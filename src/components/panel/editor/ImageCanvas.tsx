@@ -50,6 +50,8 @@ interface ImageCanvasProps {
   onSelectAiSubMask(id: string | null): void;
   onSelectMask(id: string | null): void;
   onStraighten(val: number): void;
+  onRotateDrag?(angle: number): void;
+  onRotateDragEnd?(angle: number | null): void;
   selectedImage: SelectedImage;
   setCrop(crop: Crop, perfentCrop: PercentCrop): void;
   setIsMaskHovered(isHovered: boolean): void;
@@ -1016,6 +1018,8 @@ const ImageCanvas = memo(
     onSelectAiSubMask,
     onSelectMask,
     onStraighten,
+    onRotateDrag,
+    onRotateDragEnd,
     selectedImage,
     setCrop,
     setIsMaskHovered,
@@ -2223,6 +2227,125 @@ const ImageCanvas = memo(
       return { width, height };
     };
 
+    // --- Rotate-by-dragging-the-crop-edges (Lightroom/Capture One style) ---------------
+    // The crop rectangle in container pixels. Used to place the rotate-capture zones in
+    // the margin just outside the crop, and as the pivot for the rotation.
+    const cropRectPx = useMemo(() => {
+      const cw = uncroppedImageRenderSize?.width ?? 0;
+      const ch = uncroppedImageRenderSize?.height ?? 0;
+      if (!cw || !ch) return null;
+      if (!crop) return { x: 0, y: 0, width: cw, height: ch };
+      const x = crop.unit === '%' ? cw * (crop.x / 100) : crop.x;
+      const y = crop.unit === '%' ? ch * (crop.y / 100) : crop.y;
+      const width = crop.unit === '%' ? cw * (crop.width / 100) : crop.width;
+      const height = crop.unit === '%' ? ch * (crop.height / 100) : crop.height;
+      return { x, y, width, height };
+    }, [crop, uncroppedImageRenderSize?.width, uncroppedImageRenderSize?.height]);
+
+    const cropContainerRef = useRef<HTMLDivElement>(null);
+    const isRotatingRef = useRef(false);
+    const rotatePivotRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+    const rotateStartAngleRef = useRef(0);
+    const rotateBaseRef = useRef(0);
+    const lastRotateAngleRef = useRef(0);
+
+    const ROTATE_MIN = -45;
+    const ROTATE_MAX = 45;
+    const ROTATE_SNAP = 0.4; // snap to 0° within this many degrees
+
+    const handleRotatePointerMove = useCallback(
+      (e: PointerEvent) => {
+        if (!isRotatingRef.current) return;
+        const pivot = rotatePivotRef.current;
+        const current = (Math.atan2(e.clientY - pivot.y, e.clientX - pivot.x) * 180) / Math.PI;
+        let delta = current - rotateStartAngleRef.current;
+        if (delta > 180) delta -= 360;
+        if (delta < -180) delta += 360;
+        let next = rotateBaseRef.current + delta;
+        next = Math.max(ROTATE_MIN, Math.min(ROTATE_MAX, next));
+        if (Math.abs(next) < ROTATE_SNAP) next = 0;
+        lastRotateAngleRef.current = next;
+        onRotateDrag?.(next);
+      },
+      [onRotateDrag],
+    );
+
+    const handleRotatePointerUp = useCallback(() => {
+      if (!isRotatingRef.current) return;
+      isRotatingRef.current = false;
+      window.removeEventListener('pointermove', handleRotatePointerMove);
+      window.removeEventListener('pointerup', handleRotatePointerUp);
+      onRotateDragEnd?.(lastRotateAngleRef.current);
+    }, [handleRotatePointerMove, onRotateDragEnd]);
+
+    const handleRotatePointerDown = useCallback(
+      (e: React.PointerEvent) => {
+        if (e.button !== 0 && e.pointerType === 'mouse') return;
+        if (!cropContainerRef.current || !cropRectPx || !uncroppedImageRenderSize?.width) return;
+        e.preventDefault();
+        e.stopPropagation();
+
+        const rect = cropContainerRef.current.getBoundingClientRect();
+        // Map crop-center (container space) into client space, accounting for any scale
+        // applied to the rendered container.
+        const scaleX = rect.width / (uncroppedImageRenderSize.width || 1);
+        const scaleY = rect.height / (uncroppedImageRenderSize.height || 1);
+        const pivotX = rect.left + (cropRectPx.x + cropRectPx.width / 2) * scaleX;
+        const pivotY = rect.top + (cropRectPx.y + cropRectPx.height / 2) * scaleY;
+
+        rotatePivotRef.current = { x: pivotX, y: pivotY };
+        rotateStartAngleRef.current = (Math.atan2(e.clientY - pivotY, e.clientX - pivotX) * 180) / Math.PI;
+        rotateBaseRef.current = liveRotation ?? adjustments.rotation ?? 0;
+        lastRotateAngleRef.current = rotateBaseRef.current;
+        isRotatingRef.current = true;
+        onRotateDrag?.(rotateBaseRef.current);
+
+        window.addEventListener('pointermove', handleRotatePointerMove);
+        window.addEventListener('pointerup', handleRotatePointerUp);
+      },
+      [
+        cropRectPx,
+        uncroppedImageRenderSize?.width,
+        uncroppedImageRenderSize?.height,
+        liveRotation,
+        adjustments.rotation,
+        onRotateDrag,
+        handleRotatePointerMove,
+        handleRotatePointerUp,
+      ],
+    );
+
+    useEffect(() => {
+      // Safety: detach window listeners if the component unmounts mid-drag.
+      return () => {
+        window.removeEventListener('pointermove', handleRotatePointerMove);
+        window.removeEventListener('pointerup', handleRotatePointerUp);
+      };
+    }, [handleRotatePointerMove, handleRotatePointerUp]);
+
+    // The four margin zones (top/bottom/left/right) around the crop rectangle. A gap
+    // keeps the rotate zones clear of ReactCrop's resize handles so those stay grabbable.
+    const rotateZones = useMemo(() => {
+      if (!uncroppedImageRenderSize?.width || !uncroppedImageRenderSize?.height || !cropRectPx) return [];
+      const cw = uncroppedImageRenderSize.width;
+      const ch = uncroppedImageRenderSize.height;
+      const gap = 18;
+      const topH = Math.max(0, cropRectPx.y - gap);
+      const botY = Math.min(ch, cropRectPx.y + cropRectPx.height + gap);
+      const leftW = Math.max(0, cropRectPx.x - gap);
+      const rightX = Math.min(cw, cropRectPx.x + cropRectPx.width + gap);
+      const midH = Math.max(0, botY - topH);
+      return [
+        { key: 'top', left: 0, top: 0, width: cw, height: topH },
+        { key: 'bottom', left: 0, top: botY, width: cw, height: Math.max(0, ch - botY) },
+        { key: 'left', left: 0, top: topH, width: leftW, height: midH },
+        { key: 'right', left: rightX, top: topH, width: Math.max(0, cw - rightX), height: midH },
+      ].filter((z) => z.width > 0.5 && z.height > 0.5);
+    }, [cropRectPx, uncroppedImageRenderSize?.width, uncroppedImageRenderSize?.height]);
+
+    const ROTATE_CURSOR =
+      "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M3.5 9a9 9 0 1 1-1 6'/><polyline points='2 4 3.5 9 8.5 7.5'/></svg>\") 12 12, crosshair";
+
     const effectiveCursor = useMemo(() => {
       if (isWbPickerActive) return 'crosshair';
       if (isParametricActive) return 'crosshair';
@@ -2504,8 +2627,18 @@ const ImageCanvas = memo(
             pointerEvents: isCropViewVisible ? 'auto' : 'none',
           }}
         >
+          {/* Letterbox rotate layer: dragging anywhere outside the image also rotates,
+              so straightening works even when the crop fills the whole frame. Sits
+              behind the crop container (which intercepts events over the image). */}
+          {cropPreviewUrl && uncroppedImageRenderSize && !isStraightenActive && (
+            <div
+              onPointerDown={handleRotatePointerDown}
+              style={{ position: 'absolute', inset: 0, zIndex: 0, cursor: ROTATE_CURSOR, touchAction: 'none' }}
+            />
+          )}
           {cropPreviewUrl && uncroppedImageRenderSize && (
             <div
+              ref={cropContainerRef}
               style={{
                 height: uncroppedImageRenderSize.height,
                 position: 'relative',
@@ -2550,6 +2683,48 @@ const ImageCanvas = memo(
                   }}
                 />
               </ReactCrop>
+
+              {/* Drag in the margin just outside the crop to rotate the image, like
+                  Lightroom/Capture One. Hidden while the straighten tool is active. */}
+              {!isStraightenActive &&
+                rotateZones.map((z) => (
+                  <div
+                    key={z.key}
+                    onPointerDown={handleRotatePointerDown}
+                    style={{
+                      position: 'absolute',
+                      left: z.left,
+                      top: z.top,
+                      width: z.width,
+                      height: z.height,
+                      zIndex: 5,
+                      cursor: ROTATE_CURSOR,
+                      touchAction: 'none',
+                    }}
+                  />
+                ))}
+
+              {isRotationActive && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    left: '50%',
+                    top: 8,
+                    transform: 'translateX(-50%)',
+                    zIndex: 11,
+                    padding: '2px 8px',
+                    borderRadius: 6,
+                    background: 'rgba(0,0,0,0.6)',
+                    color: '#fff',
+                    fontSize: 12,
+                    fontVariantNumeric: 'tabular-nums',
+                    pointerEvents: 'none',
+                    userSelect: 'none',
+                  }}
+                >
+                  {(liveRotation ?? adjustments.rotation ?? 0).toFixed(1)}°
+                </div>
+              )}
 
               {isStraightenActive && (
                 <Stage
