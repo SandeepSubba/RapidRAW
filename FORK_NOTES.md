@@ -44,7 +44,24 @@ To change/extend: edit the single `ADJUSTMENT_NUDGES` array in
 dispatcher and the keybind UI are both driven from it, so nothing else needs
 to change.
 
-### 2. Backend hardening + refactors  (`fix:` / `refactor:` commits)
+### 2. Metadata export-naming tokens + single-image file naming  (`feat:` commit)
+Export filename templates gain metadata tokens that mirror the Metadata panel's
+editable fields, the File Naming section shows for single-image export (not just
+batch), and unknown tokens fall back to the default template.
+
+| File | Change | Conflict risk |
+| ---- | ------ | ------------- |
+| `src-tauri/src/file_management.rs` | `{title}`/`{author}`/`{copyright}`/`{comments}` substitution + `sanitize_filename_component` + `generate_export_filename` command | low (additive) |
+| `src-tauri/src/lib.rs` | registers `generate_export_filename` | low (additive) |
+| `src/components/ui/ExportImportProperties.tsx` | new token list entries + `DEFAULT_FILENAME_TEMPLATE` + `sanitizeFilenameTemplate` | low (additive) |
+| `src/components/panel/right/ExportPanel.tsx` | show naming UI for single image; resolve single-image name via backend | low |
+| `src/hooks/useExportSettings.ts` | sanitize template on preset apply | low |
+| `src/components/ui/AppProperties.tsx` | `GenerateExportFilename` invoke enum entry | low (additive) |
+
+To add a metadata token: add the substitution in `generate_filename_from_template`
+and the `{token}` string to `FILENAME_VARIABLES`.
+
+### 3. Backend hardening + refactors  (`fix:` / `refactor:` commits)
 See the `code-analysis-fixes` branch / the open PR to upstream. These are
 candidates to be merged upstream; if they are, drop them from the fork.
 
