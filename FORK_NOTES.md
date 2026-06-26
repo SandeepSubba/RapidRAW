@@ -14,6 +14,16 @@ fork    -> https://github.com/SandeepSubba/RapidRAW.git  (this fork)
 > If `origin` points at the fork on your machine, rename it: `git remote rename
 > origin fork` and add upstream as `git remote add origin https://github.com/CyberTimon/RapidRAW.git`.
 
+## Branches
+
+| Branch | Contents | Purpose |
+| ------ | -------- | ------- |
+| `custom-shortcuts` | backend hardening + refactors **+ the adjustment shortcuts** + this doc | The full fork — **run and rebase this one.** |
+| `code-analysis-fixes` | backend hardening + refactors only | Clean subset to open as a PR to upstream. Does **not** include the personal shortcut feature. |
+
+The two share the same 3 fix/refactor commits, so opening the PR from
+`code-analysis-fixes` keeps the personal shortcuts out of the contribution.
+
 ## Custom changes in this fork
 
 All changes are kept **small, isolated, and additive** specifically so they
@@ -45,7 +55,7 @@ candidates to be merged upstream; if they are, drop them from the fork.
 git fetch origin
 
 # 2. Replay our custom commits on top of the new upstream main
-git checkout code-analysis-fixes
+git checkout custom-shortcuts
 git rebase origin/main
 
 # 3. If a conflict appears (rare, since our changes are additive), fix the
@@ -58,7 +68,7 @@ npm install
 npm start
 
 # 5. Update the fork
-git push --force-with-lease fork code-analysis-fixes
+git push --force-with-lease fork custom-shortcuts
 ```
 
 Because the feature lives in one additive commit, the usual outcome of step 2
