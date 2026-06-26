@@ -1,0 +1,77 @@
+# Fork notes (SandeepSubba/RapidRAW)
+
+This fork tracks the upstream project [`CyberTimon/RapidRAW`](https://github.com/CyberTimon/RapidRAW)
+and adds a small set of custom changes on top. This file documents what we
+changed and how to re-apply it cleanly when upstream releases a new version.
+
+## Git remotes
+
+```
+origin  -> https://github.com/CyberTimon/RapidRAW.git   (upstream / the original author)
+fork    -> https://github.com/SandeepSubba/RapidRAW.git  (this fork)
+```
+
+> If `origin` points at the fork on your machine, rename it: `git remote rename
+> origin fork` and add upstream as `git remote add origin https://github.com/CyberTimon/RapidRAW.git`.
+
+## Custom changes in this fork
+
+All changes are kept **small, isolated, and additive** specifically so they
+survive upstream updates with minimal merge friction.
+
+### 1. Capture One–style adjustment shortcuts  (`feat:` commit)
+Increase/decrease keyboard shortcuts for the core tonal & color sliders, shown
+in **Settings → Controls → Adjustments** and fully remappable.
+
+| File | Change | Conflict risk |
+| ---- | ------ | ------------- |
+| `src/utils/keyboardUtils.ts` | adds the `adjustments` section + the `ADJUSTMENT_NUDGES` table, spread into `KEYBIND_DEFINITIONS` | low (additive) |
+| `src/hooks/useKeyboardShortcuts.ts` | one generated handler per nudge, after the `actions` map | low (additive) |
+| `src/i18n/locales/en.json` | section label + action labels | low (additive) |
+
+To change/extend: edit the single `ADJUSTMENT_NUDGES` array in
+`keyboardUtils.ts` (combo, target adjustment key, step, clamp range). The
+dispatcher and the keybind UI are both driven from it, so nothing else needs
+to change.
+
+### 2. Backend hardening + refactors  (`fix:` / `refactor:` commits)
+See the `code-analysis-fixes` branch / the open PR to upstream. These are
+candidates to be merged upstream; if they are, drop them from the fork.
+
+## Updating when upstream releases a new version
+
+```bash
+# 1. Get the latest upstream code
+git fetch origin
+
+# 2. Replay our custom commits on top of the new upstream main
+git checkout code-analysis-fixes
+git rebase origin/main
+
+# 3. If a conflict appears (rare, since our changes are additive), fix the
+#    file, then:
+git add <file>
+git rebase --continue
+
+# 4. Reinstall deps in case package.json changed upstream, then test
+npm install
+npm start
+
+# 5. Update the fork
+git push --force-with-lease fork code-analysis-fixes
+```
+
+Because the feature lives in one additive commit, the usual outcome of step 2
+is a clean replay with no conflicts. If upstream ever restructures
+`keyboardUtils.ts` or `useKeyboardShortcuts.ts`, the only fix-up needed is to
+re-add the `ADJUSTMENT_NUDGES` block and its dispatch loop — both are clearly
+commented in the source.
+
+## Build / run
+
+```bash
+npm install        # Node.js LTS + Rust toolchain required
+npm run typecheck  # note: upstream has pre-existing strict-tsc errors; the
+                   # Vite/esbuild build does not gate on them
+npm start          # tauri dev — builds the Rust backend and launches the app
+```
