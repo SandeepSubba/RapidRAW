@@ -48,6 +48,8 @@ interface ImportState {
   alreadyImported: Set<string>;
   // Eject the source card/volume once the import finishes.
   ejectAfterImport: boolean;
+  // Personalize the auto-selection by learning from your keep/skip picks over time.
+  personalizeSelection: boolean;
   // Show/hide by file type (e.g. hide JPEGs when shooting RAW+JPEG).
   fileTypeFilter: FileTypeFilter;
   // Culling metadata (per session): star rating 0-5 and color label per photo.
@@ -93,6 +95,7 @@ const INITIAL: Omit<ImportState, 'setImport' | 'toggleKeep' | 'reset'> = {
   excludeImported: false,
   alreadyImported: new Set<string>(),
   ejectAfterImport: false,
+  personalizeSelection: true,
   fileTypeFilter: 'all',
   ratings: {},
   colors: {},
@@ -153,6 +156,7 @@ export const useImportStore = create<ImportState>()(
         importSettings: state.importSettings,
         excludeImported: state.excludeImported,
         ejectAfterImport: state.ejectAfterImport,
+        personalizeSelection: state.personalizeSelection,
         similarity: state.similarity,
         fileTypeFilter: state.fileTypeFilter,
       }),

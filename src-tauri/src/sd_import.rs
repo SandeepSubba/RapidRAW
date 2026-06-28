@@ -23,6 +23,10 @@ use crate::formats::{is_raw_file, is_supported_image_file};
 // (group_for_import) without re-decoding every photo.
 static IMPORT_ANALYSIS: Mutex<Option<Vec<ImageAnalysisData>>> = Mutex::new(None);
 static IMPORT_FAILED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+// Per-photo interpretable cue features from the last scoring run, keyed by path. Used to
+// fold your keep/skip decisions into the "learn from my picks" model (record_cull_picks).
+static IMPORT_FEATURES: Mutex<Option<std::collections::HashMap<String, [f64; crate::cull_model::N_FEATURES]>>> =
+    Mutex::new(None);
 
 #[derive(Serialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -165,6 +169,7 @@ pub async fn score_for_import(
     app_handle: AppHandle,
     state: State<'_, crate::AppState>,
     group_settings: CullingSettings,
+    personalize: bool,
 ) -> Result<usize, String> {
     use rayon::prelude::*;
     use std::sync::Arc;
@@ -224,7 +229,7 @@ pub async fn score_for_import(
     // either model can't be loaded (offline / not downloaded).
     let clip = crate::ai_processing::get_or_init_clip_models(&app_handle, &state.ai_state, &state.ai_init_lock).await;
     let face = crate::ai_processing::get_or_init_face_model(&app_handle, &state.ai_state, &state.ai_init_lock).await;
-    let people: std::collections::HashMap<String, (f32, f32)> = match (clip, face) {
+    let people: std::collections::HashMap<String, crate::tagging::FaceCues> = match (clip, face) {
         (Ok(clip), Ok(face)) => {
             let face_paths: Vec<&String> = paths.iter().filter(|p| grouped.contains(*p)).collect();
             let face_total = face_paths.len();
@@ -232,8 +237,8 @@ pub async fn score_for_import(
             for (i, p) in face_paths.iter().enumerate() {
                 let _ = app_handle.emit("sd-import-score-progress", serde_json::json!({ "current": i + 1, "total": face_total, "stage": "Analyzing faces (eyes, gaze, expression)…" }));
                 if let Ok(img) = crate::culling::load_face_image(p, &settings) {
-                    if let Ok(Some(face_score)) = crate::tagging::score_faces(&img, &face, &clip.model, &clip.tokenizer) {
-                        map.insert((*p).clone(), face_score);
+                    if let Ok(Some(cues)) = crate::tagging::score_faces(&img, &face, &clip.model, &clip.tokenizer) {
+                        map.insert((*p).clone(), cues);
                     }
                 }
             }
@@ -250,20 +255,31 @@ pub async fn score_for_import(
         }
     };
 
+    // Score people shots via the learned/default cue-weight model and remember each photo's
+    // feature vector so record_cull_picks can learn from the final keep/skip decisions.
+    let model = crate::cull_model::CullModel::load(&app_handle);
+    let mut features_map: std::collections::HashMap<String, [f64; crate::cull_model::N_FEATURES]> =
+        std::collections::HashMap::new();
     {
         let mut guard = IMPORT_ANALYSIS.lock().unwrap();
         if let Some(v) = guard.as_mut() {
             for d in v.iter_mut() {
                 if let Some(&(q, sh, cf, ex)) = tech.get(&d.result_path()) {
-                    // For people shots (faces detected) the faces drive the score: a weighted
-                    // blend of the technical quality, the face eyes/gaze/expression score and
-                    // the face sharpness. Photos with no faces keep the technical score.
+                    // For people shots (faces detected) the faces drive the score via the cue
+                    // model: technical + face-sharpness + looking-at-camera + expression +
+                    // eyes-open. Photos with no faces keep the technical score.
                     let q_adj = match people.get(&d.result_path()) {
-                        // For people shots the faces dominate — eyes/gaze/expression carries
-                        // the most weight, since "is everyone looking at the camera" is the
-                        // question that decides a burst.
-                        Some(&(face_clip, face_sharp)) => {
-                            (0.25 * q + 0.50 * face_clip as f64 + 0.25 * face_sharp as f64).clamp(0.0, 1.0)
+                        Some(c) => {
+                            let f = [
+                                q,
+                                c.face_sharp as f64,
+                                c.look_mean as f64,
+                                c.look_worst as f64,
+                                c.expr_mean as f64,
+                                c.eyes_worst as f64,
+                            ];
+                            features_map.insert(d.result_path(), f);
+                            model.score(&f, personalize)
                         }
                         None => q,
                     };
@@ -272,9 +288,41 @@ pub async fn score_for_import(
             }
         }
     }
+    *IMPORT_FEATURES.lock().unwrap() = Some(features_map);
 
     let _ = app_handle.emit("sd-import-score-complete", tech.len());
     Ok(tech.len())
+}
+
+/// Record the user's keep/skip decisions for the just-finished import into the on-device
+/// "learn from my picks" model. `kept`/`skipped` are paths from multi-image similar groups
+/// (we learn which frame you preferred over the group-mates you rejected). Returns the total
+/// number of samples learned so far. No-op unless both a kept and a skipped grouped photo
+/// (with cached cue features) are supplied.
+#[tauri::command]
+pub fn record_cull_picks(app_handle: AppHandle, kept: Vec<String>, skipped: Vec<String>) -> Result<u64, String> {
+    let guard = IMPORT_FEATURES.lock().unwrap();
+    let map = match guard.as_ref() {
+        Some(m) => m,
+        None => return Ok(0),
+    };
+    let chosen: Vec<[f64; crate::cull_model::N_FEATURES]> =
+        kept.iter().filter_map(|p| map.get(p).copied()).collect();
+    let rejected: Vec<[f64; crate::cull_model::N_FEATURES]> =
+        skipped.iter().filter_map(|p| map.get(p).copied()).collect();
+    if chosen.is_empty() || rejected.is_empty() {
+        return Ok(0);
+    }
+    let mut model = crate::cull_model::CullModel::load(&app_handle);
+    model.record(&chosen, &rejected);
+    model.save(&app_handle)?;
+    Ok(model.sample_count())
+}
+
+/// Forget everything the culling model has learned (back to default cue weights).
+#[tauri::command]
+pub fn reset_cull_model(app_handle: AppHandle) -> Result<(), String> {
+    crate::cull_model::CullModel::reset(&app_handle)
 }
 
 /// Eject / unmount the removable volume at `mount_point` (e.g. after import).

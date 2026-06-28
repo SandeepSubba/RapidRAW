@@ -13,6 +13,7 @@ mod android_integration;
 mod app_settings;
 mod app_state;
 mod cache_utils;
+mod cull_model;
 mod culling;
 mod denoising;
 mod exif_processing;
@@ -2321,6 +2322,8 @@ pub fn run() {
             sd_import::get_import_preview,
             sd_import::find_existing_in_destination,
             sd_import::eject_drive,
+            sd_import::record_cull_picks,
+            sd_import::reset_cull_model,
             lens_correction::get_lensfun_makers,
             lens_correction::get_lensfun_lenses_for_maker,
             lens_correction::autodetect_lens,

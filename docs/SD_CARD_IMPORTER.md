@@ -121,6 +121,30 @@ Raw scores are abstract 0–1 numbers, so each scored photo is shown as a **whol
 grade** ("Q 4"), min–max normalized across the card (**5 = best on this card**, 0 = worst).
 The "Q" prefix distinguishes it from the manual 1–5 star rating.
 
+## 5b. Learning from your culling (personalized selection)
+
+The auto-selection can **learn your taste** from the picks you actually make:
+
+- Each scored people-photo carries interpretable cues — *looking-at-camera* (mean & worst
+  face), *expression/smiling*, *eyes-open (worst face)*, *face sharpness*, and technical
+  quality.
+- On every import, the app records — per similar group — which frame you **kept** vs the
+  group-mates you **skipped**. That revealed preference is folded into an on-device model
+  (`import_cull_model.json` in the app data dir).
+- It learns the **cue weighting** that best matches your choices (a nearest-centroid /
+  Rocchio update: shift weight toward the cues where your kept frames beat the rejected
+  ones), blended with the defaults so a few picks nudge gently and sustained feedback
+  personalizes more. Next import scores with *your* weights.
+
+Controls live in the import settings panel:
+- **Personalize selection (learn from my picks)** — on by default; off uses fixed defaults
+  and stops recording.
+- **Reset learning** — wipes what it has learned, back to defaults.
+
+Notes: there's a **cold start** (a handful of imports before it visibly shifts); it learns
+the *weighting of the extracted cues*, not brand-new concepts; and it only learns from real
+bursts (groups of ≥2) where you kept some and skipped others.
+
 ## 6. Auto-select best
 
 One click runs the whole pipeline (group → score) if needed, then selects keepers:

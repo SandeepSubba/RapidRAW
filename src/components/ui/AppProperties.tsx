@@ -53,6 +53,8 @@ export enum Invokes {
   GetImportPreview = 'get_import_preview',
   GroupForImport = 'group_for_import',
   ScoreForImport = 'score_for_import',
+  RecordCullPicks = 'record_cull_picks',
+  ResetCullModel = 'reset_cull_model',
   ListSourceDrives = 'list_source_drives',
   ScanSourceImages = 'scan_source_images',
   DeleteFolder = 'delete_folder',

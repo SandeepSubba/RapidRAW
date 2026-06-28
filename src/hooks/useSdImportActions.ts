@@ -146,6 +146,7 @@ export function useSdImportActions() {
     try {
       await invoke<number>(Invokes.ScoreForImport, {
         groupSettings: groupSettings(useImportStore.getState().similarity),
+        personalize: useImportStore.getState().personalizeSelection,
       });
       const suggestions = await invoke<CullingSuggestions>(Invokes.GroupForImport, {
         settings: groupSettings(useImportStore.getState().similarity),
@@ -363,6 +364,25 @@ export function useSdImportActions() {
       } catch (metaErr) {
         console.warn('Could not write culling metadata to source sidecars (continuing import):', metaErr);
       }
+      // Learn from this culling: tell the model which frame you kept vs the group-mates you
+      // skipped, within each similar group. Best-effort — never blocks the import.
+      const { suggestions, keptPaths, personalizeSelection } = useImportStore.getState();
+      if (personalizeSelection && suggestions) {
+        const kept: string[] = [];
+        const skipped: string[] = [];
+        suggestions.similarGroups.forEach((g) => {
+          const members = [g.representative.path, ...g.duplicates.map((d) => d.path)];
+          if (members.length < 2) return; // only learn from real bursts
+          members.forEach((p) => (keptPaths.has(p) ? kept : skipped).push(p));
+        });
+        if (kept.length && skipped.length) {
+          try {
+            await invoke(Invokes.RecordCullPicks, { kept, skipped });
+          } catch (e) {
+            console.warn('Culling-preference learning skipped:', e);
+          }
+        }
+      }
       await invoke(Invokes.ImportFiles, { destinationFolder, settings: importSettings, sourcePaths });
       // import-complete / import-error are handled by the global listeners (useProcessStore.importState).
     } catch (err) {
@@ -385,6 +405,18 @@ export function useSdImportActions() {
       toast.success(`Ejected ${drive.name}.`);
     } catch (err) {
       toast.error(`Couldn't eject ${drive.name}: ${err}`);
+    }
+  }, []);
+
+  const setPersonalize = useCallback((on: boolean) => useImportStore.getState().setImport({ personalizeSelection: on }), []);
+
+  // Forget everything the auto-selection has learned from past culling.
+  const resetLearning = useCallback(async () => {
+    try {
+      await invoke(Invokes.ResetCullModel);
+      toast.success('Selection learning reset to defaults.');
+    } catch (e) {
+      toast.error(`Failed to reset learning: ${e}`);
     }
   }, []);
 
@@ -416,6 +448,8 @@ export function useSdImportActions() {
     setExcludeImported,
     startImport,
     maybeEjectSource,
+    setPersonalize,
+    resetLearning,
     closeImporter,
   };
 }

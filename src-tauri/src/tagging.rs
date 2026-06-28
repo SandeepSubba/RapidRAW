@@ -109,25 +109,29 @@ fn clip_prompt_probs(
 }
 
 /// Face-aware "people quality" multiplier in [0, 1] for ranking a burst of similar frames.
-///
-/// Detects every face and grades each *cropped face* on two axes:
-///   - `clip` in [0,1]: eyes / gaze / expression via one CLIP softmax (smiling-at-camera is
-///     ideal, blinking / looking-away are disqualifying, frowning is penalised), combined
-///     across faces as `0.5·mean + 0.5·worst` so one bad face demotes the frame.
-///   - `sharpness` in [0,1]: how sharp the faces actually are (mean of per-face Laplacian
-///     variance) — the most relevant focus cue for a people burst, far better than
-///     whole-image sharpness on a downscaled thumbnail.
-/// Returns `None` when no faces are detected (caller falls back to the technical score).
+/// Interpretable per-photo people cues, each in [0,1], aggregated over the detected faces.
+/// These feed both the default people score and the "learn from my picks" model.
+#[derive(Clone, Copy, Debug)]
+pub struct FaceCues {
+    pub face_sharp: f32,  // mean per-face sharpness (focus on the subjects)
+    pub look_mean: f32,   // mean P(looking at camera)
+    pub look_worst: f32,  // worst single face's P(looking at camera)
+    pub expr_mean: f32,   // mean P(smiling) — expression
+    pub eyes_worst: f32,  // worst single face's P(eyes open)
+}
+
+/// Detects every face and grades each *cropped face* with one CLIP softmax, returning
+/// interpretable cues (looking-at-camera, expression, eyes-open, face sharpness) aggregated
+/// across faces — `*_worst` keeps the single worst face so one blinker/looker-away demotes
+/// the frame. Returns `None` when no faces are detected (caller falls back to technical).
 pub fn score_faces(
     image: &DynamicImage,
     face_session: &Mutex<Session>,
     clip_session: &Mutex<Session>,
     tokenizer: &Tokenizer,
-) -> Result<Option<(f32, f32)>> {
-    // Per-face graded states (a single CLIP softmax per face). Each prompt maps to a
-    // desirability weight: smiling + looking at camera is ideal; a neutral attentive face is
-    // good; eyes-closed / looking-away are disqualifying; an unhappy/frowning face is mildly
-    // penalised. This folds eyes + gaze + expression into one inference per face.
+) -> Result<Option<FaceCues>> {
+    // One CLIP softmax per face over five states. Index meanings:
+    // 0 smiling+camera · 1 neutral+camera · 2 eyes-closed · 3 looking-away · 4 frowning.
     const FACE_PROMPTS: [&str; 5] = [
         "a close-up photo of a smiling happy face looking at the camera",
         "a close-up photo of a face looking at the camera with a neutral expression",
@@ -135,7 +139,6 @@ pub fn score_faces(
         "a close-up photo of a face turned away from the camera",
         "a close-up photo of an unhappy frowning face",
     ];
-    const FACE_WEIGHTS: [f32; 5] = [1.0, 0.7, 0.0, 0.0, 0.3];
     const MAX_FACES: usize = 8; // cap work on big group shots; largest faces first
 
     let faces = crate::ai_processing::run_face_detection(image, face_session)?;
@@ -144,8 +147,10 @@ pub fn score_faces(
     }
 
     let (iw, ih) = (image.width() as f32, image.height() as f32);
-    let mut clip_scores: Vec<f32> = Vec::new();
-    let mut sharp_scores: Vec<f32> = Vec::new();
+    let mut look: Vec<f32> = Vec::new();
+    let mut expr: Vec<f32> = Vec::new();
+    let mut eyes_open: Vec<f32> = Vec::new();
+    let mut sharp: Vec<f32> = Vec::new();
     for f in faces.iter().take(MAX_FACES) {
         // Expand the box ~30% so brows/eyes/mouth aren't clipped, then crop from full-res.
         let (bw, bh) = (f.x2 - f.x1, f.y2 - f.y1);
@@ -157,22 +162,25 @@ pub fn score_faces(
             continue;
         }
         let crop = image.crop_imm(x1 as u32, y1 as u32, (x2 - x1) as u32, (y2 - y1) as u32);
-        let probs = clip_prompt_probs(&crop, clip_session, tokenizer, &FACE_PROMPTS)?;
-        let score: f32 = probs.iter().zip(FACE_WEIGHTS.iter()).map(|(p, w)| p * w).sum();
-        clip_scores.push(score.clamp(0.0, 1.0));
-        sharp_scores.push(crate::culling::normalized_sharpness_of(&crop));
+        let p = clip_prompt_probs(&crop, clip_session, tokenizer, &FACE_PROMPTS)?;
+        look.push((p[0] + p[1]).clamp(0.0, 1.0)); // smiling-at-camera + neutral-at-camera
+        expr.push(p[0].clamp(0.0, 1.0)); // smiling
+        eyes_open.push((1.0 - p[2]).clamp(0.0, 1.0)); // not eyes-closed
+        sharp.push(crate::culling::normalized_sharpness_of(&crop));
     }
-    if clip_scores.is_empty() {
+    if look.is_empty() {
         return Ok(None);
     }
 
-    let clip_mean = clip_scores.iter().sum::<f32>() / clip_scores.len() as f32;
-    let clip_worst = clip_scores.iter().cloned().fold(f32::INFINITY, f32::min);
-    // Punish the single worst face heavily — if even one person is looking away or blinking,
-    // the frame should lose to a sibling where everyone is attentive.
-    let clip = (0.35 * clip_mean + 0.65 * clip_worst).clamp(0.0, 1.0);
-    let sharpness = (sharp_scores.iter().sum::<f32>() / sharp_scores.len() as f32).clamp(0.0, 1.0);
-    Ok(Some((clip, sharpness)))
+    let mean = |v: &[f32]| v.iter().sum::<f32>() / v.len() as f32;
+    let min = |v: &[f32]| v.iter().cloned().fold(f32::INFINITY, f32::min);
+    Ok(Some(FaceCues {
+        face_sharp: mean(&sharp).clamp(0.0, 1.0),
+        look_mean: mean(&look),
+        look_worst: min(&look),
+        expr_mean: mean(&expr),
+        eyes_worst: min(&eyes_open),
+    }))
 }
 
 fn rgb_to_hsv((r, g, b): (u8, u8, u8)) -> (f32, f32, f32) {

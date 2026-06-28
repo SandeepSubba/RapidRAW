@@ -7,7 +7,7 @@ import Button from '../../ui/Button';
 import Switch from '../../ui/Switch';
 
 export default function ImportReviewBar() {
-  const { keptCount, destinationFolder, importSettings, excludeImported, excludedCount, ejectAfterImport, setImport } =
+  const { keptCount, destinationFolder, importSettings, excludeImported, excludedCount, ejectAfterImport, personalizeSelection, setImport } =
     useImportStore(
       useShallow((s) => ({
         keptCount: s.keptPaths.size,
@@ -16,10 +16,11 @@ export default function ImportReviewBar() {
         excludeImported: s.excludeImported,
         excludedCount: s.alreadyImported.size,
         ejectAfterImport: s.ejectAfterImport,
+        personalizeSelection: s.personalizeSelection,
         setImport: s.setImport,
       })),
     );
-  const { pickDestination, startImport, setExcludeImported } = useSdImportActions();
+  const { pickDestination, startImport, setExcludeImported, setPersonalize, resetLearning } = useSdImportActions();
   const [showSettings, setShowSettings] = useState(false);
 
   const destLabel = destinationFolder ? destinationFolder.split(/[\\/]/).pop() : 'Choose destination…';
@@ -71,6 +72,19 @@ export default function ImportReviewBar() {
               checked={ejectAfterImport}
               onChange={(v: boolean) => setImport({ ejectAfterImport: v })}
             />
+            <Switch
+              label="Personalize selection (learn from my picks)"
+              checked={personalizeSelection}
+              onChange={(v: boolean) => setPersonalize(v)}
+            />
+            {personalizeSelection && (
+              <span className="text-xs text-text-secondary">
+                Learns which frames you keep vs skip in each group and applies it next import.{' '}
+                <button onClick={resetLearning} className="text-accent hover:underline">
+                  Reset learning
+                </button>
+              </span>
+            )}
           </div>
         </div>
       )}
