@@ -30,6 +30,7 @@ mod panorama_stitching;
 mod panorama_utils;
 mod preset_converter;
 mod raw_processing;
+mod sd_import;
 mod tagging;
 mod tagging_utils;
 mod window_customizer;
@@ -2311,6 +2312,14 @@ pub fn run() {
             tagging::add_tag_for_paths,
             tagging::remove_tag_for_paths,
             culling::cull_images,
+            sd_import::list_source_drives,
+            sd_import::scan_source_images,
+            sd_import::cull_images_for_import,
+            sd_import::analyze_for_import,
+            sd_import::group_for_import,
+            sd_import::get_import_preview,
+            sd_import::find_existing_in_destination,
+            sd_import::eject_drive,
             lens_correction::get_lensfun_makers,
             lens_correction::get_lensfun_lenses_for_maker,
             lens_correction::autodetect_lens,

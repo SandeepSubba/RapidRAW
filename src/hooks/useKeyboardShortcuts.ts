@@ -518,6 +518,7 @@ export const useKeyboardShortcuts = ({
       const state = getStoreState();
 
       const isModalOpen =
+        state.ui.isImportViewActive || // the SD-card importer owns its own keyboard map
         state.ui.isCreateFolderModalOpen ||
         state.ui.isRenameFolderModalOpen ||
         state.ui.isRenameFileModalOpen ||

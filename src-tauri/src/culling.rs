@@ -1,6 +1,7 @@
 use crate::app_settings::load_settings;
-use image::{GenericImageView, GrayImage, imageops};
+use image::{DynamicImage, GenericImageView, GrayImage, imageops};
 use image_hasher::{HashAlg, HasherConfig};
+use rawler::decoders::RawDecodeParams;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
@@ -8,7 +9,56 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tauri::{AppHandle, Emitter};
 
+use crate::formats::is_raw_file;
 use crate::image_loader;
+
+/// Fast image load for culling analysis. For RAW files we want the embedded camera
+/// preview (an already-rendered JPEG) instead of a full demosaic — orders of magnitude
+/// faster and plenty for perceptual hashing + sharpness/exposure metrics.
+///
+/// The tiered strategy minimises I/O, which dominates when scanning a card full of
+/// large raws:
+///   1. `try_fast_embedded_preview` — lazily mmaps the file and reads ONLY the embedded
+///      JPEG bytes (a few MB), instead of faulting the whole tens-of-MB raw off the card.
+///   2. rawler's `extract_preview_pixels` — reads the whole file but still no demosaic;
+///      covers raw layouts the fast path doesn't recognise.
+///   3. full decode — last resort for non-raw or unreadable previews.
+fn load_for_analysis(
+    path: &str,
+    settings: &crate::app_settings::AppSettings,
+) -> Result<DynamicImage, String> {
+    if is_raw_file(path) {
+        if let Some(img) = try_fast_embedded_preview(path) {
+            return Ok(img);
+        }
+        if let Ok(preview) = rawler::analyze::extract_preview_pixels(path, &RawDecodeParams::default()) {
+            return Ok(preview);
+        }
+    }
+    let file_bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+    image_loader::load_base_image_from_bytes(&file_bytes, path, true, settings, None).map_err(|e| e.to_string())
+}
+
+/// Opportunistic, low-I/O embedded-preview extraction. Uses a lazy memory map (no
+/// MAP_POPULATE) and reads only the bytes of the embedded JPEG, so analyzing a folder
+/// of large raws doesn't read every full file off the (often slow) card. Returns None
+/// for layouts it doesn't recognise so the caller can fall back.
+fn try_fast_embedded_preview(path: &str) -> Option<DynamicImage> {
+    let file = std::fs::File::open(path).ok()?;
+    let mmap = unsafe { memmap2::Mmap::map(&file).ok()? };
+    let buf: &[u8] = &mmap;
+
+    // Fujifilm RAF: 16-byte magic, then a header storing the embedded full-size JPEG
+    // preview's offset/length as big-endian u32s at byte 84/88.
+    if buf.starts_with(b"FUJIFILMCCD-RAW") {
+        let off = u32::from_be_bytes(buf.get(84..88)?.try_into().ok()?) as usize;
+        let len = u32::from_be_bytes(buf.get(88..92)?.try_into().ok()?) as usize;
+        let jpeg = buf.get(off..off.checked_add(len)?)?;
+        return image::load_from_memory_with_format(jpeg, image::ImageFormat::Jpeg).ok();
+    }
+
+    None
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -53,7 +103,8 @@ struct CullingProgress {
     stage: String,
 }
 
-struct ImageAnalysisData {
+#[derive(Clone)]
+pub struct ImageAnalysisData {
     hash: image_hasher::ImageHash,
     result: ImageAnalysisResult,
 }
@@ -127,10 +178,7 @@ fn analyze_image(
     settings: &crate::app_settings::AppSettings,
 ) -> Result<ImageAnalysisData, String> {
     const ANALYSIS_DIM: u32 = 720; // FIXME: How should we calculate good focus if it's downscaled?!?
-    let file_bytes = std::fs::read(path).map_err(|e| e.to_string())?;
-
-    let img = image_loader::load_base_image_from_bytes(&file_bytes, path, true, settings, None)
-        .map_err(|e| e.to_string())?;
+    let img = load_for_analysis(path, settings)?;
 
     let (width, height) = img.dimensions();
     let thumbnail = img.thumbnail(ANALYSIS_DIM, ANALYSIS_DIM);
@@ -179,15 +227,29 @@ pub async fn cull_images(
     settings: CullingSettings,
     app_handle: AppHandle,
 ) -> Result<CullingSuggestions, String> {
+    run_culling(paths, settings, app_handle, "culling").await
+}
+
+/// Core culling routine shared by the post-import `cull_images` command and the
+/// pre-import SD-card flow. The `channel` prefix isolates progress events
+/// (`{channel}-start` / `-progress` / `-complete`) so different callers don't
+/// trigger each other's UI (e.g. the import view must not pop the CullingModal).
+/// Analyze each path in parallel (decode embedded preview, perceptual hash, quality
+/// metrics). Emits `{channel}-start`/`-progress`. Returns the successful analyses plus
+/// the paths that failed. This is the slow, I/O-heavy step.
+pub async fn analyze_paths(
+    paths: Vec<String>,
+    app_handle: AppHandle,
+    channel: &str,
+) -> Result<(Vec<ImageAnalysisData>, Vec<String>), String> {
     if paths.is_empty() {
-        return Ok(CullingSuggestions::default());
+        return Ok((Vec::new(), Vec::new()));
     }
 
     let app_settings = load_settings(app_handle.clone()).unwrap_or_default();
-
     let total_count = paths.len();
     let completed_count = Arc::new(AtomicUsize::new(0));
-    let _ = app_handle.emit("culling-start", total_count);
+    let _ = app_handle.emit(&format!("{channel}-start"), total_count);
 
     let hasher = HasherConfig::new()
         .hash_alg(HashAlg::DoubleGradient)
@@ -199,14 +261,13 @@ pub async fn cull_images(
         .map(|path| {
             let completed = completed_count.fetch_add(1, Ordering::Relaxed) + 1;
             let _ = app_handle.emit(
-                "culling-progress",
+                &format!("{channel}-progress"),
                 CullingProgress {
                     current: completed,
                     total: total_count,
                     stage: "Analyzing images...".to_string(),
                 },
             );
-
             analyze_image(path, &hasher, &app_settings).map_err(|e| (path.to_string(), e))
         })
         .collect();
@@ -223,15 +284,17 @@ pub async fn cull_images(
         }
     }
 
-    let _ = app_handle.emit(
-        "culling-progress",
-        CullingProgress {
-            current: total_count,
-            total: total_count,
-            stage: "Grouping similar images...".to_string(),
-        },
-    );
+    Ok((successful_analyses, failed_paths))
+}
 
+/// Group already-analyzed images by perceptual-hash similarity (and optionally flag
+/// blurry ones). Cheap — no I/O — so it can be re-run live as the similarity threshold
+/// changes.
+pub fn group_analyses(
+    successful_analyses: &[ImageAnalysisData],
+    failed_paths: Vec<String>,
+    settings: &CullingSettings,
+) -> CullingSuggestions {
     let mut suggestions = CullingSuggestions {
         failed_paths,
         ..Default::default()
@@ -246,7 +309,6 @@ pub async fn cull_images(
 
             let mut current_group_indices = vec![];
             let mut queue = VecDeque::new();
-
             processed_indices[i] = true;
             current_group_indices.push(i);
             queue.push_back(i);
@@ -256,10 +318,7 @@ pub async fn cull_images(
                     if processed_indices[j] {
                         continue;
                     }
-
-                    let dist = successful_analyses[current_idx]
-                        .hash
-                        .dist(&successful_analyses[j].hash);
+                    let dist = successful_analyses[current_idx].hash.dist(&successful_analyses[j].hash);
                     if dist <= settings.similarity_threshold {
                         processed_indices[j] = true;
                         current_group_indices.push(j);
@@ -279,7 +338,6 @@ pub async fn cull_images(
 
                 let representative_idx = current_group_indices[0];
                 let duplicate_indices = &current_group_indices[1..];
-
                 suggestions.similar_groups.push(CullGroup {
                     representative: successful_analyses[representative_idx].result.clone(),
                     duplicates: duplicate_indices
@@ -307,6 +365,25 @@ pub async fn cull_images(
         });
     }
 
-    let _ = app_handle.emit("culling-complete", &suggestions);
+    suggestions
+}
+
+pub async fn run_culling(
+    paths: Vec<String>,
+    settings: CullingSettings,
+    app_handle: AppHandle,
+    channel: &str,
+) -> Result<CullingSuggestions, String> {
+    if paths.is_empty() {
+        return Ok(CullingSuggestions::default());
+    }
+    let (analyses, failed) = analyze_paths(paths, app_handle.clone(), channel).await?;
+    let total = analyses.len() + failed.len();
+    let _ = app_handle.emit(
+        &format!("{channel}-progress"),
+        CullingProgress { current: total, total, stage: "Grouping similar images...".to_string() },
+    );
+    let suggestions = group_analyses(&analyses, failed, &settings);
+    let _ = app_handle.emit(&format!("{channel}-complete"), &suggestions);
     Ok(suggestions)
 }

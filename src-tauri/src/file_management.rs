@@ -1529,6 +1529,8 @@ pub fn update_thumbnail_queue(
         return Ok(());
     }
 
+    const MAX_QUEUE: usize = 500;
+
     let mut unique_paths = Vec::new();
     let mut seen = std::collections::HashSet::new();
     for path in paths {
@@ -1539,8 +1541,17 @@ pub fn update_thumbnail_queue(
 
     queue.retain(|p| !seen.contains(p));
 
-    while queue.len() + unique_paths.len() > 500 {
-        queue.pop_front();
+    // A single request can exceed the cap (e.g. a large grid asking for everything at
+    // once). Keep only the most recent MAX_QUEUE of the incoming paths so the eviction
+    // loop below can't spin forever popping an already-empty queue.
+    if unique_paths.len() > MAX_QUEUE {
+        unique_paths.drain(0..unique_paths.len() - MAX_QUEUE);
+    }
+
+    while queue.len() + unique_paths.len() > MAX_QUEUE {
+        if queue.pop_front().is_none() {
+            break;
+        }
     }
 
     for path in unique_paths {

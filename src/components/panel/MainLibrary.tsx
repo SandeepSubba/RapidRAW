@@ -6,6 +6,7 @@ import {
   Check,
   Folder,
   FolderInput,
+  HardDriveDownload,
   Home,
   Loader2,
   RefreshCw,
@@ -33,6 +34,7 @@ import { ImportState, Status } from '../ui/ExportImportProperties';
 import Text from '../ui/Text';
 import { TextColors, TextVariants, TextWeights } from '../../types/typography';
 import { useLibraryStore } from '../../store/useLibraryStore';
+import { useUIStore } from '../../store/useUIStore';
 
 import LibraryGrid from './library/LibraryGrid';
 import { SearchInput, ViewOptionsDropdown } from './library/LibraryHeader';
@@ -487,6 +489,13 @@ export default function MainLibrary(props: MainLibraryProps) {
           />
           {!props.isAndroid && (
             <>
+              <Button
+                className="h-12 w-12 bg-surface text-text-primary shadow-none p-0 flex items-center justify-center"
+                onClick={() => useUIStore.getState().setUI({ isImportViewActive: true })}
+                data-tooltip="Import from SD card"
+              >
+                <HardDriveDownload className="w-8 h-8" />
+              </Button>
               <Button
                 className="h-12 w-12 bg-surface text-text-primary shadow-none p-0 flex items-center justify-center"
                 onClick={props.onNavigateToCommunity}

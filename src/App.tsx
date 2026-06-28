@@ -15,6 +15,7 @@ import AppModals from './components/modals/AppModals';
 
 import EditorView from './components/views/EditorView';
 import LibraryView from './components/views/LibraryView';
+import ImportView from './components/views/import/ImportView';
 
 import { ContextMenuProvider } from './context/ContextMenuContext';
 import { useSettingsStore } from './store/useSettingsStore';
@@ -99,6 +100,7 @@ function App() {
     isLayoutReady,
     uiVisibility,
     isLibraryExportPanelVisible,
+    isImportViewActive,
     leftPanelWidth,
     rightPanelWidth,
     compactEditorPanelHeightOverride,
@@ -113,6 +115,7 @@ function App() {
       isLayoutReady: state.isLayoutReady,
       uiVisibility: state.uiVisibility,
       isLibraryExportPanelVisible: state.isLibraryExportPanelVisible,
+      isImportViewActive: state.isImportViewActive,
       leftPanelWidth: state.leftPanelWidth,
       rightPanelWidth: state.rightPanelWidth,
       compactEditorPanelHeightOverride: state.compactEditorPanelHeightOverride,
@@ -638,7 +641,9 @@ function App() {
           <div className="flex flex-row grow h-full min-h-0">
             {!shouldHideFolderTree && renderFolderTree()}
             <div className="flex-1 flex flex-col min-w-0">
-              {selectedImage ? (
+              {isImportViewActive ? (
+                <ImportView />
+              ) : selectedImage ? (
                 <EditorView
                   transformWrapperRef={transformWrapperRef}
                   isResizing={isResizing}
