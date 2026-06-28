@@ -174,7 +174,7 @@ export default function ImportViewer({ initialPath, collapsed, memberOf, leadOf,
                       setMode('single');
                     }}
                     className={`relative flex flex-col rounded-md overflow-hidden border-2 cursor-pointer ${
-                      active ? 'border-accent' : bestOf.has(p) ? 'border-green-500/70' : 'border-transparent hover:border-surface'
+                      active ? 'border-accent' : kept ? 'border-green-500/70' : 'border-transparent hover:border-surface'
                     }`}
                     title={`${p.split(/[\\/]/).pop()} — double-click for single view`}
                   >

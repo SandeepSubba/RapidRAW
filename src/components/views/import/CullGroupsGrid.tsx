@@ -37,7 +37,7 @@ function Cell({ path, kept, focused, disabled, badge, best, rating, color, onTog
           : `${path.split(/[\\/]/).pop()} — double-click to open the viewer`
       }
       className={`relative aspect-square rounded-md overflow-hidden cursor-pointer group ring-2 transition-all ${
-        best ? 'ring-green-500' : focused ? 'ring-accent' : 'ring-transparent hover:ring-surface'
+        focused ? 'ring-accent' : kept ? 'ring-green-500' : 'ring-transparent hover:ring-surface'
       }`}
     >
       <LazyThumb
