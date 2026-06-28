@@ -251,6 +251,38 @@ pub fn score_image(
     Ok(quality_metrics(&thumbnail))
 }
 
+/// Decode + downscale to the analysis thumbnail (the same image the scoring pass uses).
+/// Exposed so other scorers — e.g. the CLIP "eyes open/closed" check in `sd_import` —
+/// can reuse one decode instead of re-loading the raw.
+pub fn load_analysis_thumbnail(
+    path: &str,
+    settings: &crate::app_settings::AppSettings,
+) -> Result<image::DynamicImage, String> {
+    let img = load_for_analysis(path, settings)?;
+    Ok(img.thumbnail(ANALYSIS_DIM, ANALYSIS_DIM))
+}
+
+/// Normalized sharpness (Laplacian variance) of an image in [0, 1] — the same curve the
+/// technical score uses for whole-image sharpness. Exposed so the face pass can measure
+/// how sharp each cropped face is (the most relevant focus cue for people bursts).
+pub fn normalized_sharpness_of(image: &image::DynamicImage) -> f32 {
+    let gray = image.to_luma8();
+    let var = calculate_laplacian_variance(&gray);
+    (((var + 1.0).log10() / 3.5).min(1.0)) as f32
+}
+
+const FACE_DIM: u32 = 1920; // large enough that cropped faces keep detail for CLIP gaze/eyes
+
+/// Decode + downscale to a larger thumbnail for the face/eye pass. Faces in a group shot
+/// are small, so we keep more resolution here than the technical-scoring thumbnail.
+pub fn load_face_image(
+    path: &str,
+    settings: &crate::app_settings::AppSettings,
+) -> Result<image::DynamicImage, String> {
+    let img = load_for_analysis(path, settings)?;
+    Ok(img.thumbnail(FACE_DIM, FACE_DIM))
+}
+
 #[tauri::command]
 pub async fn cull_images(
     paths: Vec<String>,

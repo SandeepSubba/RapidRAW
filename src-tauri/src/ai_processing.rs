@@ -58,6 +58,15 @@ const DEPTH_FILENAME: &str = "depth_anything_v2_vits.onnx";
 const DEPTH_INPUT_SIZE: u32 = 518;
 const DEPTH_SHA256: &str = "d2b11a11c1d4a12b47608fa65a17ee9a4c605b55ee1730c8e3b526304f2562be";
 
+// UltraFace (version-RFB-320): a ~1.2 MB face detector used by the SD-import culling to
+// find faces so the per-face eye/gaze check can run where the eyes actually are. Output
+// is already decoded corner-form boxes, so postprocessing is just threshold + NMS.
+const FACE_MODEL_URL: &str = "https://github.com/onnx/models/raw/main/validated/vision/body_analysis/ultraface/models/version-RFB-320.onnx";
+const FACE_MODEL_FILENAME: &str = "ultraface_rfb_320.onnx";
+const FACE_MODEL_SHA256: &str = "34cd7e60aeff28744c657de7a3dc64e872d506741de66987f3426f2b79f88017";
+const FACE_INPUT_W: u32 = 320;
+const FACE_INPUT_H: u32 = 240;
+
 pub struct AiModels {
     pub sam_encoder: Mutex<Session>,
     pub sam_decoder: Mutex<Session>,
@@ -90,6 +99,7 @@ pub struct AiState {
     pub denoise_model: Option<Arc<Mutex<Session>>>,
     pub clip_models: Option<Arc<ClipModels>>,
     pub lama_model: Option<Arc<Mutex<Session>>>,
+    pub face_model: Option<Arc<Mutex<Session>>>,
     pub embeddings: Option<ImageEmbeddings>,
     pub depth_map: Option<CachedDepthMap>,
 }
@@ -333,6 +343,7 @@ pub async fn get_or_init_ai_models(
             denoise_model: None,
             clip_models: None,
             lama_model: None,
+            face_model: None,
             embeddings: None,
             depth_map: None,
         });
@@ -393,6 +404,7 @@ pub async fn get_or_init_denoise_model(
             denoise_model: Some(denoise_model.clone()),
             clip_models: None,
             lama_model: None,
+            face_model: None,
             embeddings: None,
             depth_map: None,
         });
@@ -464,12 +476,165 @@ pub async fn get_or_init_clip_models(
             denoise_model: None,
             clip_models: Some(clip_models.clone()),
             lama_model: None,
+            face_model: None,
             embeddings: None,
             depth_map: None,
         });
     }
 
     Ok(clip_models)
+}
+
+/// A detected face, in pixel coordinates of the image passed to `run_face_detection`.
+#[derive(Clone, Copy, Debug)]
+pub struct FaceBox {
+    pub x1: f32,
+    pub y1: f32,
+    pub x2: f32,
+    pub y2: f32,
+    pub score: f32,
+}
+
+fn face_area(b: &FaceBox) -> f32 {
+    (b.x2 - b.x1).max(0.0) * (b.y2 - b.y1).max(0.0)
+}
+
+fn face_iou(a: &FaceBox, b: &FaceBox) -> f32 {
+    let ix1 = a.x1.max(b.x1);
+    let iy1 = a.y1.max(b.y1);
+    let ix2 = a.x2.min(b.x2);
+    let iy2 = a.y2.min(b.y2);
+    let inter = (ix2 - ix1).max(0.0) * (iy2 - iy1).max(0.0);
+    let union = face_area(a) + face_area(b) - inter;
+    if union <= 0.0 { 0.0 } else { inter / union }
+}
+
+/// Run UltraFace on `image`, returning face boxes in `image`'s pixel space, filtered by
+/// confidence and de-duplicated with NMS, ordered largest-first (bigger faces matter most
+/// for eye-state). The model already outputs decoded corner-form boxes, so we only need a
+/// threshold + NMS here.
+pub fn run_face_detection(
+    image: &DynamicImage,
+    face_session: &Mutex<Session>,
+) -> Result<Vec<FaceBox>> {
+    const SCORE_THRESH: f32 = 0.7;
+    const NMS_IOU: f32 = 0.3;
+
+    let (orig_w, orig_h) = image.dimensions();
+    let resized = image
+        .resize_exact(FACE_INPUT_W, FACE_INPUT_H, FilterType::Triangle)
+        .to_rgb8();
+
+    let mut input = Array::zeros((1, 3, FACE_INPUT_H as usize, FACE_INPUT_W as usize));
+    for (x, y, p) in resized.enumerate_pixels() {
+        input[[0, 0, y as usize, x as usize]] = (p[0] as f32 - 127.0) / 128.0;
+        input[[0, 1, y as usize, x as usize]] = (p[1] as f32 - 127.0) / 128.0;
+        input[[0, 2, y as usize, x as usize]] = (p[2] as f32 - 127.0) / 128.0;
+    }
+    let input_dyn = input.into_dyn();
+    let t = Tensor::from_array(input_dyn.as_standard_layout().into_owned())?;
+
+    let mut session = face_session.lock().unwrap();
+    let outputs = session.run(ort::inputs![t])?;
+    // Graph output order is [scores, boxes].
+    let scores = outputs[0]
+        .try_extract_array::<f32>()?
+        .to_owned()
+        .into_dimensionality::<ndarray::Dim<[usize; 3]>>()?; // [1, N, 2]
+    let boxes = outputs[1]
+        .try_extract_array::<f32>()?
+        .to_owned()
+        .into_dimensionality::<ndarray::Dim<[usize; 3]>>()?; // [1, N, 4]
+
+    let n = scores.shape()[1];
+    let mut cands: Vec<FaceBox> = Vec::new();
+    for i in 0..n {
+        let face_p = scores[[0, i, 1]];
+        if face_p < SCORE_THRESH {
+            continue;
+        }
+        let x1 = boxes[[0, i, 0]].clamp(0.0, 1.0) * orig_w as f32;
+        let y1 = boxes[[0, i, 1]].clamp(0.0, 1.0) * orig_h as f32;
+        let x2 = boxes[[0, i, 2]].clamp(0.0, 1.0) * orig_w as f32;
+        let y2 = boxes[[0, i, 3]].clamp(0.0, 1.0) * orig_h as f32;
+        if x2 > x1 && y2 > y1 {
+            cands.push(FaceBox { x1, y1, x2, y2, score: face_p });
+        }
+    }
+
+    cands.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    let mut keep: Vec<FaceBox> = Vec::new();
+    for c in cands {
+        if !keep.iter().any(|k| face_iou(k, &c) > NMS_IOU) {
+            keep.push(c);
+        }
+    }
+    keep.sort_by(|a, b| face_area(b).partial_cmp(&face_area(a)).unwrap_or(std::cmp::Ordering::Equal));
+    Ok(keep)
+}
+
+/// Lazily download + load the UltraFace face-detection model. Mirrors the other model
+/// accessors; stored as `face_model` on `AiState`.
+pub async fn get_or_init_face_model(
+    app_handle: &tauri::AppHandle,
+    ai_state_mutex: &Mutex<Option<AiState>>,
+    ai_init_lock: &TokioMutex<()>,
+) -> Result<Arc<Mutex<Session>>> {
+    if let Some(m) = ai_state_mutex
+        .lock()
+        .unwrap()
+        .as_ref()
+        .and_then(|state| state.face_model.clone())
+    {
+        return Ok(m);
+    }
+
+    let _guard = ai_init_lock.lock().await;
+
+    if let Some(m) = ai_state_mutex
+        .lock()
+        .unwrap()
+        .as_ref()
+        .and_then(|state| state.face_model.clone())
+    {
+        return Ok(m);
+    }
+
+    let models_dir = get_models_dir(app_handle)?;
+    download_and_verify_model(
+        app_handle,
+        &models_dir,
+        FACE_MODEL_FILENAME,
+        FACE_MODEL_URL,
+        FACE_MODEL_SHA256,
+        "Face Detector",
+    )
+    .await?;
+
+    let _ = ort::init().with_name("Face-Detection").commit();
+    let face_model_path = models_dir.join(FACE_MODEL_FILENAME);
+    let face_model = Arc::new(Mutex::new(
+        Session::builder()?.commit_from_file(face_model_path)?,
+    ));
+
+    crate::register_exit_handler();
+
+    let mut ai_state_lock = ai_state_mutex.lock().unwrap();
+    if let Some(state) = ai_state_lock.as_mut() {
+        state.face_model = Some(face_model.clone());
+    } else {
+        *ai_state_lock = Some(AiState {
+            models: None,
+            denoise_model: None,
+            clip_models: None,
+            lama_model: None,
+            face_model: Some(face_model.clone()),
+            embeddings: None,
+            depth_map: None,
+        });
+    }
+
+    Ok(face_model)
 }
 
 pub async fn get_or_init_lama_model(
@@ -524,6 +689,7 @@ pub async fn get_or_init_lama_model(
             denoise_model: None,
             clip_models: None,
             lama_model: Some(lama_model.clone()),
+            face_model: None,
             embeddings: None,
             depth_map: None,
         });

@@ -11,7 +11,7 @@ use serde::Serialize;
 use std::path::Path;
 use std::sync::Mutex;
 use sysinfo::Disks;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, State};
 use walkdir::WalkDir;
 
 use crate::culling::{
@@ -152,10 +152,20 @@ pub fn group_for_import(settings: CullingSettings) -> Result<CullingSuggestions,
 
 /// Scoring step (the "AI score"): compute quality metrics for the cached photos and fill
 /// them into the cached analysis. Emits `sd-import-score-*` progress. After this, call
-/// `group_for_import` again to get groups ranked + a "best of group" pick. This is where
-/// future AI metrics (eyes-closed, composition, content) will be added.
+/// `group_for_import` again to get groups ranked + a "best of group" pick.
+///
+/// Two passes: (1) fast technical metrics (sharpness / center-focus / exposure) in
+/// parallel, then (2) a CLIP zero-shot "people quality" check that rewards frames where
+/// everyone looks at the camera with open eyes and penalises looking-away / blinking
+/// frames, so the per-group best pick prefers the attentive shot. The CLIP pass is
+/// best-effort — if the model isn't available (offline / not downloaded) we keep the
+/// technical score unchanged.
 #[tauri::command]
-pub async fn score_for_import(app_handle: AppHandle) -> Result<usize, String> {
+pub async fn score_for_import(
+    app_handle: AppHandle,
+    state: State<'_, crate::AppState>,
+    group_settings: CullingSettings,
+) -> Result<usize, String> {
     use rayon::prelude::*;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -171,12 +181,35 @@ pub async fn score_for_import(app_handle: AppHandle) -> Result<usize, String> {
         return Ok(0);
     }
 
+    // The face/eye factor only changes the per-group "best" ranking — ungrouped singles are
+    // auto-kept regardless of score — so we only run the (expensive) face pass on images
+    // that actually belong to a multi-image similar group at the current threshold.
+    let grouped: std::collections::HashSet<String> = {
+        let guard = IMPORT_ANALYSIS.lock().unwrap();
+        let failed = IMPORT_FAILED.lock().unwrap().clone();
+        match guard.as_ref() {
+            Some(analyses) => {
+                let sugg = group_analyses(analyses, failed, &group_settings);
+                let mut set = std::collections::HashSet::new();
+                for g in &sugg.similar_groups {
+                    set.insert(g.representative.path.clone());
+                    for d in &g.duplicates {
+                        set.insert(d.path.clone());
+                    }
+                }
+                set
+            }
+            None => std::collections::HashSet::new(),
+        }
+    };
+
     let settings = crate::app_settings::load_settings(app_handle.clone()).unwrap_or_default();
     let total = paths.len();
     let done = Arc::new(AtomicUsize::new(0));
     let _ = app_handle.emit("sd-import-score-start", total);
 
-    let scores: std::collections::HashMap<String, (f64, f64, f64, f64)> = paths
+    // Pass 1 — technical metrics, in parallel.
+    let tech: std::collections::HashMap<String, (f64, f64, f64, f64)> = paths
         .par_iter()
         .filter_map(|p| {
             let n = done.fetch_add(1, Ordering::Relaxed) + 1;
@@ -185,19 +218,63 @@ pub async fn score_for_import(app_handle: AppHandle) -> Result<usize, String> {
         })
         .collect();
 
+    // Pass 2 — face-aware "people quality": detect faces, then run the open-eyes /
+    // looking-at-camera check on each cropped face so a single blinker demotes the frame
+    // (serial; the CLIP + face sessions are single-threaded). Best-effort: skip silently if
+    // either model can't be loaded (offline / not downloaded).
+    let clip = crate::ai_processing::get_or_init_clip_models(&app_handle, &state.ai_state, &state.ai_init_lock).await;
+    let face = crate::ai_processing::get_or_init_face_model(&app_handle, &state.ai_state, &state.ai_init_lock).await;
+    let people: std::collections::HashMap<String, (f32, f32)> = match (clip, face) {
+        (Ok(clip), Ok(face)) => {
+            let face_paths: Vec<&String> = paths.iter().filter(|p| grouped.contains(*p)).collect();
+            let face_total = face_paths.len();
+            let mut map = std::collections::HashMap::new();
+            for (i, p) in face_paths.iter().enumerate() {
+                let _ = app_handle.emit("sd-import-score-progress", serde_json::json!({ "current": i + 1, "total": face_total, "stage": "Analyzing faces (eyes, gaze, expression)…" }));
+                if let Ok(img) = crate::culling::load_face_image(p, &settings) {
+                    if let Ok(Some(face_score)) = crate::tagging::score_faces(&img, &face, &clip.model, &clip.tokenizer) {
+                        map.insert((*p).clone(), face_score);
+                    }
+                }
+            }
+            map
+        }
+        (clip_res, face_res) => {
+            if let Err(e) = clip_res {
+                eprintln!("Face/people scoring skipped (CLIP unavailable): {e}");
+            }
+            if let Err(e) = face_res {
+                eprintln!("Face/people scoring skipped (face model unavailable): {e}");
+            }
+            std::collections::HashMap::new()
+        }
+    };
+
     {
         let mut guard = IMPORT_ANALYSIS.lock().unwrap();
         if let Some(v) = guard.as_mut() {
             for d in v.iter_mut() {
-                if let Some(&(q, sh, cf, ex)) = scores.get(&d.result_path()) {
-                    d.set_scores(q, sh, cf, ex);
+                if let Some(&(q, sh, cf, ex)) = tech.get(&d.result_path()) {
+                    // For people shots (faces detected) the faces drive the score: a weighted
+                    // blend of the technical quality, the face eyes/gaze/expression score and
+                    // the face sharpness. Photos with no faces keep the technical score.
+                    let q_adj = match people.get(&d.result_path()) {
+                        // For people shots the faces dominate — eyes/gaze/expression carries
+                        // the most weight, since "is everyone looking at the camera" is the
+                        // question that decides a burst.
+                        Some(&(face_clip, face_sharp)) => {
+                            (0.25 * q + 0.50 * face_clip as f64 + 0.25 * face_sharp as f64).clamp(0.0, 1.0)
+                        }
+                        None => q,
+                    };
+                    d.set_scores(q_adj, sh, cf, ex);
                 }
             }
         }
     }
 
-    let _ = app_handle.emit("sd-import-score-complete", scores.len());
-    Ok(scores.len())
+    let _ = app_handle.emit("sd-import-score-complete", tech.len());
+    Ok(tech.len())
 }
 
 /// Eject / unmount the removable volume at `mount_point` (e.g. after import).

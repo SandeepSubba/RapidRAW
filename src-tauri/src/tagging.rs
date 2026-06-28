@@ -53,6 +53,128 @@ fn softmax(array: &Array<f32, ndarray::Dim<[usize; 2]>>) -> Array<f32, ndarray::
     new_array
 }
 
+/// Run the bundled combined CLIP model as a zero-shot classifier: returns the softmax
+/// probability of each `prompts` entry for `image` (row 0 of the logits). Reused for both
+/// whole-image and per-face-crop classification.
+fn clip_prompt_probs(
+    image: &DynamicImage,
+    clip_session_mutex: &Mutex<Session>,
+    tokenizer: &Tokenizer,
+    prompts: &[&str],
+) -> Result<Vec<f32>> {
+    let text_inputs: Vec<String> = prompts.iter().map(|s| s.to_string()).collect();
+    let image_input = preprocess_clip_image(image);
+
+    let encodings = tokenizer
+        .encode_batch(text_inputs.clone(), true)
+        .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+    let max_len = encodings
+        .iter()
+        .map(|e| e.get_ids().len())
+        .max()
+        .unwrap_or(0);
+
+    let mut ids_data = Vec::new();
+    let mut mask_data = Vec::new();
+    for encoding in encodings {
+        let mut ids = encoding.get_ids().iter().map(|&i| i as i64).collect::<Vec<_>>();
+        let mut mask = encoding
+            .get_attention_mask()
+            .iter()
+            .map(|&m| m as i64)
+            .collect::<Vec<_>>();
+        ids.resize(max_len, 0);
+        mask.resize(max_len, 0);
+        ids_data.extend_from_slice(&ids);
+        mask_data.extend_from_slice(&mask);
+    }
+
+    let ids_array = Array::from_shape_vec((text_inputs.len(), max_len), ids_data)?;
+    let mask_array = Array::from_shape_vec((text_inputs.len(), max_len), mask_data)?;
+
+    let image_input_dyn = image_input.into_dyn();
+    let ids_array_dyn = ids_array.into_dyn();
+    let mask_array_dyn = mask_array.into_dyn();
+
+    let image_val = Tensor::from_array(image_input_dyn.as_standard_layout().into_owned())?;
+    let ids_val = Tensor::from_array(ids_array_dyn.as_standard_layout().into_owned())?;
+    let mask_val = Tensor::from_array(mask_array_dyn.as_standard_layout().into_owned())?;
+
+    let mut clip_session = clip_session_mutex.lock().unwrap();
+    let outputs = clip_session.run(ort::inputs![ids_val, image_val, mask_val])?;
+    let logits_dyn = outputs[0].try_extract_array::<f32>()?.to_owned();
+    let logits = logits_dyn.into_dimensionality::<ndarray::Dim<[usize; 2]>>()?;
+    let probs = softmax(&logits);
+    Ok(probs.row(0).to_vec())
+}
+
+/// Face-aware "people quality" multiplier in [0, 1] for ranking a burst of similar frames.
+///
+/// Detects every face and grades each *cropped face* on two axes:
+///   - `clip` in [0,1]: eyes / gaze / expression via one CLIP softmax (smiling-at-camera is
+///     ideal, blinking / looking-away are disqualifying, frowning is penalised), combined
+///     across faces as `0.5·mean + 0.5·worst` so one bad face demotes the frame.
+///   - `sharpness` in [0,1]: how sharp the faces actually are (mean of per-face Laplacian
+///     variance) — the most relevant focus cue for a people burst, far better than
+///     whole-image sharpness on a downscaled thumbnail.
+/// Returns `None` when no faces are detected (caller falls back to the technical score).
+pub fn score_faces(
+    image: &DynamicImage,
+    face_session: &Mutex<Session>,
+    clip_session: &Mutex<Session>,
+    tokenizer: &Tokenizer,
+) -> Result<Option<(f32, f32)>> {
+    // Per-face graded states (a single CLIP softmax per face). Each prompt maps to a
+    // desirability weight: smiling + looking at camera is ideal; a neutral attentive face is
+    // good; eyes-closed / looking-away are disqualifying; an unhappy/frowning face is mildly
+    // penalised. This folds eyes + gaze + expression into one inference per face.
+    const FACE_PROMPTS: [&str; 5] = [
+        "a close-up photo of a smiling happy face looking at the camera",
+        "a close-up photo of a face looking at the camera with a neutral expression",
+        "a close-up photo of a face with closed eyes, blinking",
+        "a close-up photo of a face turned away from the camera",
+        "a close-up photo of an unhappy frowning face",
+    ];
+    const FACE_WEIGHTS: [f32; 5] = [1.0, 0.7, 0.0, 0.0, 0.3];
+    const MAX_FACES: usize = 8; // cap work on big group shots; largest faces first
+
+    let faces = crate::ai_processing::run_face_detection(image, face_session)?;
+    if faces.is_empty() {
+        return Ok(None);
+    }
+
+    let (iw, ih) = (image.width() as f32, image.height() as f32);
+    let mut clip_scores: Vec<f32> = Vec::new();
+    let mut sharp_scores: Vec<f32> = Vec::new();
+    for f in faces.iter().take(MAX_FACES) {
+        // Expand the box ~30% so brows/eyes/mouth aren't clipped, then crop from full-res.
+        let (bw, bh) = (f.x2 - f.x1, f.y2 - f.y1);
+        let x1 = (f.x1 - bw * 0.3).max(0.0);
+        let y1 = (f.y1 - bh * 0.3).max(0.0);
+        let x2 = (f.x2 + bw * 0.3).min(iw);
+        let y2 = (f.y2 + bh * 0.3).min(ih);
+        if x2 <= x1 + 4.0 || y2 <= y1 + 4.0 {
+            continue;
+        }
+        let crop = image.crop_imm(x1 as u32, y1 as u32, (x2 - x1) as u32, (y2 - y1) as u32);
+        let probs = clip_prompt_probs(&crop, clip_session, tokenizer, &FACE_PROMPTS)?;
+        let score: f32 = probs.iter().zip(FACE_WEIGHTS.iter()).map(|(p, w)| p * w).sum();
+        clip_scores.push(score.clamp(0.0, 1.0));
+        sharp_scores.push(crate::culling::normalized_sharpness_of(&crop));
+    }
+    if clip_scores.is_empty() {
+        return Ok(None);
+    }
+
+    let clip_mean = clip_scores.iter().sum::<f32>() / clip_scores.len() as f32;
+    let clip_worst = clip_scores.iter().cloned().fold(f32::INFINITY, f32::min);
+    // Punish the single worst face heavily — if even one person is looking away or blinking,
+    // the frame should lose to a sibling where everyone is attentive.
+    let clip = (0.35 * clip_mean + 0.65 * clip_worst).clamp(0.0, 1.0);
+    let sharpness = (sharp_scores.iter().sum::<f32>() / sharp_scores.len() as f32).clamp(0.0, 1.0);
+    Ok(Some((clip, sharpness)))
+}
+
 fn rgb_to_hsv((r, g, b): (u8, u8, u8)) -> (f32, f32, f32) {
     let r = r as f32 / 255.0;
     let g = g as f32 / 255.0;
