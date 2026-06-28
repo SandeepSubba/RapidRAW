@@ -38,12 +38,6 @@ async function writeCullingMetadata(paths: string[], ratings: Record<string, num
   ]);
 }
 
-// Within a similar group, keep every shot whose quality is at least this fraction of
-// the group's best. A burst of comparably-good frames therefore keeps several images
-// (Capture One style) rather than collapsing the whole group to a single pick. Only
-// clearly-weaker near-duplicates get dropped.
-export const GROUP_KEEP_MARGIN = 0.9;
-
 // Map a Capture One–style "Similarity %" (higher = stricter) to the backend's
 // perceptual-hash Hamming-distance threshold (lower = stricter).
 function groupSettings(similarity: number) {
@@ -51,33 +45,41 @@ function groupSettings(similarity: number) {
   return { groupSimilar: true, filterBlurry: false, similarityThreshold: threshold, blurThreshold: 100 };
 }
 
+// Minimum 0–5 grade an auto-selected photo must reach to be kept.
+const KEEP_MIN_GRADE = 3;
+
 /**
- * Default keeper selection ("auto-keep the good ones per group, drop clearly-weaker
- * near-duplicates"):
- *  - each similar group keeps its representative plus any duplicate within
- *    GROUP_KEEP_MARGIN of the best quality score
- *  - blurry images are dropped
- *  - everything else (ungrouped, non-blurry, plus analysis failures) is kept
+ * "Auto-select best": pick exactly ONE photo per similar group — the highest-scoring
+ * (the representative) — plus every ungrouped single. Duplicates and blurry shots are
+ * dropped, and a group whose best shot grades below {@link KEEP_MIN_GRADE} (on the same
+ * 0–5 scale shown on the badges) is dropped entirely. The user can still manually keep
+ * extras afterward.
  */
 export function computeDefaultKeepers(scannedPaths: string[], suggestions: CullingSuggestions): Set<string> {
   const grouped = new Set<string>();
   const kept = new Set<string>();
 
+  // 0–5 grade, min–max normalized across grouped scores (matches the cell badges).
+  const allScores: number[] = [];
+  suggestions.similarGroups.forEach((g) => {
+    allScores.push(g.representative.qualityScore, ...g.duplicates.map((d) => d.qualityScore));
+  });
+  const sMin = allScores.length ? Math.min(...allScores) : 0;
+  const sMax = allScores.length ? Math.max(...allScores) : 1;
+  const grade = (s: number) => Math.round(sMax > sMin ? ((s - sMin) / (sMax - sMin)) * 5 : 5);
+
   suggestions.similarGroups.forEach((group) => {
-    const best = group.representative.qualityScore || 0;
     grouped.add(group.representative.path);
-    kept.add(group.representative.path);
-    group.duplicates.forEach((dup) => {
-      grouped.add(dup.path);
-      if ((dup.qualityScore || 0) >= best * GROUP_KEEP_MARGIN) {
-        kept.add(dup.path);
-      }
-    });
+    group.duplicates.forEach((dup) => grouped.add(dup.path)); // dropped (not the best)
+    // Keep the group's best shot only if it's good enough.
+    if (grade(group.representative.qualityScore) >= KEEP_MIN_GRADE) {
+      kept.add(group.representative.path);
+    }
   });
 
   const blurry = new Set(suggestions.blurryImages.map((img) => img.path));
   scannedPaths.forEach((p) => {
-    if (!grouped.has(p) && !blurry.has(p)) kept.add(p);
+    if (!grouped.has(p) && !blurry.has(p)) kept.add(p); // ungrouped singles (unique shots)
   });
 
   return kept;
@@ -142,7 +144,9 @@ export function useSdImportActions() {
       useImportStore.getState().setImport({ cullProgress: event.payload });
     });
     try {
-      await invoke<number>(Invokes.ScoreForImport);
+      await invoke<number>(Invokes.ScoreForImport, {
+        groupSettings: groupSettings(useImportStore.getState().similarity),
+      });
       const suggestions = await invoke<CullingSuggestions>(Invokes.GroupForImport, {
         settings: groupSettings(useImportStore.getState().similarity),
       });
@@ -238,12 +242,22 @@ export function useSdImportActions() {
     useImportStore.getState().setImport({ keptPaths: new Set() });
   }, []);
 
-  const autoSelectBest = useCallback(() => {
+  // Auto-select best = run the full analysis (group + score) if it hasn't been done, then
+  // keep the single best of each group + all ungrouped singles. This is the one-click
+  // entry point — it no longer requires the user to enable grouping first. (Previously it
+  // only scored when groups already existed, so a first click with no analysis fell
+  // through to "select everything".)
+  const autoSelectBest = useCallback(async () => {
+    if (!useImportStore.getState().scoresReady) {
+      useImportStore.getState().setImport({ enableGroups: true }); // reflect that grouping is now active
+      await scoreImages(); // analyzes + groups + scores as needed, sets scoresReady + suggestions
+    }
     const { scannedPaths, suggestions, alreadyImported, setImport } = useImportStore.getState();
-    const kept = suggestions ? computeDefaultKeepers(scannedPaths, suggestions) : new Set(scannedPaths);
+    if (!suggestions) return; // analysis failed; leave the current selection untouched
+    const kept = computeDefaultKeepers(scannedPaths, suggestions);
     alreadyImported.forEach((p) => kept.delete(p));
     setImport({ keptPaths: kept });
-  }, []);
+  }, [scoreImages]);
 
   const scanSource = useCallback(async (path: string) => {
     const { setImport } = useImportStore.getState();
@@ -341,9 +355,14 @@ export function useSdImportActions() {
     setImport({ stage: 'importing' });
     try {
       // Persist culling ratings/labels onto the source sidecars so they travel with the
-      // imported copies (import_files copies the .rrdata sidecar).
+      // imported copies (import_files copies the .rrdata sidecar). This is best-effort —
+      // a read-only card / sidecar write failure must NOT block the actual import.
       const { ratings, colors } = useImportStore.getState();
-      await writeCullingMetadata(sourcePaths, ratings, colors);
+      try {
+        await writeCullingMetadata(sourcePaths, ratings, colors);
+      } catch (metaErr) {
+        console.warn('Could not write culling metadata to source sidecars (continuing import):', metaErr);
+      }
       await invoke(Invokes.ImportFiles, { destinationFolder, settings: importSettings, sourcePaths });
       // import-complete / import-error are handled by the global listeners (useProcessStore.importState).
     } catch (err) {

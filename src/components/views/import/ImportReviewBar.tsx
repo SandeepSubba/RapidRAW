@@ -99,7 +99,15 @@ export default function ImportReviewBar() {
           <span className="truncate">{destLabel}</span>
         </button>
 
-        <Button onClick={startImport} disabled={keptCount === 0 || !destinationFolder}>
+        {/* Enabled as soon as photos are selected. If no destination is chosen yet, clicking
+            opens the folder picker first, then proceeds with the import (no dead button). */}
+        <Button
+          onClick={async () => {
+            if (!useImportStore.getState().destinationFolder) await pickDestination();
+            if (useImportStore.getState().destinationFolder) startImport();
+          }}
+          disabled={keptCount === 0}
+        >
           Import {keptCount}
           <ArrowRight size={16} className="ml-2" />
         </Button>

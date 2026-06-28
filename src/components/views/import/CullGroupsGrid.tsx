@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { Check, Layers, Image as ImageIcon, Droplet, Grid2x2, Eye, Sparkles, Wand2 } from 'lucide-react';
+import { Check, Layers, Image as ImageIcon, Droplet, Grid2x2, Eye, Sparkles } from 'lucide-react';
 import { useImportStore } from '../../../store/useImportStore';
 import { useSettingsStore } from '../../../store/useSettingsStore';
 import { useSdImportActions } from '../../../hooks/useSdImportActions';
@@ -28,6 +28,7 @@ interface CellProps {
 function Cell({ path, kept, focused, disabled, badge, best, rating, color, onToggleKeep, onFocus, onOpen }: CellProps) {
   return (
     <div
+      data-path={path}
       onClick={() => onFocus(path)}
       onDoubleClick={() => onOpen(path)}
       title={
@@ -119,7 +120,7 @@ export default function CullGroupsGrid({ suggestions }: { suggestions: CullingSu
     })),
   );
   const actions = useSdImportActions();
-  const { setEnableGroups, setSimilarity, scoreImages, setActivePath, selectAll, selectNone, autoSelectBest } = actions;
+  const { setEnableGroups, setSimilarity, setActivePath, selectAll, selectNone, autoSelectBest } = actions;
   const rawExts = useSettingsStore((s) => s.supportedTypes?.raw);
   const selectedCount = keptPaths.size;
 
@@ -128,10 +129,14 @@ export default function CullGroupsGrid({ suggestions }: { suggestions: CullingSu
     () => computeVisible(scannedPaths, { fileType: fileTypeFilter, rating: filterRating, colors: filterColors }, ratings, colors, rawExts ?? []),
     [scannedPaths, fileTypeFilter, filterRating, filterColors, ratings, colors, rawExts],
   );
-  const vis = (p: string) => !visibleSet || visibleSet.has(p);
+  // Hide already-imported photos entirely (not just dimmed). `alreadyImported` is only
+  // populated when "Exclude already-imported" is on AND a destination is set, so this hides
+  // them exactly when exclusion is active and shows everything otherwise.
+  const vis = (p: string) => (!visibleSet || visibleSet.has(p)) && !alreadyImported.has(p);
 
   const [viewMode, setViewMode] = useState<'grid' | 'viewer'>('grid');
   const [viewerInitialPath, setViewerInitialPath] = useState<string | null>(null);
+  const gridScrollRef = useRef<HTMLDivElement>(null);
 
   // Reading order + grouping lookups + render-ready arrays, all honouring the file-type
   // filter (hidden paths are dropped; a group that loses members collapses to a single).
@@ -164,6 +169,13 @@ export default function CullGroupsGrid({ suggestions }: { suggestions: CullingSu
       [g.representative.path, ...g.duplicates.map((d) => d.path)].forEach((p) => grouped.add(p));
     });
 
+    // The raw quality score is an abstract 0–1 number; present it as a whole-number 0–5
+    // grade (5 = best on this card) by min–max normalizing across all scored photos.
+    const scoreVals = Object.values(scoreOf);
+    const sMin = scoreVals.length ? Math.min(...scoreVals) : 0;
+    const sMax = scoreVals.length ? Math.max(...scoreVals) : 1;
+    const to5 = (s: number) => String(Math.round(sMax > sMin ? ((s - sMin) / (sMax - sMin)) * 5 : 5));
+
     const groupList: string[][] = [];
     const reducedSingles: string[] = [];
     suggestions.similarGroups.forEach((g) => {
@@ -171,9 +183,9 @@ export default function CullGroupsGrid({ suggestions }: { suggestions: CullingSu
       if (visMembers.length >= 2) {
         if (scoresReady) best.add(visMembers[0]); // "best of group" only meaningful once scored
         visMembers.forEach((p, i) => {
-          // Show the quality score (with a ★ on the best) only after scoring; before that
-          // just show the filename, since the score is 0/unranked.
-          badge[p] = scoresReady ? `${i === 0 ? '★ ' : ''}${(scoreOf[p] ?? 0).toFixed(2)}` : p.split(/[\\/]/).pop() || '';
+          // After scoring, show the 0–5 quality grade ("Q" distinguishes it from the manual
+          // 1–5 star rating); before scoring, just the filename since the score is unranked.
+          badge[p] = scoresReady ? `Q ${to5(scoreOf[p] ?? 0)}` : p.split(/[\\/]/).pop() || '';
           orderedList.push(p);
           members[p] = visMembers;
           lead[p] = visMembers[0];
@@ -195,7 +207,7 @@ export default function CullGroupsGrid({ suggestions }: { suggestions: CullingSu
     visBlurry.forEach(pushSingle);
 
     return { flat: visScanned, groups: groupList, singles: singleList, blurry: visBlurry, ordered: orderedList, badgeOf: badge, bestOf: best, memberOf: members, collapsed: collapsedList, leadOf: lead };
-  }, [suggestions, scannedPaths, visibleSet, scoresReady]);
+  }, [suggestions, scannedPaths, visibleSet, scoresReady, alreadyImported]);
 
   const onOpen = (p: string) => {
     setViewerInitialPath(p);
@@ -208,6 +220,102 @@ export default function CullGroupsGrid({ suggestions }: { suggestions: CullingSu
       setViewMode('viewer');
     }
   };
+
+  // Arrow-key navigation across the (sectioned) grid. Left/Right step through the
+  // reading order; Up/Down pick the geometrically nearest cell in the row above/below
+  // (robust to the responsive column count and the group/single/blurry section breaks).
+  const navigate = useCallback(
+    (dir: 'left' | 'right' | 'up' | 'down') => {
+      const list = ordered;
+      if (!list.length) return;
+      const cur = activePath && list.includes(activePath) ? activePath : null;
+      if (!cur) {
+        setActivePath(list[0]); // first keypress just focuses the start
+        return;
+      }
+      if (dir === 'left' || dir === 'right') {
+        const i = list.indexOf(cur);
+        const ni = dir === 'right' ? i + 1 : i - 1;
+        if (ni >= 0 && ni < list.length) setActivePath(list[ni]);
+        return;
+      }
+      const container = gridScrollRef.current;
+      const curEl = container?.querySelector<HTMLElement>(`[data-path="${CSS.escape(cur)}"]`);
+      if (!container || !curEl) return;
+      const r = curEl.getBoundingClientRect();
+      const cx = r.left + r.width / 2;
+      let best: string | null = null;
+      let bestScore = Infinity;
+      for (const p of list) {
+        if (p === cur) continue;
+        const el = container.querySelector<HTMLElement>(`[data-path="${CSS.escape(p)}"]`);
+        if (!el) continue;
+        const rr = el.getBoundingClientRect();
+        const isDown = rr.top > r.top + r.height * 0.5;
+        const isUp = rr.bottom < r.bottom - r.height * 0.5;
+        if (dir === 'down' && !isDown) continue;
+        if (dir === 'up' && !isUp) continue;
+        const dy = dir === 'down' ? rr.top - r.top : r.top - rr.top;
+        const dx = Math.abs(rr.left + rr.width / 2 - cx);
+        const score = Math.abs(dy) + dx * 3; // weight horizontal distance to stay in-column
+        if (score < bestScore) {
+          bestScore = score;
+          best = p;
+        }
+      }
+      if (best) setActivePath(best);
+    },
+    [ordered, activePath, setActivePath],
+  );
+
+  // Keep the focused cell scrolled into view as the user navigates.
+  useEffect(() => {
+    if (viewMode !== 'grid' || !activePath) return;
+    gridScrollRef.current
+      ?.querySelector<HTMLElement>(`[data-path="${CSS.escape(activePath)}"]`)
+      ?.scrollIntoView({ block: 'nearest' });
+  }, [activePath, viewMode]);
+
+  useEffect(() => {
+    if (viewMode !== 'grid') return;
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      switch (e.key) {
+        case 'ArrowRight':
+          e.preventDefault();
+          navigate('right');
+          break;
+        case 'ArrowLeft':
+          e.preventDefault();
+          navigate('left');
+          break;
+        case 'ArrowDown':
+          e.preventDefault();
+          navigate('down');
+          break;
+        case 'ArrowUp':
+          e.preventDefault();
+          navigate('up');
+          break;
+        case ' ':
+          if (activePath) {
+            e.preventDefault();
+            toggleKeep(activePath);
+          }
+          break;
+        case 'Enter':
+          if (activePath) {
+            e.preventDefault();
+            onOpen(activePath);
+          }
+          break;
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [viewMode, navigate, activePath, toggleKeep]);
 
   const keptInGroupCount = (paths: string[]) => paths.filter((p) => keptPaths.has(p)).length;
 
@@ -266,29 +374,16 @@ export default function CullGroupsGrid({ suggestions }: { suggestions: CullingSu
           <span className="text-xs tabular-nums text-text-secondary w-9">{similarity}%</span>
         </div>
 
-        {/* AI scoring (separate from grouping). Scores quality + ranks each group. */}
-        <button
-          onClick={scoreImages}
-          className={`flex items-center gap-1 px-2.5 py-1 text-sm rounded-md border ${
-            scoresReady ? 'border-surface text-text-secondary hover:bg-surface' : 'border-accent text-accent'
-          }`}
-          data-tooltip="Score photo quality and rank each group (sharpness, focus, exposure)"
-        >
-          <Wand2 size={14} /> {scoresReady ? 'Re-score' : 'AI score'}
-        </button>
-
         {/* filters: rating / file type / color label */}
         <ImportFilterBar />
 
         <div className="h-5 w-px bg-surface" />
 
+        {/* Auto-select best = AI-score (if needed) + keep the single best of each group. */}
         <button
           onClick={autoSelectBest}
-          disabled={!scoresReady}
-          className={`flex items-center gap-1 px-2.5 py-1 text-sm rounded-md ${
-            scoresReady ? 'bg-accent text-button-text hover:opacity-90' : 'bg-surface text-text-secondary cursor-not-allowed'
-          }`}
-          data-tooltip={scoresReady ? 'Select the best of each group (and all ungrouped photos)' : 'Run AI score first'}
+          className="flex items-center gap-1 px-2.5 py-1 text-sm rounded-md bg-accent text-button-text hover:opacity-90"
+          data-tooltip="Score the photos and select the best of each group (plus all ungrouped photos)"
         >
           <Sparkles size={14} /> Auto-select best
         </button>
@@ -316,7 +411,7 @@ export default function CullGroupsGrid({ suggestions }: { suggestions: CullingSu
         />
       )}
 
-      <div className={`flex-1 overflow-y-auto px-4 pb-4 space-y-6 ${viewMode === 'viewer' ? 'hidden' : ''}`}>
+      <div ref={gridScrollRef} className={`flex-1 overflow-y-auto px-4 pb-4 space-y-6 ${viewMode === 'viewer' ? 'hidden' : ''}`}>
         {/* Before analysis: flat grid of everything scanned (file-type filtered). */}
         {!suggestions && (
           <section>

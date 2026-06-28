@@ -30,7 +30,7 @@ export default function ImportViewer({ initialPath, collapsed, memberOf, leadOf,
     if (!useImportStore.getState().activePath) useImportStore.getState().setImport({ activePath: initialPath });
   }, [initialPath]);
 
-  const [mode, setMode] = useState<'compare' | 'single'>('compare');
+  const [mode, setMode] = useState<'compare' | 'single'>('single');
 
   const currentLead = leadOf[activePath] ?? activePath;
   const members = memberOf[currentLead] ?? [activePath];
@@ -74,6 +74,33 @@ export default function ImportViewer({ initialPath, collapsed, memberOf, leadOf,
 
   const cols = members.length <= 1 ? 1 : members.length <= 4 ? 2 : members.length <= 9 ? 3 : 4;
   const activeKept = keptPaths.has(activePath);
+
+  // Compare-mode zoom/pan, shared across all panes so you zoom into the same spot on every
+  // frame at once. Mouse wheel zooms; drag pans when zoomed in.
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const compareRef = useRef<HTMLDivElement>(null);
+
+  // Reset zoom when the group or view mode changes.
+  useEffect(() => {
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+  }, [currentLead, mode]);
+  // Snap pan back to centre once fully zoomed out.
+  useEffect(() => {
+    if (zoom === 1) setPan({ x: 0, y: 0 });
+  }, [zoom]);
+  // Wheel-to-zoom (registered non-passive so we can preventDefault the page scroll).
+  useEffect(() => {
+    const el = compareRef.current;
+    if (!el || mode !== 'compare') return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      setZoom((z) => Math.min(6, Math.max(1, z * Math.exp(-e.deltaY * 0.0015))));
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [mode]);
 
   return (
     <div className="flex-1 min-h-0 flex">
@@ -130,6 +157,7 @@ export default function ImportViewer({ initialPath, collapsed, memberOf, leadOf,
             <SingleView path={activePath} />
           ) : (
             <div
+              ref={compareRef}
               className="absolute inset-0 overflow-y-auto p-3 grid gap-3 auto-rows-fr"
               style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
             >
@@ -150,12 +178,8 @@ export default function ImportViewer({ initialPath, collapsed, memberOf, leadOf,
                     }`}
                     title={`${p.split(/[\\/]/).pop()} — double-click for single view`}
                   >
-                    <div className="relative flex-1 min-h-0 bg-black/40 flex items-center justify-center">
-                      <LazyThumb
-                        path={p}
-                        className="w-full h-full flex items-center justify-center"
-                        imgClassName={`max-w-full max-h-full object-contain ${disabled ? 'opacity-20 grayscale' : ''}`}
-                      />
+                    <div className="relative flex-1 min-h-0">
+                      <ComparePane path={p} disabled={disabled} zoom={zoom} pan={pan} onPanChange={setPan} />
                       {!disabled && <RatingColor rating={ratings[p] || 0} color={colors[p]} />}
                     </div>
                     <div className="shrink-0 flex items-center gap-2 px-2 py-1 bg-surface/70 text-xs">
@@ -182,8 +206,13 @@ export default function ImportViewer({ initialPath, collapsed, memberOf, leadOf,
           )}
 
           {mode === 'compare' && (
-            <div className="absolute bottom-2 left-1/2 -translate-x-1/2 text-[11px] text-text-secondary bg-bg-secondary/80 rounded px-2 py-1 pointer-events-none">
-              ← → groups · ↑ ↓ within group · double-click for single · space keeps
+            <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex items-center gap-2 text-[11px] text-text-secondary bg-bg-secondary/80 rounded px-2 py-1">
+              <span className="pointer-events-none">← → groups · ↑ ↓ within group · scroll to zoom · double-click for single · space keeps</span>
+              {zoom > 1 && (
+                <button onClick={() => setZoom(1)} className="text-accent hover:underline">
+                  {zoom.toFixed(1)}× · reset
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -218,6 +247,75 @@ function GroupStrip({ members, activePath, onPick }: { members: string[]; active
           </button>
         );
       })}
+    </div>
+  );
+}
+
+// A single compared frame: loads the full-resolution preview (not the low-res thumbnail) so
+// the comparison is sharp, and applies the shared zoom/pan so all panes track together. Drag
+// to pan when zoomed in.
+function ComparePane({
+  path,
+  disabled,
+  zoom,
+  pan,
+  onPanChange,
+}: {
+  path: string;
+  disabled: boolean;
+  zoom: number;
+  pan: { x: number; y: number };
+  onPanChange(p: { x: number; y: number }): void;
+}) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const drag = useRef<{ x: number; y: number; px: number; py: number } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setUrl(null);
+    invoke<string>(Invokes.GetImportPreview, { path })
+      .then((u) => !cancelled && (setUrl(u), setLoading(false)))
+      .catch(() => !cancelled && setLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [path]);
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    if (zoom <= 1) return;
+    drag.current = { x: e.clientX, y: e.clientY, px: pan.x, py: pan.y };
+  };
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (!drag.current) return;
+    onPanChange({ x: drag.current.px + (e.clientX - drag.current.x), y: drag.current.py + (e.clientY - drag.current.y) });
+  };
+  const end = () => (drag.current = null);
+
+  return (
+    <div
+      className="absolute inset-0 overflow-hidden bg-black/40 flex items-center justify-center"
+      style={{ cursor: zoom > 1 ? 'grab' : 'default' }}
+      onClick={(e) => zoom > 1 && e.stopPropagation()}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={end}
+      onPointerLeave={end}
+    >
+      {loading && <Loader2 className="w-8 h-8 text-white/60 animate-spin" />}
+      {url && (
+        <img
+          src={url}
+          alt=""
+          draggable={false}
+          className={`max-w-full max-h-full object-contain select-none ${disabled ? 'opacity-20 grayscale' : ''}`}
+          style={{
+            transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+            transition: drag.current ? 'none' : 'transform 60ms',
+          }}
+        />
+      )}
     </div>
   );
 }
