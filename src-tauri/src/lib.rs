@@ -2317,6 +2317,7 @@ pub fn run() {
             sd_import::cull_images_for_import,
             sd_import::analyze_for_import,
             sd_import::group_for_import,
+            sd_import::score_for_import,
             sd_import::get_import_preview,
             sd_import::find_existing_in_destination,
             sd_import::eject_drive,

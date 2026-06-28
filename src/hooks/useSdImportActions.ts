@@ -107,7 +107,8 @@ export function useSdImportActions() {
     }
   }, []);
 
-  // First-time grouping: analyze (slow, with progress) then group.
+  // First-time grouping: analyze for grouping (hash only — fast) then group. Scoring is
+  // a separate step, so this resets scoresReady.
   const analyzeThenGroup = useCallback(async () => {
     const { scannedPaths, setImport } = useImportStore.getState();
     if (scannedPaths.length === 0) return;
@@ -120,7 +121,7 @@ export function useSdImportActions() {
       const suggestions = await invoke<CullingSuggestions>(Invokes.GroupForImport, {
         settings: groupSettings(useImportStore.getState().similarity),
       });
-      setImport({ suggestions, analysisReady: true, cullProgress: null, stage: 'review' });
+      setImport({ suggestions, analysisReady: true, scoresReady: false, cullProgress: null, stage: 'review' });
     } catch (err) {
       setImport({ error: String(err), cullProgress: null, stage: 'review' });
       toast.error(`Grouping failed: ${err}`);
@@ -128,6 +129,31 @@ export function useSdImportActions() {
       unlisten();
     }
   }, []);
+
+  // The "AI score" step: score the photos, then re-group so each group is ranked with a
+  // best-of-group pick and the score badges appear. Separate from grouping for speed.
+  const scoreImages = useCallback(async () => {
+    const { scannedPaths, analysisReady, setImport } = useImportStore.getState();
+    if (scannedPaths.length === 0) return;
+    // Scoring needs the grouping analysis cached; run it first if needed.
+    if (!analysisReady) await analyzeThenGroup();
+    setImport({ stage: 'scoring', cullProgress: { current: 0, total: scannedPaths.length, stage: 'Scoring…' } });
+    const unlisten = await listen('sd-import-score-progress', (event: any) => {
+      useImportStore.getState().setImport({ cullProgress: event.payload });
+    });
+    try {
+      await invoke<number>(Invokes.ScoreForImport);
+      const suggestions = await invoke<CullingSuggestions>(Invokes.GroupForImport, {
+        settings: groupSettings(useImportStore.getState().similarity),
+      });
+      setImport({ suggestions, scoresReady: true, cullProgress: null, stage: 'review' });
+    } catch (err) {
+      setImport({ error: String(err), cullProgress: null, stage: 'review' });
+      toast.error(`Scoring failed: ${err}`);
+    } finally {
+      unlisten();
+    }
+  }, [analyzeThenGroup]);
 
   const setEnableGroups = useCallback(
     (on: boolean) => {
@@ -237,6 +263,7 @@ export function useSdImportActions() {
         suggestions: null,
         enableGroups: false,
         analysisReady: false,
+        scoresReady: false,
         stage: 'review',
       });
     } catch (err) {
@@ -353,6 +380,7 @@ export function useSdImportActions() {
     scanSource,
     setEnableGroups,
     setSimilarity,
+    scoreImages,
     setFileTypeFilter,
     setActivePath,
     setFilterRating,

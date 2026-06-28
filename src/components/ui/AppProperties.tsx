@@ -52,6 +52,7 @@ export enum Invokes {
   FindExistingInDestination = 'find_existing_in_destination',
   GetImportPreview = 'get_import_preview',
   GroupForImport = 'group_for_import',
+  ScoreForImport = 'score_for_import',
   ListSourceDrives = 'list_source_drives',
   ScanSourceImages = 'scan_source_images',
   DeleteFolder = 'delete_folder',

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { Check, Layers, Image as ImageIcon, Droplet, Grid2x2, Eye, Sparkles } from 'lucide-react';
+import { Check, Layers, Image as ImageIcon, Droplet, Grid2x2, Eye, Sparkles, Wand2 } from 'lucide-react';
 import { useImportStore } from '../../../store/useImportStore';
 import { useSettingsStore } from '../../../store/useSettingsStore';
 import { useSdImportActions } from '../../../hooks/useSdImportActions';
@@ -93,6 +93,7 @@ export default function CullGroupsGrid({ suggestions }: { suggestions: CullingSu
     alreadyImported,
     enableGroups,
     similarity,
+    scoresReady,
     fileTypeFilter,
     filterRating,
     filterColors,
@@ -107,6 +108,7 @@ export default function CullGroupsGrid({ suggestions }: { suggestions: CullingSu
       alreadyImported: s.alreadyImported,
       enableGroups: s.enableGroups,
       similarity: s.similarity,
+      scoresReady: s.scoresReady,
       fileTypeFilter: s.fileTypeFilter,
       filterRating: s.filterRating,
       filterColors: s.filterColors,
@@ -117,7 +119,7 @@ export default function CullGroupsGrid({ suggestions }: { suggestions: CullingSu
     })),
   );
   const actions = useSdImportActions();
-  const { setEnableGroups, setSimilarity, setActivePath, selectAll, selectNone, autoSelectBest } = actions;
+  const { setEnableGroups, setSimilarity, scoreImages, setActivePath, selectAll, selectNone, autoSelectBest } = actions;
   const rawExts = useSettingsStore((s) => s.supportedTypes?.raw);
   const selectedCount = keptPaths.size;
 
@@ -167,9 +169,11 @@ export default function CullGroupsGrid({ suggestions }: { suggestions: CullingSu
     suggestions.similarGroups.forEach((g) => {
       const visMembers = [g.representative.path, ...g.duplicates.map((d) => d.path)].filter(vis);
       if (visMembers.length >= 2) {
-        best.add(visMembers[0]);
+        if (scoresReady) best.add(visMembers[0]); // "best of group" only meaningful once scored
         visMembers.forEach((p, i) => {
-          badge[p] = `${i === 0 ? '★ ' : ''}${(scoreOf[p] ?? 0).toFixed(2)}`;
+          // Show the quality score (with a ★ on the best) only after scoring; before that
+          // just show the filename, since the score is 0/unranked.
+          badge[p] = scoresReady ? `${i === 0 ? '★ ' : ''}${(scoreOf[p] ?? 0).toFixed(2)}` : p.split(/[\\/]/).pop() || '';
           orderedList.push(p);
           members[p] = visMembers;
           lead[p] = visMembers[0];
@@ -191,7 +195,7 @@ export default function CullGroupsGrid({ suggestions }: { suggestions: CullingSu
     visBlurry.forEach(pushSingle);
 
     return { flat: visScanned, groups: groupList, singles: singleList, blurry: visBlurry, ordered: orderedList, badgeOf: badge, bestOf: best, memberOf: members, collapsed: collapsedList, leadOf: lead };
-  }, [suggestions, scannedPaths, visibleSet]);
+  }, [suggestions, scannedPaths, visibleSet, scoresReady]);
 
   const onOpen = (p: string) => {
     setViewerInitialPath(p);
@@ -262,6 +266,17 @@ export default function CullGroupsGrid({ suggestions }: { suggestions: CullingSu
           <span className="text-xs tabular-nums text-text-secondary w-9">{similarity}%</span>
         </div>
 
+        {/* AI scoring (separate from grouping). Scores quality + ranks each group. */}
+        <button
+          onClick={scoreImages}
+          className={`flex items-center gap-1 px-2.5 py-1 text-sm rounded-md border ${
+            scoresReady ? 'border-surface text-text-secondary hover:bg-surface' : 'border-accent text-accent'
+          }`}
+          data-tooltip="Score photo quality and rank each group (sharpness, focus, exposure)"
+        >
+          <Wand2 size={14} /> {scoresReady ? 'Re-score' : 'AI score'}
+        </button>
+
         {/* filters: rating / file type / color label */}
         <ImportFilterBar />
 
@@ -269,8 +284,11 @@ export default function CullGroupsGrid({ suggestions }: { suggestions: CullingSu
 
         <button
           onClick={autoSelectBest}
-          className="flex items-center gap-1 px-2.5 py-1 text-sm rounded-md bg-accent text-button-text hover:opacity-90"
-          data-tooltip="Select the best of each group (and all ungrouped photos)"
+          disabled={!scoresReady}
+          className={`flex items-center gap-1 px-2.5 py-1 text-sm rounded-md ${
+            scoresReady ? 'bg-accent text-button-text hover:opacity-90' : 'bg-surface text-text-secondary cursor-not-allowed'
+          }`}
+          data-tooltip={scoresReady ? 'Select the best of each group (and all ungrouped photos)' : 'Run AI score first'}
         >
           <Sparkles size={14} /> Auto-select best
         </button>

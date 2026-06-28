@@ -11,7 +11,7 @@ use serde::Serialize;
 use std::path::Path;
 use std::sync::Mutex;
 use sysinfo::Disks;
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter};
 use walkdir::WalkDir;
 
 use crate::culling::{
@@ -125,11 +125,12 @@ pub async fn cull_images_for_import(
     crate::culling::run_culling(paths, settings, app_handle, "sd-import-cull").await
 }
 
-/// Analyze the photos once and cache the result. The slow step (decode + hash). Emits
-/// `sd-import-cull-*` progress events. Returns how many analyzed successfully.
+/// Analyze the photos for GROUPING only: decode + perceptual hash, no quality scoring.
+/// This keeps "Group similar" fast — scoring is a separate, opt-in step. Emits
+/// `sd-import-cull-*` progress. Returns how many analyzed successfully.
 #[tauri::command]
 pub async fn analyze_for_import(paths: Vec<String>, app_handle: AppHandle) -> Result<usize, String> {
-    let (analyses, failed) = analyze_paths(paths, app_handle, "sd-import-cull").await?;
+    let (analyses, failed) = analyze_paths(paths, app_handle, "sd-import-cull", false).await?;
     let count = analyses.len();
     *IMPORT_ANALYSIS.lock().unwrap() = Some(analyses);
     *IMPORT_FAILED.lock().unwrap() = failed;
@@ -137,7 +138,8 @@ pub async fn analyze_for_import(paths: Vec<String>, app_handle: AppHandle) -> Re
 }
 
 /// Group the cached analysis at the given similarity threshold. Cheap (no I/O), so the
-/// similarity slider can call it live on every change.
+/// similarity slider can call it live on every change. Ranks each group by quality score
+/// (0 until the scoring step has run, in which case order is just the scan order).
 #[tauri::command]
 pub fn group_for_import(settings: CullingSettings) -> Result<CullingSuggestions, String> {
     let guard = IMPORT_ANALYSIS.lock().unwrap();
@@ -146,6 +148,56 @@ pub fn group_for_import(settings: CullingSettings) -> Result<CullingSuggestions,
         Some(analyses) => Ok(group_analyses(analyses, failed, &settings)),
         None => Ok(CullingSuggestions::default()),
     }
+}
+
+/// Scoring step (the "AI score"): compute quality metrics for the cached photos and fill
+/// them into the cached analysis. Emits `sd-import-score-*` progress. After this, call
+/// `group_for_import` again to get groups ranked + a "best of group" pick. This is where
+/// future AI metrics (eyes-closed, composition, content) will be added.
+#[tauri::command]
+pub async fn score_for_import(app_handle: AppHandle) -> Result<usize, String> {
+    use rayon::prelude::*;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let paths: Vec<String> = {
+        let guard = IMPORT_ANALYSIS.lock().unwrap();
+        match guard.as_ref() {
+            Some(v) => v.iter().map(|d| d.result_path()).collect(),
+            None => return Ok(0),
+        }
+    };
+    if paths.is_empty() {
+        return Ok(0);
+    }
+
+    let settings = crate::app_settings::load_settings(app_handle.clone()).unwrap_or_default();
+    let total = paths.len();
+    let done = Arc::new(AtomicUsize::new(0));
+    let _ = app_handle.emit("sd-import-score-start", total);
+
+    let scores: std::collections::HashMap<String, (f64, f64, f64, f64)> = paths
+        .par_iter()
+        .filter_map(|p| {
+            let n = done.fetch_add(1, Ordering::Relaxed) + 1;
+            let _ = app_handle.emit("sd-import-score-progress", serde_json::json!({ "current": n, "total": total, "stage": "Scoring photos…" }));
+            crate::culling::score_image(p, &settings).ok().map(|s| (p.clone(), s))
+        })
+        .collect();
+
+    {
+        let mut guard = IMPORT_ANALYSIS.lock().unwrap();
+        if let Some(v) = guard.as_mut() {
+            for d in v.iter_mut() {
+                if let Some(&(q, sh, cf, ex)) = scores.get(&d.result_path()) {
+                    d.set_scores(q, sh, cf, ex);
+                }
+            }
+        }
+    }
+
+    let _ = app_handle.emit("sd-import-score-complete", scores.len());
+    Ok(scores.len())
 }
 
 /// Eject / unmount the removable volume at `mount_point` (e.g. after import).

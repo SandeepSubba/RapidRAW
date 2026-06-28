@@ -109,6 +109,18 @@ pub struct ImageAnalysisData {
     result: ImageAnalysisResult,
 }
 
+impl ImageAnalysisData {
+    pub fn result_path(&self) -> String {
+        self.result.path.clone()
+    }
+    pub fn set_scores(&mut self, quality: f64, sharpness: f64, center_focus: f64, exposure: f64) {
+        self.result.quality_score = quality;
+        self.result.sharpness_metric = sharpness;
+        self.result.center_focus_metric = center_focus;
+        self.result.exposure_metric = exposure;
+    }
+}
+
 const WEIGHT_SHARPNESS: f64 = 0.40;
 const WEIGHT_CENTER_FOCUS: f64 = 0.35;
 const WEIGHT_EXPOSURE: f64 = 0.25;
@@ -172,40 +184,47 @@ fn calculate_exposure_metric(image: &GrayImage) -> f64 {
     (1.0f64 - penalty).max(0.0)
 }
 
-fn analyze_image(
-    path: &str,
-    hasher: &image_hasher::Hasher,
-    settings: &crate::app_settings::AppSettings,
-) -> Result<ImageAnalysisData, String> {
-    const ANALYSIS_DIM: u32 = 720; // FIXME: How should we calculate good focus if it's downscaled?!?
-    let img = load_for_analysis(path, settings)?;
+const ANALYSIS_DIM: u32 = 720; // FIXME: How should we calculate good focus if it's downscaled?!?
 
-    let (width, height) = img.dimensions();
-    let thumbnail = img.thumbnail(ANALYSIS_DIM, ANALYSIS_DIM);
-    let gray_thumbnail = thumbnail.to_luma8();
+/// Quality metrics from an already-downscaled thumbnail: (quality, sharpness, center
+/// focus, exposure). This is the "scoring" work — separable from the grouping hash.
+fn quality_metrics(thumbnail: &image::DynamicImage) -> (f64, f64, f64, f64) {
+    let gray = thumbnail.to_luma8();
+    let sharpness_metric = calculate_laplacian_variance(&gray);
+    let exposure_metric = calculate_exposure_metric(&gray);
 
-    let sharpness_metric = calculate_laplacian_variance(&gray_thumbnail);
-    let exposure_metric = calculate_exposure_metric(&gray_thumbnail);
-
-    let (thumb_w, thumb_h) = gray_thumbnail.dimensions();
-    let center_crop = imageops::crop_imm(
-        &gray_thumbnail,
-        thumb_w / 4,
-        thumb_h / 4,
-        thumb_w / 2,
-        thumb_h / 2,
-    )
-    .to_image();
+    let (tw, th) = gray.dimensions();
+    let center_crop = imageops::crop_imm(&gray, tw / 4, th / 4, tw / 2, th / 2).to_image();
     let center_focus_metric = calculate_laplacian_variance(&center_crop);
 
     let normalized_sharpness = ((sharpness_metric + 1.0).log10() / 3.5).min(1.0);
     let normalized_center_focus = ((center_focus_metric + 1.0).log10() / 3.5).min(1.0);
-
     let quality_score = (normalized_sharpness * WEIGHT_SHARPNESS)
         + (normalized_center_focus * WEIGHT_CENTER_FOCUS)
         + (exposure_metric * WEIGHT_EXPOSURE);
 
+    (quality_score, sharpness_metric, center_focus_metric, exposure_metric)
+}
+
+/// Decode + perceptual hash, optionally computing quality metrics. When `compute_score`
+/// is false (the grouping pass) the quality fields are left at 0 — they're filled in
+/// later by the separate scoring step.
+fn analyze_image(
+    path: &str,
+    hasher: &image_hasher::Hasher,
+    settings: &crate::app_settings::AppSettings,
+    compute_score: bool,
+) -> Result<ImageAnalysisData, String> {
+    let img = load_for_analysis(path, settings)?;
+    let (width, height) = img.dimensions();
+    let thumbnail = img.thumbnail(ANALYSIS_DIM, ANALYSIS_DIM);
     let hash = hasher.hash_image(&thumbnail);
+
+    let (quality_score, sharpness_metric, center_focus_metric, exposure_metric) = if compute_score {
+        quality_metrics(&thumbnail)
+    } else {
+        (0.0, 0.0, 0.0, 0.0)
+    };
 
     Ok(ImageAnalysisData {
         hash,
@@ -219,6 +238,17 @@ fn analyze_image(
             height,
         },
     })
+}
+
+/// Score one image (decode + quality metrics, no hash). Used by the standalone scoring
+/// step that fills in scores after grouping.
+pub fn score_image(
+    path: &str,
+    settings: &crate::app_settings::AppSettings,
+) -> Result<(f64, f64, f64, f64), String> {
+    let img = load_for_analysis(path, settings)?;
+    let thumbnail = img.thumbnail(ANALYSIS_DIM, ANALYSIS_DIM);
+    Ok(quality_metrics(&thumbnail))
 }
 
 #[tauri::command]
@@ -241,6 +271,7 @@ pub async fn analyze_paths(
     paths: Vec<String>,
     app_handle: AppHandle,
     channel: &str,
+    compute_score: bool,
 ) -> Result<(Vec<ImageAnalysisData>, Vec<String>), String> {
     if paths.is_empty() {
         return Ok((Vec::new(), Vec::new()));
@@ -268,7 +299,7 @@ pub async fn analyze_paths(
                     stage: "Analyzing images...".to_string(),
                 },
             );
-            analyze_image(path, &hasher, &app_settings).map_err(|e| (path.to_string(), e))
+            analyze_image(path, &hasher, &app_settings, compute_score).map_err(|e| (path.to_string(), e))
         })
         .collect();
 
@@ -377,7 +408,7 @@ pub async fn run_culling(
     if paths.is_empty() {
         return Ok(CullingSuggestions::default());
     }
-    let (analyses, failed) = analyze_paths(paths, app_handle.clone(), channel).await?;
+    let (analyses, failed) = analyze_paths(paths, app_handle.clone(), channel, true).await?;
     let total = analyses.len() + failed.len();
     let _ = app_handle.emit(
         &format!("{channel}-progress"),

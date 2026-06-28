@@ -18,7 +18,7 @@ export interface ImportFileSettings {
   deleteAfterImport: boolean;
 }
 
-export type ImportStage = 'source' | 'scanning' | 'culling' | 'review' | 'importing';
+export type ImportStage = 'source' | 'scanning' | 'culling' | 'scoring' | 'review' | 'importing';
 
 export interface ImportProgress {
   current: number;
@@ -37,7 +37,8 @@ interface ImportState {
   // Capture One–style "Group Overview": grouping is opt-in via a toggle + similarity %.
   enableGroups: boolean;
   similarity: number; // 0–100
-  analysisReady: boolean; // analysis cached on the backend for the current scan
+  analysisReady: boolean; // grouping analysis cached on the backend for the current scan
+  scoresReady: boolean; // quality scoring has run (best-pick + score badges available)
   // Paths the user has chosen to import (keepers). Anything not in this set is skipped.
   keptPaths: Set<string>;
   destinationFolder: string | null;
@@ -80,6 +81,7 @@ const INITIAL: Omit<ImportState, 'setImport' | 'toggleKeep' | 'reset'> = {
   enableGroups: false,
   similarity: 80,
   analysisReady: false,
+  scoresReady: false,
   keptPaths: new Set<string>(),
   destinationFolder: null,
   importSettings: {
@@ -131,6 +133,7 @@ export const useImportStore = create<ImportState>()(
           suggestions: null,
           enableGroups: false,
           analysisReady: false,
+          scoresReady: false,
           keptPaths: new Set<string>(),
           destinationFolder: null,
           alreadyImported: new Set<string>(),

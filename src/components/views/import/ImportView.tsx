@@ -76,10 +76,11 @@ export default function ImportView() {
       case 'scanning':
         return <ProgressPane icon={<Loader2 size={40} className="text-accent animate-spin" />} title="Scanning for images…" />;
       case 'culling':
+      case 'scoring':
         return (
           <ProgressPane
             icon={<Loader2 size={40} className="text-accent animate-spin" />}
-            title={cullProgress?.stage || 'Analyzing images…'}
+            title={cullProgress?.stage || (stage === 'scoring' ? 'Scoring images…' : 'Analyzing images…')}
             current={cullProgress?.current}
             total={cullProgress?.total}
           />
