@@ -1,9 +1,11 @@
-# SD-Card Importer with AI Culling
+# Image Importer with AI Culling
 
 A dedicated, full-screen import workflow for RapidRAW that brings a **Capture One–style
-culling experience** to the moment you plug in an SD card: detect the card, group similar
-shots, score them with AI (sharpness + faces + eyes/gaze/expression), keep the best of each
-burst, and import only the keepers — with ratings, labels, and metadata travelling along.
+culling experience** to importing from **any source** — an SD card, a camera, a USB drive,
+or any folder on disk: detect/pick the source, group similar shots, score them with AI
+(sharpness + faces + eyes/gaze/expression, plus subject focus + composition for non-people
+shots), keep the best of each burst, and import only the keepers — with ratings, labels, and
+metadata travelling along.
 
 It is built as a **mostly self-contained module** that reuses RapidRAW's existing engines
 (similarity culling, the import pipeline, the thumbnail system, the bundled ONNX models)
