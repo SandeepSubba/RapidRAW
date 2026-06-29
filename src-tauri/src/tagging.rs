@@ -108,7 +108,23 @@ fn clip_prompt_probs(
     Ok(probs.row(0).to_vec())
 }
 
-/// Face-aware "people quality" multiplier in [0, 1] for ranking a burst of similar frames.
+/// CLIP zero-shot aesthetic/composition score in [0,1] for non-people photos (landscape,
+/// product, food, still life) — how well-composed/lit/appealing the frame looks. Coarse, but
+/// it adds a composition cue that pure sharpness/exposure can't capture. Reuses the bundled
+/// CLIP model.
+pub fn clip_aesthetic(
+    image: &DynamicImage,
+    clip_session: &Mutex<Session>,
+    tokenizer: &Tokenizer,
+) -> Result<f32> {
+    const PROMPTS: [&str; 2] = [
+        "a sharp, well-composed, well-lit, appealing photograph",
+        "a blurry, poorly composed, badly lit, dull photograph",
+    ];
+    let probs = clip_prompt_probs(image, clip_session, tokenizer, &PROMPTS)?;
+    Ok(probs[0].clamp(0.0, 1.0))
+}
+
 /// Interpretable per-photo people cues, each in [0,1], aggregated over the detected faces.
 /// These feed both the default people score and the "learn from my picks" model.
 #[derive(Clone, Copy, Debug)]

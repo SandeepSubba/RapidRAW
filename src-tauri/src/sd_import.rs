@@ -229,29 +229,41 @@ pub async fn score_for_import(
     // either model can't be loaded (offline / not downloaded).
     let clip = crate::ai_processing::get_or_init_clip_models(&app_handle, &state.ai_state, &state.ai_init_lock).await;
     let face = crate::ai_processing::get_or_init_face_model(&app_handle, &state.ai_state, &state.ai_init_lock).await;
-    let people: std::collections::HashMap<String, crate::tagging::FaceCues> = match (clip, face) {
+    // People shots → per-face cues. Non-people shots (landscape/product/food/still life) →
+    // subject-region sharpness + a CLIP aesthetic/composition cue: [overall, best_region, aesthetic].
+    let mut people: std::collections::HashMap<String, crate::tagging::FaceCues> = std::collections::HashMap::new();
+    let mut nonpeople: std::collections::HashMap<String, [f32; 3]> = std::collections::HashMap::new();
+    match (clip, face) {
         (Ok(clip), Ok(face)) => {
             let face_paths: Vec<&String> = paths.iter().filter(|p| grouped.contains(*p)).collect();
             let face_total = face_paths.len();
-            let mut map = std::collections::HashMap::new();
             for (i, p) in face_paths.iter().enumerate() {
-                let _ = app_handle.emit("sd-import-score-progress", serde_json::json!({ "current": i + 1, "total": face_total, "stage": "Analyzing faces (eyes, gaze, expression)…" }));
+                let _ = app_handle.emit("sd-import-score-progress", serde_json::json!({ "current": i + 1, "total": face_total, "stage": "Analyzing photos (faces, focus, composition)…" }));
                 if let Ok(img) = crate::culling::load_face_image(p, &settings) {
-                    if let Ok(Some(cues)) = crate::tagging::score_faces(&img, &face, &clip.model, &clip.tokenizer) {
-                        map.insert((*p).clone(), cues);
+                    match crate::tagging::score_faces(&img, &face, &clip.model, &clip.tokenizer) {
+                        Ok(Some(cues)) => {
+                            people.insert((*p).clone(), cues);
+                        }
+                        Ok(None) => {
+                            // No faces: rank by subject-region sharpness + composition instead
+                            // of the centre-focus assumption.
+                            let overall = crate::culling::normalized_sharpness_of(&img);
+                            let best = crate::culling::best_region_sharpness(&img);
+                            let aesthetic = crate::tagging::clip_aesthetic(&img, &clip.model, &clip.tokenizer).unwrap_or(0.5);
+                            nonpeople.insert((*p).clone(), [overall, best, aesthetic]);
+                        }
+                        Err(_) => {}
                     }
                 }
             }
-            map
         }
         (clip_res, face_res) => {
             if let Err(e) = clip_res {
-                eprintln!("Face/people scoring skipped (CLIP unavailable): {e}");
+                eprintln!("AI scoring skipped (CLIP unavailable): {e}");
             }
             if let Err(e) = face_res {
-                eprintln!("Face/people scoring skipped (face model unavailable): {e}");
+                eprintln!("AI scoring skipped (face model unavailable): {e}");
             }
-            std::collections::HashMap::new()
         }
     };
 
@@ -268,20 +280,24 @@ pub async fn score_for_import(
                     // For people shots (faces detected) the faces drive the score via the cue
                     // model: technical + face-sharpness + looking-at-camera + expression +
                     // eyes-open. Photos with no faces keep the technical score.
-                    let q_adj = match people.get(&d.result_path()) {
-                        Some(c) => {
-                            let f = [
-                                q,
-                                c.face_sharp as f64,
-                                c.look_mean as f64,
-                                c.look_worst as f64,
-                                c.expr_mean as f64,
-                                c.eyes_worst as f64,
-                            ];
-                            features_map.insert(d.result_path(), f);
-                            model.score(&f, personalize)
-                        }
-                        None => q,
+                    let q_adj = if let Some(c) = people.get(&d.result_path()) {
+                        let f = [
+                            q,
+                            c.face_sharp as f64,
+                            c.look_mean as f64,
+                            c.look_worst as f64,
+                            c.expr_mean as f64,
+                            c.eyes_worst as f64,
+                        ];
+                        features_map.insert(d.result_path(), f);
+                        model.score(&f, personalize)
+                    } else if let Some(&[overall, best, aesthetic]) = nonpeople.get(&d.result_path()) {
+                        // Non-people: subject-region focus + composition, de-emphasising the
+                        // centre-focus assumption that doesn't fit off-centre subjects.
+                        (0.30 * overall as f64 + 0.30 * best as f64 + 0.20 * ex + 0.20 * aesthetic as f64)
+                            .clamp(0.0, 1.0)
+                    } else {
+                        q
                     };
                     d.set_scores(q_adj, sh, cf, ex);
                 }

@@ -271,6 +271,28 @@ pub fn normalized_sharpness_of(image: &image::DynamicImage) -> f32 {
     (((var + 1.0).log10() / 3.5).min(1.0)) as f32
 }
 
+/// Sharpness of the *sharpest region* of the image (max over a 3×3 grid of the Laplacian
+/// variance), normalized to [0,1]. A position-agnostic "is the subject in focus somewhere"
+/// cue — better than center-focus for off-centre subjects (landscapes, product, food, still
+/// life) where the point of interest isn't in the middle.
+pub fn best_region_sharpness(image: &image::DynamicImage) -> f32 {
+    let gray = image.to_luma8();
+    let (w, h) = gray.dimensions();
+    if w < 9 || h < 9 {
+        return normalized_sharpness_of(image);
+    }
+    let (gx, gy) = (3u32, 3u32);
+    let (cw, ch) = (w / gx, h / gy);
+    let mut best = 0.0f64;
+    for ry in 0..gy {
+        for rx in 0..gx {
+            let cell = imageops::crop_imm(&gray, rx * cw, ry * ch, cw, ch).to_image();
+            best = best.max(calculate_laplacian_variance(&cell));
+        }
+    }
+    (((best + 1.0).log10() / 3.5).min(1.0)) as f32
+}
+
 const FACE_DIM: u32 = 1920; // large enough that cropped faces keep detail for CLIP gaze/eyes
 
 /// Decode + downscale to a larger thumbnail for the face/eye pass. Faces in a group shot

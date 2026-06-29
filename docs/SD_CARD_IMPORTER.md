@@ -107,9 +107,22 @@ photos that belong to a similar group (singles are auto-kept regardless):
 **Final score (people shots):**
 `0.25·technical + 0.50·face(eyes/gaze/expression) + 0.25·face-sharpness`
 
-Photos with **no faces** (landscapes, objects) keep the pure technical score. If the face
-or CLIP model can't be loaded (offline / not downloaded), scoring **degrades gracefully**
-to technical-only.
+**Non-people shots** (landscape, product, food, still life — no faces detected) get a
+dedicated score instead of the centre-biased technical metric:
+
+`0.30·overall-sharpness + 0.30·subject-region-sharpness + 0.20·exposure + 0.20·aesthetic`
+
+- **Subject-region sharpness** = the sharpest cell of a 3×3 grid, so the in-focus subject is
+  rewarded *wherever it sits* in the frame (not just the centre) — the key fix for off-centre
+  subjects and landscapes.
+- **Aesthetic** = a CLIP zero-shot "well-composed, well-lit, appealing" vs "blurry, poorly
+  composed, dull" cue (reuses the bundled CLIP model, no extra download).
+
+For near-duplicate bursts the ranking is driven mostly by subject sharpness + exposure (what
+you want for product/food/still life); the aesthetic term mainly breaks ties on composition.
+
+If the face or CLIP model can't be loaded (offline / not downloaded), scoring **degrades
+gracefully** to the plain technical metric.
 
 > **Note on gaze:** distinguishing two near-identical frames purely on *subtle gaze* is at
 > the edge of what whole-face CLIP can do. The weighting and high-res crops help, but it is
