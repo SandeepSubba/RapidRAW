@@ -13,6 +13,108 @@ use little_exif::metadata::Metadata;
 use little_exif::rational::{iR64, uR64};
 use rawler::decoders::RawMetadata;
 
+/// Decode an EXIF `UserComment` (tag 0x9286) into displayable text.
+///
+/// Per the EXIF spec the value is an 8-byte character-code header
+/// (`ASCII\0\0\0`, `UNICODE\0`, `JIS\0\0\0\0\0`, or all-zero = undefined)
+/// followed by the comment. Cameras such as the Canon 5D Mark III allocate the
+/// buffer but leave it padded with NUL bytes; returning `None` for those keeps
+/// the "Comments" field empty instead of showing a hex dump of zero bytes.
+fn decode_user_comment(bytes: &[u8]) -> Option<String> {
+    if bytes.is_empty() {
+        return None;
+    }
+
+    let (code, payload) = if bytes.len() >= 8 {
+        bytes.split_at(8)
+    } else {
+        (&[][..], bytes)
+    };
+
+    let text: String = if code == b"UNICODE\0" {
+        let decode = |big_endian: bool| -> String {
+            let units = payload.chunks_exact(2).map(|c| {
+                if big_endian {
+                    u16::from_be_bytes([c[0], c[1]])
+                } else {
+                    u16::from_le_bytes([c[0], c[1]])
+                }
+            });
+            char::decode_utf16(units)
+                .map(|r| r.unwrap_or('\u{FFFD}'))
+                .collect()
+        };
+        // EXIF doesn't record the UTF-16 byte order, so keep whichever decode
+        // produced fewer replacement characters.
+        let le = decode(false);
+        let be = decode(true);
+        if be.matches('\u{FFFD}').count() < le.matches('\u{FFFD}').count() {
+            be
+        } else {
+            le
+        }
+    } else {
+        // ASCII / JIS / undefined: treat the payload as Latin-1 bytes.
+        payload.iter().map(|&b| b as char).collect()
+    };
+
+    let trimmed = text.trim_matches(|c: char| c == '\u{0}' || c.is_whitespace());
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+/// Repair a `UserComment` value cached by an older import that stored the raw
+/// EXIF bytes as a hex dump (e.g. `0x000000…` for the Canon empty-comment
+/// buffer, or `0x415343494900…` for a real comment). The hex is parsed back
+/// into bytes and decoded properly: real text replaces the dump, empty buffers
+/// are dropped. Returns `true` if `map` was modified.
+fn heal_cached_user_comment(map: &mut HashMap<String, String>) -> bool {
+    let Some(raw) = map.get("UserComment") else {
+        return false;
+    };
+
+    // Only touch the hex-dump artifact `0x<hex>`. Large buffers are stored
+    // truncated by `truncate_large_exif` (`0x000…000`), so drop the `...` marker.
+    let Some(body) = raw.strip_prefix("0x") else {
+        return false;
+    };
+    let truncated = body.contains("...");
+    let hex = body.replace("...", "");
+    if hex.is_empty() || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return false;
+    }
+
+    // An all-zero dump is Canon's empty padding buffer regardless of truncation.
+    if hex.bytes().all(|b| b == b'0') {
+        map.remove("UserComment");
+        return true;
+    }
+
+    // A truncated non-zero dump can't be reconstructed exactly; leave it rather
+    // than risk corrupting a genuine comment.
+    if truncated || hex.len() % 2 != 0 {
+        return false;
+    }
+
+    let bytes: Vec<u8> = (0..hex.len())
+        .step_by(2)
+        .filter_map(|i| u8::from_str_radix(&hex[i..i + 2], 16).ok())
+        .collect();
+
+    match decode_user_comment(&bytes) {
+        Some(comment) => {
+            map.insert("UserComment".to_string(), comment);
+        }
+        None => {
+            map.remove("UserComment");
+        }
+    }
+    true
+}
+
 pub fn truncate_large_exif(value: &str) -> String {
     if value.len() <= 500 {
         return value.to_string();
@@ -332,6 +434,27 @@ pub fn extract_metadata(file_bytes: &[u8]) -> Option<HashMap<String, String>> {
                         fmt_date_str(field.display_value().to_string()),
                     );
                 }
+                exif::Tag::UserComment => {
+                    let decoded = match field.value {
+                        // Spec-compliant: UNDEFINED with an 8-byte charset header.
+                        exif::Value::Undefined(ref v, _) => decode_user_comment(v),
+                        // Non-standard ASCII writers store the text directly (no header).
+                        exif::Value::Ascii(ref v) => {
+                            let s: String =
+                                v.iter().flatten().map(|&b| b as char).collect();
+                            let t = s.trim_matches(|c: char| c == '\u{0}' || c.is_whitespace());
+                            if t.is_empty() {
+                                None
+                            } else {
+                                Some(t.to_string())
+                            }
+                        }
+                        _ => None,
+                    };
+                    if let Some(comment) = decoded {
+                        map.insert("UserComment".to_string(), comment);
+                    }
+                }
                 _ => {
                     let val = field.display_value().with_unit(&exif_obj).to_string();
                     if !val.trim().is_empty() {
@@ -392,7 +515,10 @@ pub fn extract_metadata(file_bytes: &[u8]) -> Option<HashMap<String, String>> {
         insert_if_present("ImageNumber", v.to_string());
     }
     if let Some(v) = exif.user_comment {
-        insert_if_present("UserComment", v);
+        let cleaned = v.trim_matches(|c: char| c == '\u{0}' || c.is_whitespace());
+        if !cleaned.is_empty() {
+            insert_if_present("UserComment", cleaned.to_string());
+        }
     }
 
     if let Some(v) = exif.date_time_original {
@@ -1096,15 +1222,21 @@ fn save_primary_metadata(image_path: &Path, metadata: &ImageMetadata) -> std::io
 
 pub fn read_rrexif_sidecar(image_path: &Path) -> Option<HashMap<String, String>> {
     let metadata = load_primary_metadata(image_path);
-    if let Some(exif) = metadata.exif {
+    if let Some(mut exif) = metadata.exif {
+        if heal_cached_user_comment(&mut exif) {
+            let mut healed = load_primary_metadata(image_path);
+            healed.exif = Some(exif.clone());
+            let _ = save_primary_metadata(image_path, &healed);
+        }
         return Some(exif);
     }
 
     let legacy = get_rrexif_path(image_path);
     if legacy.exists()
         && let Ok(content) = fs::read_to_string(&legacy)
-        && let Ok(map) = serde_json::from_str::<HashMap<String, String>>(&content)
+        && let Ok(mut map) = serde_json::from_str::<HashMap<String, String>>(&content)
     {
+        heal_cached_user_comment(&mut map);
         let mut migrated = load_primary_metadata(image_path);
         migrated.exif = Some(map.clone());
         if save_primary_metadata(image_path, &migrated).is_ok() {
