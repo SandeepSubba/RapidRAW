@@ -50,6 +50,7 @@ export enum Invokes {
   CullImagesForImport = 'cull_images_for_import',
   EjectDrive = 'eject_drive',
   FindExistingInDestination = 'find_existing_in_destination',
+  GetCaptureTimes = 'get_capture_times',
   GetImportPreview = 'get_import_preview',
   GroupForImport = 'group_for_import',
   ScoreForImport = 'score_for_import',

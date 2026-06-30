@@ -1,7 +1,11 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { CullingSettings, CullingSuggestions } from '../components/ui/AppProperties';
+import { CullingSettings, CullingSuggestions, SortDirection } from '../components/ui/AppProperties';
 import { FileTypeFilter } from '../components/views/import/importFilters';
+
+// What to order the culling grid by. 'date' uses EXIF capture time (loaded after a scan);
+// 'quality' only becomes meaningful once scoring has run.
+export type ImportSortKey = 'name' | 'date' | 'quality';
 
 export interface DriveInfo {
   name: string;
@@ -63,6 +67,11 @@ interface ImportState {
   // View filters by assigned metadata. rating: 0=all, -1=unrated, 1-5=N+ stars.
   filterRating: number;
   filterColors: string[];
+  // Display ordering for the culling grid (name/date/quality, ascending/descending).
+  sortKey: ImportSortKey;
+  sortOrder: SortDirection;
+  // EXIF capture time (epoch seconds) per scanned path; loaded after a scan for date sorting.
+  captureTimes: Record<string, number>;
   error: string | null;
 
   setImport: (updater: Partial<ImportState> | ((state: ImportState) => Partial<ImportState>)) => void;
@@ -107,6 +116,9 @@ const INITIAL: Omit<ImportState, 'setImport' | 'toggleKeep' | 'reset'> = {
   activePath: null,
   filterRating: 0,
   filterColors: [],
+  sortKey: 'name',
+  sortOrder: SortDirection.Ascending,
+  captureTimes: {},
   error: null,
 };
 
@@ -137,6 +149,7 @@ export const useImportStore = create<ImportState>()(
           drives: [],
           sourcePath: null,
           scannedPaths: [],
+          captureTimes: {},
           cullProgress: null,
           suggestions: null,
           enableGroups: false,
@@ -166,6 +179,8 @@ export const useImportStore = create<ImportState>()(
         groupMode: state.groupMode,
         timeGapSeconds: state.timeGapSeconds,
         fileTypeFilter: state.fileTypeFilter,
+        sortKey: state.sortKey,
+        sortOrder: state.sortOrder,
       }),
     },
   ),

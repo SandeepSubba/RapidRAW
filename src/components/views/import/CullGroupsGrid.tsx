@@ -4,7 +4,7 @@ import { Check, Layers, Image as ImageIcon, Droplet, Grid2x2, Eye, Sparkles } fr
 import { useImportStore } from '../../../store/useImportStore';
 import { useSettingsStore } from '../../../store/useSettingsStore';
 import { useSdImportActions } from '../../../hooks/useSdImportActions';
-import { CullingSuggestions } from '../../../components/ui/AppProperties';
+import { CullingSuggestions, SortDirection } from '../../../components/ui/AppProperties';
 import { computeVisible } from './importFilters';
 import ImportFilterBar from './ImportFilterBar';
 import { RatingColor } from './RatingColor';
@@ -103,6 +103,9 @@ export default function CullGroupsGrid({ suggestions }: { suggestions: CullingSu
     ratings,
     colors,
     activePath,
+    sortKey,
+    sortOrder,
+    captureTimes,
     toggleKeep,
   } = useImportStore(
     useShallow((s) => ({
@@ -120,6 +123,9 @@ export default function CullGroupsGrid({ suggestions }: { suggestions: CullingSu
       ratings: s.ratings,
       colors: s.colors,
       activePath: s.activePath,
+      sortKey: s.sortKey,
+      sortOrder: s.sortOrder,
+      captureTimes: s.captureTimes,
       toggleKeep: s.toggleKeep,
     })),
   );
@@ -143,33 +149,49 @@ export default function CullGroupsGrid({ suggestions }: { suggestions: CullingSu
   const gridScrollRef = useRef<HTMLDivElement>(null);
 
   // Reading order + grouping lookups + render-ready arrays, all honouring the file-type
-  // filter (hidden paths are dropped; a group that loses members collapses to a single).
+  // filter (hidden paths are dropped; a group that loses members collapses to a single)
+  // and the user's chosen sort order (by file name or — once scored — quality).
   const { flat, groups, singles, blurry, ordered, badgeOf, bestOf, memberOf, collapsed, leadOf } = useMemo(() => {
-    const orderedList: string[] = [];
+    const fileName = (p: string) => p.split(/[\\/]/).pop() || p;
     const badge: Record<string, string> = {};
     const best = new Set<string>();
     const members: Record<string, string[]> = {};
     const lead: Record<string, string> = {};
-    const collapsedList: { lead: string; count: number }[] = [];
     const visScanned = scannedPaths.filter(vis);
 
-    const pushSingle = (p: string) => {
-      orderedList.push(p);
-      members[p] = [p];
-      lead[p] = p;
-      collapsedList.push({ lead: p, count: 1 });
+    // Quality scores keyed by path (only populated once an analysis exists).
+    const scoreOf: Record<string, number> = {};
+    if (suggestions) {
+      suggestions.similarGroups.forEach((g) => {
+        scoreOf[g.representative.path] = g.representative.qualityScore;
+        g.duplicates.forEach((d) => (scoreOf[d.path] = d.qualityScore));
+      });
+    }
+
+    // User-selected comparator, with file name as the tiebreaker. Quality/date degrade
+    // gracefully to the name order when their data isn't loaded yet (before scoring, or
+    // before EXIF capture times have finished loading after a scan).
+    const dir = sortOrder === SortDirection.Ascending ? 1 : -1;
+    const cmp = (a: string, b: string) => {
+      let primary = 0;
+      if (sortKey === 'quality') primary = (scoreOf[a] ?? -1) - (scoreOf[b] ?? -1);
+      else if (sortKey === 'date') primary = (captureTimes[a] ?? 0) - (captureTimes[b] ?? 0);
+      if (primary !== 0) return primary * dir;
+      return fileName(a).localeCompare(fileName(b), undefined, { numeric: true }) * dir;
     };
 
     if (!suggestions) {
-      visScanned.forEach(pushSingle);
-      return { flat: visScanned, groups: [] as string[][], singles: visScanned, blurry: [] as string[], ordered: orderedList, badgeOf: badge, bestOf: best, memberOf: members, collapsed: collapsedList, leadOf: lead };
+      const sorted = [...visScanned].sort(cmp);
+      sorted.forEach((p) => {
+        members[p] = [p];
+        lead[p] = p;
+      });
+      const collapsedList = sorted.map((p) => ({ lead: p, count: 1 }));
+      return { flat: sorted, groups: [] as string[][], singles: sorted, blurry: [] as string[], ordered: sorted, badgeOf: badge, bestOf: best, memberOf: members, collapsed: collapsedList, leadOf: lead };
     }
 
-    const scoreOf: Record<string, number> = {};
     const grouped = new Set<string>();
     suggestions.similarGroups.forEach((g) => {
-      scoreOf[g.representative.path] = g.representative.qualityScore;
-      g.duplicates.forEach((d) => (scoreOf[d.path] = d.qualityScore));
       [g.representative.path, ...g.duplicates.map((d) => d.path)].forEach((p) => grouped.add(p));
     });
 
@@ -183,35 +205,48 @@ export default function CullGroupsGrid({ suggestions }: { suggestions: CullingSu
     const groupList: string[][] = [];
     const reducedSingles: string[] = [];
     suggestions.similarGroups.forEach((g) => {
-      const visMembers = [g.representative.path, ...g.duplicates.map((d) => d.path)].filter(vis);
+      const rep = g.representative.path; // backend's best pick — anchors "best of group" + stack lead
+      const visMembers = [rep, ...g.duplicates.map((d) => d.path)].filter(vis);
       if (visMembers.length >= 2) {
-        if (scoresReady) best.add(visMembers[0]); // "best of group" only meaningful once scored
-        visMembers.forEach((p, i) => {
+        if (scoresReady) best.add(rep); // "best of group" only meaningful once scored
+        const sortedMembers = [...visMembers].sort(cmp);
+        sortedMembers.forEach((p) => {
           // After scoring, show the 0–5 quality grade ("Q" distinguishes it from the manual
           // 1–5 star rating); before scoring, just the filename since the score is unranked.
-          badge[p] = scoresReady ? `Q ${to5(scoreOf[p] ?? 0)}` : p.split(/[\\/]/).pop() || '';
-          orderedList.push(p);
-          members[p] = visMembers;
-          lead[p] = visMembers[0];
+          badge[p] = scoresReady ? `Q ${to5(scoreOf[p] ?? 0)}` : fileName(p);
+          members[p] = sortedMembers;
+          lead[p] = rep;
         });
-        collapsedList.push({ lead: visMembers[0], count: visMembers.length });
-        groupList.push(visMembers);
+        groupList.push(sortedMembers);
       } else if (visMembers.length === 1) {
         reducedSingles.push(visMembers[0]);
       }
     });
+    // Order the groups themselves by their representative.
+    groupList.sort((g1, g2) => cmp(lead[g1[0]], lead[g2[0]]));
 
     const blurrySet = new Set(suggestions.blurryImages.map((b) => b.path));
     suggestions.blurryImages.forEach((b) => (badge[b.path] = `sharp ${b.sharpnessMetric.toFixed(0)}`));
-    const visBlurry = suggestions.blurryImages.filter((b) => vis(b.path)).map((b) => b.path);
+    const visBlurry = suggestions.blurryImages.filter((b) => vis(b.path)).map((b) => b.path).sort(cmp);
 
     const ungrouped = visScanned.filter((p) => !grouped.has(p) && !blurrySet.has(p));
-    const singleList = [...ungrouped, ...reducedSingles];
-    singleList.forEach(pushSingle);
-    visBlurry.forEach(pushSingle);
+    const singleList = [...ungrouped, ...reducedSingles].sort(cmp);
+    [...singleList, ...visBlurry].forEach((p) => {
+      members[p] = [p];
+      lead[p] = p;
+    });
+
+    // Collapsed-stack order (viewer) and reading order (keyboard nav) follow the final
+    // on-screen order: groups, then singles, then blurry.
+    const collapsedList = [
+      ...groupList.map((g) => ({ lead: lead[g[0]], count: g.length })),
+      ...singleList.map((p) => ({ lead: p, count: 1 })),
+      ...visBlurry.map((p) => ({ lead: p, count: 1 })),
+    ];
+    const orderedList = [...groupList.flat(), ...singleList, ...visBlurry];
 
     return { flat: visScanned, groups: groupList, singles: singleList, blurry: visBlurry, ordered: orderedList, badgeOf: badge, bestOf: best, memberOf: members, collapsed: collapsedList, leadOf: lead };
-  }, [suggestions, scannedPaths, visibleSet, scoresReady, alreadyImported]);
+  }, [suggestions, scannedPaths, visibleSet, scoresReady, alreadyImported, sortKey, sortOrder, captureTimes]);
 
   const onOpen = (p: string) => {
     setViewerInitialPath(p);
@@ -416,7 +451,7 @@ export default function CullGroupsGrid({ suggestions }: { suggestions: CullingSu
           )}
         </div>
 
-        {/* filters: rating / file type / color label */}
+        {/* filters: sort order + rating / file type / color label */}
         <ImportFilterBar />
 
         <div className="h-5 w-px bg-surface" />

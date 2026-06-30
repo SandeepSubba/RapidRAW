@@ -2315,6 +2315,7 @@ pub fn run() {
             culling::cull_images,
             sd_import::list_source_drives,
             sd_import::scan_source_images,
+            sd_import::get_capture_times,
             sd_import::cull_images_for_import,
             sd_import::analyze_for_import,
             sd_import::group_for_import,
