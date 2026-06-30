@@ -11,6 +11,7 @@ import { Adjustments, AiPatch, MaskContainer } from '../../utils/adjustments';
 import { calculateCenteredCrop } from '../../utils/cropUtils';
 import EditorToolbar from './editor/EditorToolbar';
 import ImageCanvas from './editor/ImageCanvas';
+import GuidedKeystoneOverlay from './editor/GuidedKeystoneOverlay';
 import { Mask, SubMask } from './right/Masks';
 import { Panel, TransformState, Invokes } from '../ui/AppProperties';
 import Text from '../ui/Text';
@@ -102,6 +103,7 @@ export default function Editor({ onBackToLibrary, onContextMenu, transformWrappe
   const isWbPickerActive = useEditorStore((s) => s.isWbPickerActive);
   const liveRotation = useEditorStore((s) => s.liveRotation);
   const brushSettings = useEditorStore((s) => s.brushSettings);
+  const guidedKeystoneActive = useEditorStore((s) => s.guidedKeystoneActive);
   const activeMaskContainerId = useEditorStore((s) => s.activeMaskContainerId);
   const activeMaskId = useEditorStore((s) => s.activeMaskId);
   const activeAiPatchContainerId = useEditorStore((s) => s.activeAiPatchContainerId);
@@ -2066,6 +2068,7 @@ export default function Editor({ onBackToLibrary, onContextMenu, transformWrappe
             transformState={transformState}
             hasRenderedFirstFrame={hasRenderedFirstFrame}
           />
+          {guidedKeystoneActive && <GuidedKeystoneOverlay renderSize={imageRenderSize} />}
         </div>
       </div>
     </div>

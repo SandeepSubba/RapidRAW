@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Aperture,
+  Check,
   FlipHorizontal,
   FlipVertical,
   Grid3x3,
+  PencilRuler,
   RectangleHorizontal,
   RectangleVertical,
   RotateCcw,
@@ -24,6 +26,7 @@ import Slider from '../../ui/Slider';
 import { TEXT_COLOR_KEYS, TextColors, TextVariants, TextWeights } from '../../../types/typography';
 import { useEditorStore } from '../../../store/useEditorStore';
 import { useEditorActions } from '../../../hooks/useEditorActions';
+import { solveKeystone } from '../../../utils/keystone';
 
 const BASE_RATIO = 1.618;
 const ORIGINAL_RATIO = 0;
@@ -58,6 +61,8 @@ export default function CropPanel() {
   const adjustments = useEditorStore((s) => s.adjustments);
   const isStraightenActive = useEditorStore((s) => s.isStraightenActive);
   const activeOverlay = useEditorStore((s) => s.overlayMode);
+  const guidedKeystoneActive = useEditorStore((s) => s.guidedKeystoneActive);
+  const keystoneLines = useEditorStore((s) => s.keystoneLines);
   const setEditor = useEditorStore((s) => s.setEditor);
   const { setAdjustments } = useEditorActions();
   const [customW, setCustomW] = useState('');
@@ -176,7 +181,7 @@ export default function CropPanel() {
 
   useEffect(() => {
     return () => {
-      setEditor({ liveRotation: null });
+      setEditor({ liveRotation: null, guidedKeystoneActive: false, keystoneLines: [] });
     };
   }, [setEditor]);
 
@@ -431,6 +436,34 @@ export default function CropPanel() {
   const setTransform = (key: string, value: number) =>
     setAdjustments((prev: Adjustments) => ({ ...prev, [key]: value }));
 
+  const isVerticalGuide = (l: { x1: number; y1: number; x2: number; y2: number }) =>
+    Math.abs(l.y2 - l.y1) >= Math.abs(l.x2 - l.x1);
+  const verticalGuideCount = keystoneLines.filter(isVerticalGuide).length;
+  const horizontalGuideCount = keystoneLines.length - verticalGuideCount;
+  const canApplyGuided = verticalGuideCount >= 2 || horizontalGuideCount >= 2;
+
+  const enterGuided = () =>
+    setAdjustments((prev: Adjustments) => {
+      // Draw on the un-keystoned image: clear perspective, then enter guided mode.
+      setEditor({ guidedKeystoneActive: true, keystoneLines: [] });
+      return { ...prev, transformVertical: 0, transformHorizontal: 0, transformScale: 100 };
+    });
+
+  const exitGuided = () => setEditor({ guidedKeystoneActive: false, keystoneLines: [] });
+
+  const applyGuided = () => {
+    const verticalGuides = keystoneLines.filter(isVerticalGuide);
+    const horizontalGuides = keystoneLines.filter((l) => !isVerticalGuide(l));
+    const res = solveKeystone({ verticalGuides, horizontalGuides, width: 1, height: 1 });
+    setAdjustments((prev: Adjustments) => ({
+      ...prev,
+      transformVertical: res.transformVertical,
+      transformHorizontal: res.transformHorizontal,
+      transformScale: res.transformScale,
+    }));
+    setEditor({ guidedKeystoneActive: false, keystoneLines: [] });
+  };
+
   const handleFineRotationChange = (e: any) => {
     const newFineRotation = parseFloat(e.target.value);
     if (isRotationActive) {
@@ -677,6 +710,18 @@ export default function CropPanel() {
                 {t('modals.transform.perspective')}
                 <div className="flex items-center gap-2">
                   <button
+                    className={clsx(
+                      'p-1.5 rounded-md transition-colors',
+                      guidedKeystoneActive
+                        ? 'bg-accent text-button-text'
+                        : 'text-text-secondary hover:bg-card-active hover:text-text-primary',
+                    )}
+                    onClick={() => (guidedKeystoneActive ? exitGuided() : enterGuided())}
+                    data-tooltip="Guided keystone: draw 2 lines that should be vertical and/or horizontal"
+                  >
+                    <PencilRuler size={16} />
+                  </button>
+                  <button
                     className="p-1.5 rounded-md hover:bg-surface transition-colors"
                     onClick={() => setIsTransformModalOpen(true)}
                     data-tooltip={t('editor.crop.tooltips.transform')}
@@ -693,6 +738,44 @@ export default function CropPanel() {
                   </button>
                 </div>
               </Text>
+              {guidedKeystoneActive && (
+                <div className="bg-surface p-3 rounded-lg space-y-3">
+                  <Text variant={TextVariants.small} color={TextColors.secondary}>
+                    Drag lines over edges that should be vertical (≥2) or horizontal (≥2). Blue = vertical, green =
+                    horizontal.
+                  </Text>
+                  <Text variant={TextVariants.small} color={TextColors.secondary}>
+                    {`Vertical: ${verticalGuideCount} · Horizontal: ${horizontalGuideCount}`}
+                  </Text>
+                  <div className="flex items-center gap-2">
+                    <button
+                      className="flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-md bg-accent text-button-text disabled:opacity-50 disabled:cursor-default transition-opacity"
+                      onClick={applyGuided}
+                      disabled={!canApplyGuided}
+                    >
+                      <Check size={14} />
+                      <Text color={TextColors.button} variant={TextVariants.small}>
+                        Apply
+                      </Text>
+                    </button>
+                    <button
+                      className="p-1.5 rounded-md text-text-secondary hover:bg-card-active hover:text-text-primary transition-colors disabled:opacity-50 disabled:cursor-default"
+                      onClick={() => setEditor({ keystoneLines: [] })}
+                      data-tooltip={t('modals.transform.resetTooltip')}
+                      disabled={keystoneLines.length === 0}
+                    >
+                      <RotateCcw size={14} />
+                    </button>
+                    <button
+                      className="p-1.5 rounded-md text-text-secondary hover:bg-card-active hover:text-text-primary transition-colors"
+                      onClick={exitGuided}
+                      data-tooltip="Cancel"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                </div>
+              )}
               {PERSPECTIVE_GROUPS.map((group, gi) => (
                 <div key={gi} className="bg-surface px-4 pt-3 pb-4 rounded-lg space-y-3">
                   {group.heading && (
