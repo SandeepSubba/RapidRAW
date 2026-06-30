@@ -35,6 +35,30 @@ export function useLibraryActions(handleImageSelect?: (path: string) => void) {
     });
   }, []);
 
+  // Batch-rotate the selected library images a quarter turn (direction > 0 = clockwise).
+  // Rotation is relative/per-image, so it goes through the dedicated backend command rather
+  // than apply_adjustments_to_paths. Thumbnails refresh via the `thumbnail-generated` events.
+  const handleRotateSelected = useCallback((direction: number, paths?: string[]) => {
+    const { multiSelectedPaths, libraryActivePath } = useLibraryStore.getState();
+    const { selectedImage } = useEditorStore.getState();
+
+    const pathsToRotate =
+      paths ||
+      (multiSelectedPaths.length > 0
+        ? multiSelectedPaths
+        : libraryActivePath
+          ? [libraryActivePath]
+          : selectedImage
+            ? [selectedImage.path]
+            : []);
+    if (pathsToRotate.length === 0) return;
+
+    invoke(Invokes.ApplyOrientationToPaths, { paths: pathsToRotate, direction }).catch((err) => {
+      console.error(err);
+      toast.error(`Failed to rotate selected images: ${err}`);
+    });
+  }, []);
+
   const handleSetColorLabel = useCallback(async (color: string | null, paths?: string[]) => {
     const { multiSelectedPaths, libraryActivePath, imageList, setLibrary } = useLibraryStore.getState();
     const { selectedImage } = useEditorStore.getState();
@@ -386,6 +410,7 @@ export function useLibraryActions(handleImageSelect?: (path: string) => void) {
 
   return {
     handleRate,
+    handleRotateSelected,
     handleSetColorLabel,
     handleTagsChanged,
     handleUpdateExif,

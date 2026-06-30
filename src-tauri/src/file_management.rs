@@ -2242,6 +2242,115 @@ pub async fn apply_adjustments_to_paths(
     Ok(())
 }
 
+/// Batch-rotate images by a quarter turn each. Unlike `apply_adjustments_to_paths` (which
+/// merges one uniform adjustment object into every image), rotation is RELATIVE and per-image:
+/// each photo's own `orientationSteps` is read and incremented, its aspect ratio is swapped
+/// (portrait <-> landscape), and any fine-rotation angle and crop are reset (a quarter turn
+/// invalidates the previous crop region) — matching the single-image editor `handleRotate`.
+/// `direction > 0` rotates clockwise, `direction < 0` counter-clockwise.
+#[tauri::command]
+pub async fn apply_orientation_to_paths(
+    paths: Vec<String>,
+    direction: i32,
+    app_handle: AppHandle,
+) -> Result<(), String> {
+    let state = app_handle.state::<AppState>();
+    add_to_thumbnail_queue(&state, paths.len(), &app_handle);
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let settings = load_settings(app_handle.clone()).unwrap_or_default();
+        let enable_xmp_sync = settings.enable_xmp_sync.unwrap_or(false);
+        let create_xmp_if_missing = settings.create_xmp_if_missing.unwrap_or(false);
+
+        let increment: u64 = if direction > 0 { 1 } else { 3 }; // +1 turn CW, +3 (== -1) CCW
+
+        paths.par_iter().for_each(|path| {
+            let (_, sidecar_path) = parse_virtual_path(path);
+
+            let mut existing_metadata = crate::exif_processing::load_sidecar(&sidecar_path);
+
+            let mut new_adjustments = existing_metadata.adjustments;
+            if new_adjustments.is_null() {
+                new_adjustments = serde_json::json!({});
+            }
+
+            if let Some(map) = new_adjustments.as_object_mut() {
+                let current = map
+                    .get("orientationSteps")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                map.insert(
+                    "orientationSteps".to_string(),
+                    serde_json::json!((current + increment) % 4),
+                );
+
+                // Swap aspect ratio when one is set, else clear it — same as handleRotate.
+                let new_aspect = match map.get("aspectRatio").and_then(|v| v.as_f64()) {
+                    Some(a) if a != 0.0 => serde_json::json!(1.0 / a),
+                    _ => serde_json::Value::Null,
+                };
+                map.insert("aspectRatio".to_string(), new_aspect);
+
+                map.insert("rotation".to_string(), serde_json::json!(0));
+                map.insert("crop".to_string(), serde_json::Value::Null);
+            }
+
+            existing_metadata.adjustments = new_adjustments;
+
+            if let Ok(json_string) = serde_json::to_string_pretty(&existing_metadata) {
+                let _ = std::fs::write(&sidecar_path, json_string);
+            }
+
+            if enable_xmp_sync {
+                let source_path = parse_virtual_path(path).0;
+                sync_metadata_to_xmp(&source_path, &existing_metadata, create_xmp_if_missing);
+            }
+        });
+
+        // Regenerate thumbnails so the rotation shows in the grid (same flow as the other
+        // apply-to-paths commands; emits `thumbnail-generated` per image).
+        let state = app_handle.state::<AppState>();
+        let thumb_cache_dir = match resolve_thumbnail_cache_dir(&app_handle) {
+            Ok(dir) => dir,
+            Err(e) => {
+                log::warn!("Unable to initialize thumbnail cache directory: {}", e);
+                for path in &paths {
+                    emit_thumbnail_cache_setup_error(&app_handle, path, &e);
+                }
+                for _ in 0..paths.len() {
+                    increment_thumbnail_progress(&state, &app_handle);
+                }
+                return;
+            }
+        };
+
+        let gpu_context = gpu_processing::get_or_init_gpu_context(&state, &app_handle).ok();
+
+        paths.par_iter().for_each(|path_str| {
+            let result = generate_single_thumbnail_and_cache(
+                path_str,
+                &thumb_cache_dir,
+                gpu_context.as_ref(),
+                None,
+                true,
+                &app_handle,
+                &settings,
+            );
+
+            if let Some((thumbnail_data, rating, is_edited)) = result {
+                let _ = app_handle.emit(
+                    "thumbnail-generated",
+                    serde_json::json!({ "path": path_str, "data": thumbnail_data, "rating": rating, "is_edited": is_edited  }),
+                );
+            }
+
+            increment_thumbnail_progress(&state, &app_handle);
+        });
+    });
+
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn reset_adjustments_for_paths(
     paths: Vec<String>,
