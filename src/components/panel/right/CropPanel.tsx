@@ -29,6 +29,16 @@ const BASE_RATIO = 1.618;
 const ORIGINAL_RATIO = 0;
 const RATIO_TOLERANCE = 0.01;
 
+const PERSPECTIVE_DEFAULTS: Record<string, number> = {
+  transformVertical: 0,
+  transformHorizontal: 0,
+  transformRotate: 0,
+  transformAspect: 0,
+  transformScale: 100,
+  transformXOffset: 0,
+  transformYOffset: 0,
+};
+
 export type OverlayMode = 'none' | 'thirds' | 'goldenTriangle' | 'goldenSpiral' | 'phiGrid' | 'armature' | 'diagonal';
 
 interface CropPreset {
@@ -384,6 +394,45 @@ export default function CropPanel() {
 
   const displayRotation = localRotation !== null ? localRotation : fineRotation;
 
+  const PERSPECTIVE_GROUPS = useMemo(
+    () => [
+      {
+        heading: null as string | null,
+        sliders: [
+          { key: 'transformVertical', label: t('modals.transform.vertical'), min: -100, max: 100, step: 1, suffix: '' },
+          {
+            key: 'transformHorizontal',
+            label: t('modals.transform.horizontal'),
+            min: -100,
+            max: 100,
+            step: 1,
+            suffix: '',
+          },
+          { key: 'transformRotate', label: t('modals.transform.rotate'), min: -45, max: 45, step: 0.1, suffix: '°' },
+          { key: 'transformAspect', label: t('modals.transform.aspect'), min: -100, max: 100, step: 1, suffix: '' },
+          { key: 'transformScale', label: t('modals.transform.scale'), min: 50, max: 150, step: 1, suffix: '%' },
+        ],
+      },
+      {
+        heading: t('modals.transform.offset'),
+        sliders: [
+          { key: 'transformXOffset', label: t('modals.transform.xAxis'), min: -100, max: 100, step: 1, suffix: '' },
+          { key: 'transformYOffset', label: t('modals.transform.yAxis'), min: -100, max: 100, step: 1, suffix: '' },
+        ],
+      },
+    ],
+    [t],
+  );
+
+  const isPerspectiveDefault = Object.entries(PERSPECTIVE_DEFAULTS).every(
+    ([k, v]) => ((adjustments as any)[k] ?? v) === v,
+  );
+
+  const resetPerspective = () => setAdjustments((prev: Adjustments) => ({ ...prev, ...PERSPECTIVE_DEFAULTS }));
+
+  const setTransform = (key: string, value: number) =>
+    setAdjustments((prev: Adjustments) => ({ ...prev, [key]: value }));
+
   const handleFineRotationChange = (e: any) => {
     const newFineRotation = parseFloat(e.target.value);
     if (isRotationActive) {
@@ -623,6 +672,51 @@ export default function CropPanel() {
                   onDragStateChange={handleDragStateChange}
                 />
               </div>
+            </div>
+
+            <div className="space-y-4">
+              <Text variant={TextVariants.heading} className="mb-2 flex items-center justify-between">
+                {t('modals.transform.perspective')}
+                <div className="flex items-center gap-2">
+                  <button
+                    className="p-1.5 rounded-md hover:bg-surface transition-colors"
+                    onClick={() => setIsTransformModalOpen(true)}
+                    data-tooltip={t('editor.crop.tooltips.transform')}
+                  >
+                    <Scan size={16} />
+                  </button>
+                  <button
+                    className="p-1.5 rounded-md text-text-secondary transition-colors cursor-pointer hover:bg-card-active hover:text-text-primary disabled:opacity-50 disabled:cursor-default"
+                    onClick={resetPerspective}
+                    data-tooltip={t('modals.transform.resetTooltip')}
+                    disabled={isPerspectiveDefault}
+                  >
+                    <RotateCcw size={14} />
+                  </button>
+                </div>
+              </Text>
+              {PERSPECTIVE_GROUPS.map((group, gi) => (
+                <div key={gi} className="bg-surface px-4 pt-3 pb-4 rounded-lg space-y-3">
+                  {group.heading && (
+                    <Text variant={TextVariants.small} color={TextColors.secondary}>
+                      {group.heading}
+                    </Text>
+                  )}
+                  {group.sliders.map((s) => (
+                    <Slider
+                      key={s.key}
+                      label={s.label}
+                      min={s.min}
+                      max={s.max}
+                      step={s.step}
+                      suffix={s.suffix}
+                      value={(adjustments as any)[s.key] ?? PERSPECTIVE_DEFAULTS[s.key]}
+                      defaultValue={PERSPECTIVE_DEFAULTS[s.key]}
+                      onChange={(e: any) => setTransform(s.key, parseFloat(e.target.value))}
+                    />
+                  ))}
+                </div>
+              ))}
             </div>
 
             <div className="space-y-4">
