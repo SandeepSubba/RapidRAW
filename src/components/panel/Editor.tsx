@@ -244,6 +244,26 @@ export default function Editor({ onBackToLibrary, onContextMenu, transformWrappe
     [setAdjustments, setEditor],
   );
 
+  // Live preview while dragging to rotate from the crop edges (Lightroom-style).
+  // Mirrors the rotation slider's state path: liveRotation drives the preview during
+  // the drag and the final angle is committed to adjustments.rotation on release.
+  const handleRotateDrag = useCallback(
+    (angle: number) => {
+      setEditor({ liveRotation: angle, isRotationActive: true });
+    },
+    [setEditor],
+  );
+
+  const handleRotateDragEnd = useCallback(
+    (angle: number | null) => {
+      if (angle !== null && angle !== undefined) {
+        setAdjustments((prev: Adjustments) => ({ ...prev, rotation: angle }));
+      }
+      setEditor({ liveRotation: null, isRotationActive: false });
+    },
+    [setAdjustments, setEditor],
+  );
+
   const updateSubMaskLocal = useCallback(
     (subMaskId: string, updatedData: any) => {
       setAdjustments((prev: Adjustments) => ({
@@ -2025,6 +2045,8 @@ export default function Editor({ onBackToLibrary, onContextMenu, transformWrappe
             onSelectAiSubMask={(id) => setEditor({ activeAiSubMaskId: id })}
             onSelectMask={(id) => setEditor({ activeMaskId: id })}
             onStraighten={handleStraighten}
+            onRotateDrag={handleRotateDrag}
+            onRotateDragEnd={handleRotateDragEnd}
             selectedImage={selectedImage}
             setCrop={handleCropChange}
             setIsMaskHovered={setIsMaskHovered}
