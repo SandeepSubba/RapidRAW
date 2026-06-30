@@ -45,6 +45,12 @@ function groupSettings(similarity: number) {
   return { groupSimilar: true, filterBlurry: false, similarityThreshold: threshold, blurThreshold: 100 };
 }
 
+// Grouping invoke args from current store state — visual similarity or time-burst mode.
+function groupArgs() {
+  const s = useImportStore.getState();
+  return { settings: groupSettings(s.similarity), mode: s.groupMode, timeGapSeconds: s.timeGapSeconds };
+}
+
 // Minimum 0–5 grade an auto-selected photo must reach to be kept.
 const KEEP_MIN_GRADE = 3;
 
@@ -98,11 +104,8 @@ export function useSdImportActions() {
   // Cheap re-group of the cached analysis at the current similarity. Runs live as the
   // slider moves. Does NOT change the selection.
   const regroup = useCallback(async () => {
-    const { similarity } = useImportStore.getState();
     try {
-      const suggestions = await invoke<CullingSuggestions>(Invokes.GroupForImport, {
-        settings: groupSettings(similarity),
-      });
+      const suggestions = await invoke<CullingSuggestions>(Invokes.GroupForImport, groupArgs());
       useImportStore.getState().setImport({ suggestions });
     } catch (err) {
       toast.error(`Grouping failed: ${err}`);
@@ -120,9 +123,7 @@ export function useSdImportActions() {
     });
     try {
       await invoke<number>(Invokes.AnalyzeForImport, { paths: scannedPaths });
-      const suggestions = await invoke<CullingSuggestions>(Invokes.GroupForImport, {
-        settings: groupSettings(useImportStore.getState().similarity),
-      });
+      const suggestions = await invoke<CullingSuggestions>(Invokes.GroupForImport, groupArgs());
       setImport({ suggestions, analysisReady: true, scoresReady: false, cullProgress: null, stage: 'review' });
     } catch (err) {
       setImport({ error: String(err), cullProgress: null, stage: 'review' });
@@ -144,13 +145,14 @@ export function useSdImportActions() {
       useImportStore.getState().setImport({ cullProgress: event.payload });
     });
     try {
+      const s = useImportStore.getState();
       await invoke<number>(Invokes.ScoreForImport, {
-        groupSettings: groupSettings(useImportStore.getState().similarity),
-        personalize: useImportStore.getState().personalizeSelection,
+        groupSettings: groupSettings(s.similarity),
+        mode: s.groupMode,
+        timeGapSeconds: s.timeGapSeconds,
+        personalize: s.personalizeSelection,
       });
-      const suggestions = await invoke<CullingSuggestions>(Invokes.GroupForImport, {
-        settings: groupSettings(useImportStore.getState().similarity),
-      });
+      const suggestions = await invoke<CullingSuggestions>(Invokes.GroupForImport, groupArgs());
       setImport({ suggestions, scoresReady: true, cullProgress: null, stage: 'review' });
     } catch (err) {
       setImport({ error: String(err), cullProgress: null, stage: 'review' });
@@ -179,6 +181,24 @@ export function useSdImportActions() {
       const { enableGroups, analysisReady, setImport } = useImportStore.getState();
       setImport({ similarity: pct });
       if (enableGroups && analysisReady) regroup();
+    },
+    [regroup],
+  );
+
+  const setGroupMode = useCallback(
+    (mode: 'visual' | 'time') => {
+      const { enableGroups, analysisReady, setImport } = useImportStore.getState();
+      setImport({ groupMode: mode, scoresReady: false });
+      if (enableGroups && analysisReady) regroup();
+    },
+    [regroup],
+  );
+
+  const setTimeGap = useCallback(
+    (seconds: number) => {
+      const { enableGroups, analysisReady, groupMode, setImport } = useImportStore.getState();
+      setImport({ timeGapSeconds: seconds });
+      if (enableGroups && analysisReady && groupMode === 'time') regroup();
     },
     [regroup],
   );
@@ -431,6 +451,8 @@ export function useSdImportActions() {
     scanSource,
     setEnableGroups,
     setSimilarity,
+    setGroupMode,
+    setTimeGap,
     scoreImages,
     setFileTypeFilter,
     setActivePath,

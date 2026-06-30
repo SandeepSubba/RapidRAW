@@ -453,6 +453,69 @@ pub fn group_analyses(
     suggestions
 }
 
+fn flush_time_burst(
+    analyses: &[ImageAnalysisData],
+    burst: &mut Vec<usize>,
+    suggestions: &mut CullingSuggestions,
+) {
+    if burst.len() > 1 {
+        burst.sort_by(|&a, &b| {
+            analyses[b]
+                .result
+                .quality_score
+                .partial_cmp(&analyses[a].result.quality_score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        suggestions.similar_groups.push(CullGroup {
+            representative: analyses[burst[0]].result.clone(),
+            duplicates: burst[1..]
+                .iter()
+                .map(|&idx| analyses[idx].result.clone())
+                .collect(),
+        });
+    }
+    burst.clear();
+}
+
+/// Group photos into **bursts captured close together in time** (true burst detection),
+/// independent of visual similarity. `times` maps result path -> capture epoch seconds; a new
+/// burst starts whenever the gap to the previous photo exceeds `max_gap_seconds`. Each burst
+/// of >=2 becomes a group (representative = highest quality). Photos without a timestamp are
+/// left ungrouped (they fall into the frontend's "Other images").
+pub fn group_by_time(
+    successful_analyses: &[ImageAnalysisData],
+    failed_paths: Vec<String>,
+    times: &std::collections::HashMap<String, i64>,
+    max_gap_seconds: i64,
+) -> CullingSuggestions {
+    let mut suggestions = CullingSuggestions {
+        failed_paths,
+        ..Default::default()
+    };
+
+    let mut timed: Vec<(i64, usize)> = successful_analyses
+        .iter()
+        .enumerate()
+        .filter_map(|(i, a)| times.get(&a.result.path).map(|&t| (t, i)))
+        .collect();
+    timed.sort_by_key(|&(t, _)| t);
+
+    let mut burst: Vec<usize> = Vec::new();
+    let mut prev_t: Option<i64> = None;
+    for (t, idx) in timed {
+        if let Some(pt) = prev_t {
+            if t - pt > max_gap_seconds {
+                flush_time_burst(successful_analyses, &mut burst, &mut suggestions);
+            }
+        }
+        burst.push(idx);
+        prev_t = Some(t);
+    }
+    flush_time_burst(successful_analyses, &mut burst, &mut suggestions);
+
+    suggestions
+}
+
 pub async fn run_culling(
     paths: Vec<String>,
     settings: CullingSettings,

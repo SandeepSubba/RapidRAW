@@ -65,14 +65,23 @@ always explicit.
 
 ## 3. Grouping similar shots
 
-"Group similar" is an opt-in toggle (Capture One's "Group Overview"). When on, photos are
-grouped into **bursts of visually similar frames** using perceptual hashing (DoubleGradient
-16×16) + Hamming-distance BFS.
+"Group" is an opt-in toggle (Capture One's "Group Overview") with two modes:
 
-- A **Similarity %** slider controls how strict grouping is. It re-groups **instantly** —
-  the analysis is cached on the backend, so moving the slider never re-decodes images.
-- Grouping (fast, hash-only) is deliberately **separate from scoring** (slower) so the
-  "Group similar" toggle stays snappy.
+**Similar look** (default) — groups **visually near-duplicate frames** using perceptual
+hashing (DoubleGradient 16×16) + Hamming-distance BFS. A **Similarity %** slider controls
+strictness (higher = stricter; lower = looser, so more shots group).
+
+**By time** — true **burst detection** by capture time. Photos are sorted by their EXIF
+timestamp and split into bursts whenever the gap between consecutive frames exceeds the
+**Max gap** slider (1–60 s). This catches *event bursts* that visual hashing misses — e.g.
+five different poses shot seconds apart group together even though the frames don't look
+near-identical. Timestamps are read once during analysis and cached.
+
+Both modes:
+- re-group **instantly** — the analysis is cached on the backend, so changing mode / slider
+  never re-decodes images;
+- are deliberately **separate from scoring** (slower) so the toggle stays snappy;
+- land any photo with no group-mate into **"Other images."**
 
 ## 4. AI scoring
 

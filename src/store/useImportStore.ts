@@ -37,6 +37,9 @@ interface ImportState {
   // Capture One–style "Group Overview": grouping is opt-in via a toggle + similarity %.
   enableGroups: boolean;
   similarity: number; // 0–100
+  // Grouping mode: 'visual' = perceptual-hash similarity; 'time' = burst-by-capture-time.
+  groupMode: 'visual' | 'time';
+  timeGapSeconds: number; // max gap between frames of a time burst
   analysisReady: boolean; // grouping analysis cached on the backend for the current scan
   scoresReady: boolean; // quality scoring has run (best-pick + score badges available)
   // Paths the user has chosen to import (keepers). Anything not in this set is skipped.
@@ -82,6 +85,8 @@ const INITIAL: Omit<ImportState, 'setImport' | 'toggleKeep' | 'reset'> = {
   suggestions: null,
   enableGroups: false,
   similarity: 80,
+  groupMode: 'visual',
+  timeGapSeconds: 5,
   analysisReady: false,
   scoresReady: false,
   keptPaths: new Set<string>(),
@@ -158,6 +163,8 @@ export const useImportStore = create<ImportState>()(
         ejectAfterImport: state.ejectAfterImport,
         personalizeSelection: state.personalizeSelection,
         similarity: state.similarity,
+        groupMode: state.groupMode,
+        timeGapSeconds: state.timeGapSeconds,
         fileTypeFilter: state.fileTypeFilter,
       }),
     },

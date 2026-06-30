@@ -94,6 +94,8 @@ export default function CullGroupsGrid({ suggestions }: { suggestions: CullingSu
     alreadyImported,
     enableGroups,
     similarity,
+    groupMode,
+    timeGapSeconds,
     scoresReady,
     fileTypeFilter,
     filterRating,
@@ -109,6 +111,8 @@ export default function CullGroupsGrid({ suggestions }: { suggestions: CullingSu
       alreadyImported: s.alreadyImported,
       enableGroups: s.enableGroups,
       similarity: s.similarity,
+      groupMode: s.groupMode,
+      timeGapSeconds: s.timeGapSeconds,
       scoresReady: s.scoresReady,
       fileTypeFilter: s.fileTypeFilter,
       filterRating: s.filterRating,
@@ -120,7 +124,7 @@ export default function CullGroupsGrid({ suggestions }: { suggestions: CullingSu
     })),
   );
   const actions = useSdImportActions();
-  const { setEnableGroups, setSimilarity, setActivePath, selectAll, selectNone, autoSelectBest } = actions;
+  const { setEnableGroups, setSimilarity, setGroupMode, setTimeGap, setActivePath, selectAll, selectNone, autoSelectBest } = actions;
   const rawExts = useSettingsStore((s) => s.supportedTypes?.raw);
   const selectedCount = keptPaths.size;
 
@@ -354,24 +358,62 @@ export default function CullGroupsGrid({ suggestions }: { suggestions: CullingSu
           </button>
         </div>
 
-        {/* Group Overview: opt-in grouping + similarity */}
+        {/* Group Overview: opt-in grouping, by visual similarity or by capture time */}
         <label className="flex items-center gap-1.5 text-sm text-text-primary cursor-pointer select-none">
           <input type="checkbox" checked={enableGroups} onChange={(e) => setEnableGroups(e.target.checked)} />
-          <Layers size={14} className="text-accent" /> Group similar
+          <Layers size={14} className="text-accent" /> Group
         </label>
         <div className={`flex items-center gap-2 ${enableGroups ? '' : 'opacity-40'}`}>
-          <span className="text-xs text-text-secondary">Similarity</span>
-          <input
-            type="range"
-            min={0}
-            max={100}
-            step={1}
-            value={similarity}
-            disabled={!enableGroups}
-            onChange={(e) => setSimilarity(Number(e.target.value))}
-            className="w-28 accent-accent"
-          />
-          <span className="text-xs tabular-nums text-text-secondary w-9">{similarity}%</span>
+          {/* mode: similar look vs burst-by-time */}
+          <div className="flex rounded-md overflow-hidden border border-surface text-xs">
+            <button
+              onClick={() => setGroupMode('visual')}
+              disabled={!enableGroups}
+              className={`px-2 py-1 ${groupMode === 'visual' ? 'bg-accent text-button-text' : 'text-text-secondary hover:bg-surface'}`}
+            >
+              Similar look
+            </button>
+            <button
+              onClick={() => setGroupMode('time')}
+              disabled={!enableGroups}
+              className={`px-2 py-1 ${groupMode === 'time' ? 'bg-accent text-button-text' : 'text-text-secondary hover:bg-surface'}`}
+            >
+              By time
+            </button>
+          </div>
+          {groupMode === 'visual' ? (
+            <>
+              <span className="text-xs text-text-secondary">Similarity</span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                step={1}
+                value={similarity}
+                disabled={!enableGroups}
+                onChange={(e) => setSimilarity(Number(e.target.value))}
+                className="w-24 accent-accent"
+              />
+              <span className="text-xs tabular-nums text-text-secondary w-9">{similarity}%</span>
+            </>
+          ) : (
+            <>
+              <span className="text-xs text-text-secondary" data-tooltip="Photos taken within this gap form a burst">
+                Max gap
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={60}
+                step={1}
+                value={timeGapSeconds}
+                disabled={!enableGroups}
+                onChange={(e) => setTimeGap(Number(e.target.value))}
+                className="w-24 accent-accent"
+              />
+              <span className="text-xs tabular-nums text-text-secondary w-9">{timeGapSeconds}s</span>
+            </>
+          )}
         </div>
 
         {/* filters: rating / file type / color label */}

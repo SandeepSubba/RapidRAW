@@ -16,6 +16,7 @@ use walkdir::WalkDir;
 
 use crate::culling::{
     CullingSettings, CullingSuggestions, ImageAnalysisData, analyze_paths, group_analyses,
+    group_by_time,
 };
 use crate::formats::{is_raw_file, is_supported_image_file};
 
@@ -27,6 +28,27 @@ static IMPORT_FAILED: Mutex<Vec<String>> = Mutex::new(Vec::new());
 // fold your keep/skip decisions into the "learn from my picks" model (record_cull_picks).
 static IMPORT_FEATURES: Mutex<Option<std::collections::HashMap<String, [f64; crate::cull_model::N_FEATURES]>>> =
     Mutex::new(None);
+// Capture timestamps (epoch seconds) per scanned path, for time-based (burst) grouping.
+static IMPORT_TIMES: Mutex<Option<std::collections::HashMap<String, i64>>> = Mutex::new(None);
+
+/// Group the cached analyses by the requested mode: "time" → burst-by-capture-time using the
+/// timestamp cache; anything else → visual perceptual-hash similarity.
+fn group_cached(
+    analyses: &[ImageAnalysisData],
+    failed: Vec<String>,
+    settings: &CullingSettings,
+    mode: &str,
+    time_gap_seconds: i64,
+) -> CullingSuggestions {
+    if mode == "time" {
+        let guard = IMPORT_TIMES.lock().unwrap();
+        let empty = std::collections::HashMap::new();
+        let times = guard.as_ref().unwrap_or(&empty);
+        group_by_time(analyses, failed, times, time_gap_seconds)
+    } else {
+        group_analyses(analyses, failed, settings)
+    }
+}
 
 #[derive(Serialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -134,22 +156,37 @@ pub async fn cull_images_for_import(
 /// `sd-import-cull-*` progress. Returns how many analyzed successfully.
 #[tauri::command]
 pub async fn analyze_for_import(paths: Vec<String>, app_handle: AppHandle) -> Result<usize, String> {
+    use rayon::prelude::*;
+    // Capture timestamps up front (parallel, best-effort) so time-based grouping is instant.
+    let times: std::collections::HashMap<String, i64> = paths
+        .par_iter()
+        .map(|p| {
+            let t = crate::exif_processing::get_creation_date_from_path(Path::new(p)).timestamp();
+            (p.clone(), t)
+        })
+        .collect();
+
     let (analyses, failed) = analyze_paths(paths, app_handle, "sd-import-cull", false).await?;
     let count = analyses.len();
     *IMPORT_ANALYSIS.lock().unwrap() = Some(analyses);
     *IMPORT_FAILED.lock().unwrap() = failed;
+    *IMPORT_TIMES.lock().unwrap() = Some(times);
     Ok(count)
 }
 
-/// Group the cached analysis at the given similarity threshold. Cheap (no I/O), so the
-/// similarity slider can call it live on every change. Ranks each group by quality score
-/// (0 until the scoring step has run, in which case order is just the scan order).
+/// Group the cached analysis. `mode` = "time" → burst-by-capture-time (gap = `time_gap_seconds`);
+/// otherwise visual similarity at the slider's threshold. Cheap (no I/O), so the slider /
+/// mode toggle can call it live. Ranks each group by quality score.
 #[tauri::command]
-pub fn group_for_import(settings: CullingSettings) -> Result<CullingSuggestions, String> {
+pub fn group_for_import(
+    settings: CullingSettings,
+    mode: String,
+    time_gap_seconds: i64,
+) -> Result<CullingSuggestions, String> {
     let guard = IMPORT_ANALYSIS.lock().unwrap();
     let failed = IMPORT_FAILED.lock().unwrap().clone();
     match guard.as_ref() {
-        Some(analyses) => Ok(group_analyses(analyses, failed, &settings)),
+        Some(analyses) => Ok(group_cached(analyses, failed, &settings, &mode, time_gap_seconds)),
         None => Ok(CullingSuggestions::default()),
     }
 }
@@ -169,6 +206,8 @@ pub async fn score_for_import(
     app_handle: AppHandle,
     state: State<'_, crate::AppState>,
     group_settings: CullingSettings,
+    mode: String,
+    time_gap_seconds: i64,
     personalize: bool,
 ) -> Result<usize, String> {
     use rayon::prelude::*;
@@ -194,7 +233,7 @@ pub async fn score_for_import(
         let failed = IMPORT_FAILED.lock().unwrap().clone();
         match guard.as_ref() {
             Some(analyses) => {
-                let sugg = group_analyses(analyses, failed, &group_settings);
+                let sugg = group_cached(analyses, failed, &group_settings, &mode, time_gap_seconds);
                 let mut set = std::collections::HashSet::new();
                 for g in &sugg.similar_groups {
                     set.insert(g.representative.path.clone());
