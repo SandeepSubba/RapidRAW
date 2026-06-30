@@ -62,8 +62,12 @@ interface ImportState {
   // Culling metadata (per session): star rating 0-5 and color label per photo.
   ratings: Record<string, number>;
   colors: Record<string, string>;
-  // The photo the keyboard rating/label shortcuts act on.
+  // The photo the keyboard rating/label shortcuts act on (the active cursor cell).
   activePath: string | null;
+  // Multi-selection in the grid (click / Ctrl-click toggle / Shift-click range). The active
+  // cell is always included; `selectionAnchor` is the fixed end for Shift-click ranges.
+  selectedPaths: string[];
+  selectionAnchor: string | null;
   // View filters by assigned metadata. rating: 0=all, -1=unrated, 1-5=N+ stars.
   filterRating: number;
   filterColors: string[];
@@ -114,6 +118,8 @@ const INITIAL: Omit<ImportState, 'setImport' | 'toggleKeep' | 'reset'> = {
   ratings: {},
   colors: {},
   activePath: null,
+  selectedPaths: [],
+  selectionAnchor: null,
   filterRating: 0,
   filterColors: [],
   sortKey: 'name',
@@ -161,6 +167,8 @@ export const useImportStore = create<ImportState>()(
           ratings: {},
           colors: {},
           activePath: null,
+          selectedPaths: [],
+          selectionAnchor: null,
           filterRating: 0,
           filterColors: [],
           error: null,

@@ -15,36 +15,47 @@ interface CellProps {
   path: string;
   kept: boolean;
   focused: boolean;
+  selected?: boolean;
   disabled?: boolean;
   badge?: string;
   best?: boolean;
   rating?: number;
   color?: string;
   onToggleKeep(path: string): void;
-  onFocus(path: string): void;
+  onSelect(path: string, e: React.MouseEvent): void;
   onOpen(path: string): void;
 }
 
-function Cell({ path, kept, focused, disabled, badge, best, rating, color, onToggleKeep, onFocus, onOpen }: CellProps) {
+function Cell({ path, kept, focused, selected, disabled, badge, best, rating, color, onToggleKeep, onSelect, onOpen }: CellProps) {
+  // Ring priority: multi-selection (accent, brightest on the active cell) wins, then the
+  // keep state (green), then a plain hover outline.
+  const ring = selected
+    ? focused
+      ? 'ring-accent'
+      : 'ring-accent/60'
+    : kept
+      ? 'ring-green-500'
+      : focused
+        ? 'ring-accent'
+        : 'ring-transparent hover:ring-surface';
   return (
     <div
       data-path={path}
-      onClick={() => onFocus(path)}
+      onClick={(e) => onSelect(path, e)}
       onDoubleClick={() => onOpen(path)}
       title={
         disabled
           ? `${path.split(/[\\/]/).pop()} — already imported`
-          : `${path.split(/[\\/]/).pop()} — double-click to open the viewer`
+          : `${path.split(/[\\/]/).pop()} — click to select (⌘/Ctrl or ⇧ for multi) · double-click to open`
       }
-      className={`relative aspect-square rounded-md overflow-hidden cursor-pointer group ring-2 transition-all ${
-        focused ? 'ring-accent' : kept ? 'ring-green-500' : 'ring-transparent hover:ring-surface'
-      }`}
+      className={`relative aspect-square rounded-md overflow-hidden cursor-pointer group ring-2 transition-all ${ring}`}
     >
       <LazyThumb
         path={path}
         className="w-full h-full"
         imgClassName={`w-full h-full object-cover ${disabled ? 'opacity-20 grayscale' : ''}`}
       />
+      {selected && <div className="absolute inset-0 bg-accent/15 pointer-events-none" />}
       {!disabled && <RatingColor rating={rating} color={color} />}
       {disabled ? (
         <span className="absolute top-1.5 left-1.5 right-1.5 text-[9px] uppercase tracking-wide text-white/80 bg-black/70 rounded px-1 py-0.5 text-center pointer-events-none">
@@ -103,6 +114,8 @@ export default function CullGroupsGrid({ suggestions }: { suggestions: CullingSu
     ratings,
     colors,
     activePath,
+    selectedPaths,
+    selectionAnchor,
     sortKey,
     sortOrder,
     captureTimes,
@@ -123,6 +136,8 @@ export default function CullGroupsGrid({ suggestions }: { suggestions: CullingSu
       ratings: s.ratings,
       colors: s.colors,
       activePath: s.activePath,
+      selectedPaths: s.selectedPaths,
+      selectionAnchor: s.selectionAnchor,
       sortKey: s.sortKey,
       sortOrder: s.sortOrder,
       captureTimes: s.captureTimes,
@@ -130,7 +145,8 @@ export default function CullGroupsGrid({ suggestions }: { suggestions: CullingSu
     })),
   );
   const actions = useSdImportActions();
-  const { setEnableGroups, setSimilarity, setGroupMode, setTimeGap, setActivePath, selectAll, selectNone, autoSelectBest } = actions;
+  const { setEnableGroups, setSimilarity, setGroupMode, setTimeGap, setSelection, toggleKeepMany, selectAll, selectNone, autoSelectBest } = actions;
+  const selectedSet = useMemo(() => new Set(selectedPaths), [selectedPaths]);
   const rawExts = useSettingsStore((s) => s.supportedTypes?.raw);
   const selectedCount = keptPaths.size;
 
@@ -263,19 +279,22 @@ export default function CullGroupsGrid({ suggestions }: { suggestions: CullingSu
   // Arrow-key navigation across the (sectioned) grid. Left/Right step through the
   // reading order; Up/Down pick the geometrically nearest cell in the row above/below
   // (robust to the responsive column count and the group/single/blurry section breaks).
+  // Move the cursor and collapse the multi-selection back to that single cell.
+  const focusSingle = useCallback((p: string) => setSelection([p], p, p), [setSelection]);
+
   const navigate = useCallback(
     (dir: 'left' | 'right' | 'up' | 'down') => {
       const list = ordered;
       if (!list.length) return;
       const cur = activePath && list.includes(activePath) ? activePath : null;
       if (!cur) {
-        setActivePath(list[0]); // first keypress just focuses the start
+        focusSingle(list[0]); // first keypress just focuses the start
         return;
       }
       if (dir === 'left' || dir === 'right') {
         const i = list.indexOf(cur);
         const ni = dir === 'right' ? i + 1 : i - 1;
-        if (ni >= 0 && ni < list.length) setActivePath(list[ni]);
+        if (ni >= 0 && ni < list.length) focusSingle(list[ni]);
         return;
       }
       const container = gridScrollRef.current;
@@ -302,9 +321,39 @@ export default function CullGroupsGrid({ suggestions }: { suggestions: CullingSu
           best = p;
         }
       }
-      if (best) setActivePath(best);
+      if (best) focusSingle(best);
     },
-    [ordered, activePath, setActivePath],
+    [ordered, activePath, focusSingle],
+  );
+
+  // Mouse selection with standard modifiers, computed over the visual reading order:
+  //   plain click     → select just this cell
+  //   ⌘/Ctrl + click  → toggle this cell in/out of the selection
+  //   ⇧ + click       → select the range from the anchor to this cell
+  const handleCellSelect = useCallback(
+    (path: string, e: React.MouseEvent) => {
+      if (e.shiftKey) {
+        const anchor = selectionAnchor ?? activePath ?? path;
+        const ai = ordered.indexOf(anchor);
+        const bi = ordered.indexOf(path);
+        if (ai !== -1 && bi !== -1) {
+          const [lo, hi] = ai <= bi ? [ai, bi] : [bi, ai];
+          setSelection(ordered.slice(lo, hi + 1), path, anchor); // anchor stays put
+          return;
+        }
+        setSelection([path], path, path);
+        return;
+      }
+      if (e.metaKey || e.ctrlKey) {
+        const next = new Set(selectedPaths);
+        if (next.has(path)) next.delete(path);
+        else next.add(path);
+        setSelection([...next], path, path);
+        return;
+      }
+      setSelection([path], path, path);
+    },
+    [ordered, selectedPaths, selectionAnchor, activePath, setSelection],
   );
 
   // Keep the focused cell scrolled into view as the user navigates.
@@ -338,12 +387,15 @@ export default function CullGroupsGrid({ suggestions }: { suggestions: CullingSu
           e.preventDefault();
           navigate('up');
           break;
-        case ' ':
-          if (activePath) {
+        case ' ': {
+          // Keep/skip the whole multi-selection at once (falls back to the active cell).
+          const targets = selectedPaths.length > 0 ? selectedPaths : activePath ? [activePath] : [];
+          if (targets.length) {
             e.preventDefault();
-            toggleKeep(activePath);
+            toggleKeepMany(targets);
           }
           break;
+        }
         case 'Enter':
           if (activePath) {
             e.preventDefault();
@@ -354,7 +406,7 @@ export default function CullGroupsGrid({ suggestions }: { suggestions: CullingSu
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [viewMode, navigate, activePath, toggleKeep]);
+  }, [viewMode, navigate, activePath, selectedPaths, toggleKeepMany]);
 
   const keptInGroupCount = (paths: string[]) => paths.filter((p) => keptPaths.has(p)).length;
 
@@ -362,11 +414,12 @@ export default function CullGroupsGrid({ suggestions }: { suggestions: CullingSu
     path: p,
     kept: keptPaths.has(p),
     focused: activePath === p,
+    selected: selectedSet.has(p),
     disabled: alreadyImported.has(p),
     rating: ratings[p] || 0,
     color: colors[p],
     onToggleKeep: toggleKeep,
-    onFocus: setActivePath,
+    onSelect: handleCellSelect,
     onOpen,
   });
 
@@ -472,9 +525,10 @@ export default function CullGroupsGrid({ suggestions }: { suggestions: CullingSu
         </button>
 
         <span className="text-xs text-text-secondary">
-          {selectedCount} / {flat.length} shown{suggestions ? ` · ${groups.length} groups` : ''}
+          {selectedCount} / {flat.length} kept{suggestions ? ` · ${groups.length} groups` : ''}
+          {selectedPaths.length > 1 ? ` · ${selectedPaths.length} selected` : ''}
         </span>
-        <span className="ml-auto text-xs text-text-secondary">click ✓ to keep · double-click for viewer</span>
+        <span className="ml-auto text-xs text-text-secondary">⌘/Ctrl or ⇧ click to multi-select · space to keep/skip · double-click for viewer</span>
       </div>
 
       {viewMode === 'viewer' && (viewerInitialPath || ordered[0]) && (
