@@ -431,39 +431,6 @@ export default function CropPanel() {
   const setTransform = (key: string, value: number) =>
     setAdjustments((prev: Adjustments) => ({ ...prev, [key]: value }));
 
-  // A geometry change rebuilds a full-res warp, so commit only on drag release
-  // (not every frame) to keep the mouse responsive and avoid memory churn.
-  const draggingKeyRef = useRef<string | null>(null);
-  const liveTransformRef = useRef<{ key: string; value: number } | null>(null);
-  const [liveTransform, setLiveTransform] = useState<{ key: string; value: number } | null>(null);
-
-  const handleTransformChange = (key: string, value: number) => {
-    if (draggingKeyRef.current === key) {
-      const live = { key, value };
-      liveTransformRef.current = live;
-      setLiveTransform(live);
-    } else {
-      setTransform(key, value);
-    }
-  };
-
-  const handleTransformDrag = (key: string, isDragging: boolean) => {
-    if (isDragging) {
-      draggingKeyRef.current = key;
-    } else {
-      draggingKeyRef.current = null;
-      const live = liveTransformRef.current;
-      if (live && live.key === key) {
-        setTransform(key, live.value);
-      }
-      liveTransformRef.current = null;
-      setLiveTransform(null);
-    }
-  };
-
-  const transformValue = (key: string): number =>
-    liveTransform?.key === key ? liveTransform.value : ((adjustments as any)[key] ?? PERSPECTIVE_DEFAULTS[key]);
-
   const handleFineRotationChange = (e: any) => {
     const newFineRotation = parseFloat(e.target.value);
     if (isRotationActive) {
@@ -741,10 +708,9 @@ export default function CropPanel() {
                       max={s.max}
                       step={s.step}
                       suffix={s.suffix}
-                      value={transformValue(s.key)}
+                      value={(adjustments as any)[s.key] ?? PERSPECTIVE_DEFAULTS[s.key]}
                       defaultValue={PERSPECTIVE_DEFAULTS[s.key]}
-                      onChange={(e: any) => handleTransformChange(s.key, parseFloat(e.target.value))}
-                      onDragStateChange={(d: boolean) => handleTransformDrag(s.key, d)}
+                      onChange={(e: any) => setTransform(s.key, parseFloat(e.target.value))}
                     />
                   ))}
                 </div>
