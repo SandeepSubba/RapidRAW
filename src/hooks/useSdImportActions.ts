@@ -3,8 +3,8 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
 import { toast } from 'react-toastify';
-import { CullingSuggestions, Invokes } from '../components/ui/AppProperties';
-import { DriveInfo, useImportStore } from '../store/useImportStore';
+import { CullingSuggestions, Invokes, SortDirection } from '../components/ui/AppProperties';
+import { DriveInfo, ImportSortKey, useImportStore } from '../store/useImportStore';
 import { useUIStore } from '../store/useUIStore';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { FileTypeFilter, ImportFilterState, computeVisible, computeVisibleSet } from '../components/views/import/importFilters';
@@ -223,6 +223,8 @@ export function useSdImportActions() {
 
   const setActivePath = useCallback((p: string | null) => useImportStore.getState().setImport({ activePath: p }), []);
   const setFilterRating = useCallback((r: number) => useImportStore.getState().setImport({ filterRating: r }), []);
+  const setSortKey = useCallback((key: ImportSortKey) => useImportStore.getState().setImport({ sortKey: key }), []);
+  const setSortOrder = useCallback((order: SortDirection) => useImportStore.getState().setImport({ sortOrder: order }), []);
   const toggleFilterColor = useCallback((c: string) => {
     const { filterColors, setImport } = useImportStore.getState();
     setImport({ filterColors: filterColors.includes(c) ? filterColors.filter((x) => x !== c) : [...filterColors, c] });
@@ -282,7 +284,7 @@ export function useSdImportActions() {
 
   const scanSource = useCallback(async (path: string) => {
     const { setImport } = useImportStore.getState();
-    setImport({ sourcePath: path, stage: 'scanning', scannedPaths: [], suggestions: null, error: null });
+    setImport({ sourcePath: path, stage: 'scanning', scannedPaths: [], captureTimes: {}, suggestions: null, error: null });
     try {
       const scannedPaths = await invoke<string[]>(Invokes.ScanSourceImages, { path });
       if (scannedPaths.length === 0) {
@@ -301,6 +303,14 @@ export function useSdImportActions() {
         scoresReady: false,
         stage: 'review',
       });
+      // Best-effort, in the background: load EXIF capture dates so "sort by date" works.
+      // The grid renders immediately; date sorting falls back to filename until these land.
+      invoke<Record<string, number>>(Invokes.GetCaptureTimes, { paths: scannedPaths })
+        .then((times) => {
+          // Ignore if a newer scan has started in the meantime.
+          if (useImportStore.getState().scannedPaths === scannedPaths) setImport({ captureTimes: times });
+        })
+        .catch(() => {});
     } catch (err) {
       setImport({ error: String(err), stage: 'source' });
       toast.error(`Scan failed: ${err}`);
@@ -458,6 +468,8 @@ export function useSdImportActions() {
     setActivePath,
     setFilterRating,
     toggleFilterColor,
+    setSortKey,
+    setSortOrder,
     rateActive,
     colorActive,
     keepActive,

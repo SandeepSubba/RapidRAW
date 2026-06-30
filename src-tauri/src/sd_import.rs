@@ -140,6 +140,23 @@ pub fn scan_source_images(path: String) -> Result<Vec<String>, String> {
     Ok(paths)
 }
 
+/// Best-effort EXIF capture date (epoch seconds) per path, so the importer grid can offer a
+/// "sort by date" option. Reuses the same date resolution as time-based grouping
+/// (`get_creation_date_from_path`): EXIF DateTimeOriginal first, then RAW metadata, falling
+/// back to the file's creation time. Read in parallel; never fails (missing dates just sort old).
+#[tauri::command]
+pub fn get_capture_times(paths: Vec<String>) -> Result<std::collections::HashMap<String, i64>, String> {
+    use rayon::prelude::*;
+    let times = paths
+        .par_iter()
+        .map(|p| {
+            let t = crate::exif_processing::get_creation_date_from_path(Path::new(p)).timestamp();
+            (p.clone(), t)
+        })
+        .collect();
+    Ok(times)
+}
+
 /// Pre-import culling. Identical analysis to `cull_images`, but on an isolated event
 /// channel (`sd-import-cull-*`) so running it never pops the post-import CullingModal.
 #[tauri::command]
