@@ -222,6 +222,25 @@ export function useSdImportActions() {
   }, []);
 
   const setActivePath = useCallback((p: string | null) => useImportStore.getState().setImport({ activePath: p }), []);
+
+  // Replace the grid multi-selection. `active` becomes the cursor cell; `anchor` is the fixed
+  // end used for Shift-click ranges. Always keep them consistent in one update.
+  const setSelection = useCallback((paths: string[], active: string | null, anchor: string | null) => {
+    useImportStore.getState().setImport({ selectedPaths: paths, activePath: active, selectionAnchor: anchor });
+  }, []);
+
+  // Keep/skip a whole set at once: if every (importable) target is already kept, skip them all;
+  // otherwise keep them all. Already-imported photos can't be kept, so they're ignored.
+  const toggleKeepMany = useCallback((paths: string[]) => {
+    const { keptPaths, alreadyImported, setImport } = useImportStore.getState();
+    const targets = paths.filter((p) => !alreadyImported.has(p));
+    if (targets.length === 0) return;
+    const allKept = targets.every((p) => keptPaths.has(p));
+    const next = new Set(keptPaths);
+    targets.forEach((p) => (allKept ? next.delete(p) : next.add(p)));
+    setImport({ keptPaths: next });
+  }, []);
+
   const setFilterRating = useCallback((r: number) => useImportStore.getState().setImport({ filterRating: r }), []);
   const setSortKey = useCallback((key: ImportSortKey) => useImportStore.getState().setImport({ sortKey: key }), []);
   const setSortOrder = useCallback((order: SortDirection) => useImportStore.getState().setImport({ sortOrder: order }), []);
@@ -284,7 +303,7 @@ export function useSdImportActions() {
 
   const scanSource = useCallback(async (path: string) => {
     const { setImport } = useImportStore.getState();
-    setImport({ sourcePath: path, stage: 'scanning', scannedPaths: [], captureTimes: {}, suggestions: null, error: null });
+    setImport({ sourcePath: path, stage: 'scanning', scannedPaths: [], captureTimes: {}, suggestions: null, activePath: null, selectedPaths: [], selectionAnchor: null, error: null });
     try {
       const scannedPaths = await invoke<string[]>(Invokes.ScanSourceImages, { path });
       if (scannedPaths.length === 0) {
@@ -466,6 +485,8 @@ export function useSdImportActions() {
     scoreImages,
     setFileTypeFilter,
     setActivePath,
+    setSelection,
+    toggleKeepMany,
     setFilterRating,
     toggleFilterColor,
     setSortKey,
