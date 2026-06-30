@@ -53,6 +53,152 @@ fn softmax(array: &Array<f32, ndarray::Dim<[usize; 2]>>) -> Array<f32, ndarray::
     new_array
 }
 
+/// Run the bundled combined CLIP model as a zero-shot classifier: returns the softmax
+/// probability of each `prompts` entry for `image` (row 0 of the logits). Reused for both
+/// whole-image and per-face-crop classification.
+fn clip_prompt_probs(
+    image: &DynamicImage,
+    clip_session_mutex: &Mutex<Session>,
+    tokenizer: &Tokenizer,
+    prompts: &[&str],
+) -> Result<Vec<f32>> {
+    let text_inputs: Vec<String> = prompts.iter().map(|s| s.to_string()).collect();
+    let image_input = preprocess_clip_image(image);
+
+    let encodings = tokenizer
+        .encode_batch(text_inputs.clone(), true)
+        .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+    let max_len = encodings
+        .iter()
+        .map(|e| e.get_ids().len())
+        .max()
+        .unwrap_or(0);
+
+    let mut ids_data = Vec::new();
+    let mut mask_data = Vec::new();
+    for encoding in encodings {
+        let mut ids = encoding.get_ids().iter().map(|&i| i as i64).collect::<Vec<_>>();
+        let mut mask = encoding
+            .get_attention_mask()
+            .iter()
+            .map(|&m| m as i64)
+            .collect::<Vec<_>>();
+        ids.resize(max_len, 0);
+        mask.resize(max_len, 0);
+        ids_data.extend_from_slice(&ids);
+        mask_data.extend_from_slice(&mask);
+    }
+
+    let ids_array = Array::from_shape_vec((text_inputs.len(), max_len), ids_data)?;
+    let mask_array = Array::from_shape_vec((text_inputs.len(), max_len), mask_data)?;
+
+    let image_input_dyn = image_input.into_dyn();
+    let ids_array_dyn = ids_array.into_dyn();
+    let mask_array_dyn = mask_array.into_dyn();
+
+    let image_val = Tensor::from_array(image_input_dyn.as_standard_layout().into_owned())?;
+    let ids_val = Tensor::from_array(ids_array_dyn.as_standard_layout().into_owned())?;
+    let mask_val = Tensor::from_array(mask_array_dyn.as_standard_layout().into_owned())?;
+
+    let mut clip_session = clip_session_mutex.lock().unwrap();
+    let outputs = clip_session.run(ort::inputs![ids_val, image_val, mask_val])?;
+    let logits_dyn = outputs[0].try_extract_array::<f32>()?.to_owned();
+    let logits = logits_dyn.into_dimensionality::<ndarray::Dim<[usize; 2]>>()?;
+    let probs = softmax(&logits);
+    Ok(probs.row(0).to_vec())
+}
+
+/// CLIP zero-shot aesthetic/composition score in [0,1] for non-people photos (landscape,
+/// product, food, still life) — how well-composed/lit/appealing the frame looks. Coarse, but
+/// it adds a composition cue that pure sharpness/exposure can't capture. Reuses the bundled
+/// CLIP model.
+pub fn clip_aesthetic(
+    image: &DynamicImage,
+    clip_session: &Mutex<Session>,
+    tokenizer: &Tokenizer,
+) -> Result<f32> {
+    const PROMPTS: [&str; 2] = [
+        "a sharp, well-composed, well-lit, appealing photograph",
+        "a blurry, poorly composed, badly lit, dull photograph",
+    ];
+    let probs = clip_prompt_probs(image, clip_session, tokenizer, &PROMPTS)?;
+    Ok(probs[0].clamp(0.0, 1.0))
+}
+
+/// Interpretable per-photo people cues, each in [0,1], aggregated over the detected faces.
+/// These feed both the default people score and the "learn from my picks" model.
+#[derive(Clone, Copy, Debug)]
+pub struct FaceCues {
+    pub face_sharp: f32,  // mean per-face sharpness (focus on the subjects)
+    pub look_mean: f32,   // mean P(looking at camera)
+    pub look_worst: f32,  // worst single face's P(looking at camera)
+    pub expr_mean: f32,   // mean P(smiling) — expression
+    pub eyes_worst: f32,  // worst single face's P(eyes open)
+}
+
+/// Detects every face and grades each *cropped face* with one CLIP softmax, returning
+/// interpretable cues (looking-at-camera, expression, eyes-open, face sharpness) aggregated
+/// across faces — `*_worst` keeps the single worst face so one blinker/looker-away demotes
+/// the frame. Returns `None` when no faces are detected (caller falls back to technical).
+pub fn score_faces(
+    image: &DynamicImage,
+    face_session: &Mutex<Session>,
+    clip_session: &Mutex<Session>,
+    tokenizer: &Tokenizer,
+) -> Result<Option<FaceCues>> {
+    // One CLIP softmax per face over five states. Index meanings:
+    // 0 smiling+camera · 1 neutral+camera · 2 eyes-closed · 3 looking-away · 4 frowning.
+    const FACE_PROMPTS: [&str; 5] = [
+        "a close-up photo of a smiling happy face looking at the camera",
+        "a close-up photo of a face looking at the camera with a neutral expression",
+        "a close-up photo of a face with closed eyes, blinking",
+        "a close-up photo of a face turned away from the camera",
+        "a close-up photo of an unhappy frowning face",
+    ];
+    const MAX_FACES: usize = 8; // cap work on big group shots; largest faces first
+
+    let faces = crate::ai_processing::run_face_detection(image, face_session)?;
+    if faces.is_empty() {
+        return Ok(None);
+    }
+
+    let (iw, ih) = (image.width() as f32, image.height() as f32);
+    let mut look: Vec<f32> = Vec::new();
+    let mut expr: Vec<f32> = Vec::new();
+    let mut eyes_open: Vec<f32> = Vec::new();
+    let mut sharp: Vec<f32> = Vec::new();
+    for f in faces.iter().take(MAX_FACES) {
+        // Expand the box ~30% so brows/eyes/mouth aren't clipped, then crop from full-res.
+        let (bw, bh) = (f.x2 - f.x1, f.y2 - f.y1);
+        let x1 = (f.x1 - bw * 0.3).max(0.0);
+        let y1 = (f.y1 - bh * 0.3).max(0.0);
+        let x2 = (f.x2 + bw * 0.3).min(iw);
+        let y2 = (f.y2 + bh * 0.3).min(ih);
+        if x2 <= x1 + 4.0 || y2 <= y1 + 4.0 {
+            continue;
+        }
+        let crop = image.crop_imm(x1 as u32, y1 as u32, (x2 - x1) as u32, (y2 - y1) as u32);
+        let p = clip_prompt_probs(&crop, clip_session, tokenizer, &FACE_PROMPTS)?;
+        look.push((p[0] + p[1]).clamp(0.0, 1.0)); // smiling-at-camera + neutral-at-camera
+        expr.push(p[0].clamp(0.0, 1.0)); // smiling
+        eyes_open.push((1.0 - p[2]).clamp(0.0, 1.0)); // not eyes-closed
+        sharp.push(crate::culling::normalized_sharpness_of(&crop));
+    }
+    if look.is_empty() {
+        return Ok(None);
+    }
+
+    let mean = |v: &[f32]| v.iter().sum::<f32>() / v.len() as f32;
+    let min = |v: &[f32]| v.iter().cloned().fold(f32::INFINITY, f32::min);
+    Ok(Some(FaceCues {
+        face_sharp: mean(&sharp).clamp(0.0, 1.0),
+        look_mean: mean(&look),
+        look_worst: min(&look),
+        expr_mean: mean(&expr),
+        eyes_worst: min(&eyes_open),
+    }))
+}
+
 fn rgb_to_hsv((r, g, b): (u8, u8, u8)) -> (f32, f32, f32) {
     let r = r as f32 / 255.0;
     let g = g as f32 / 255.0;

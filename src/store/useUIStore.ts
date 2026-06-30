@@ -78,6 +78,7 @@ export interface CullingModalState {
 interface UIState {
   // View & Layout
   activeView: string;
+  isImportViewActive: boolean;
   isFullScreen: boolean;
   isWindowFullScreen: boolean;
   isInstantTransition: boolean;
@@ -132,6 +133,7 @@ interface UIState {
 
 export const useUIStore = create<UIState>((set, get) => ({
   activeView: 'library',
+  isImportViewActive: false,
   isFullScreen: false,
   isWindowFullScreen: false,
   isInstantTransition: false,
