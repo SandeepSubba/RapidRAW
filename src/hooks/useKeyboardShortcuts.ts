@@ -29,7 +29,7 @@ export const useKeyboardShortcuts = ({
   handleZoomChange,
 }: KeyboardShortcutsProps) => {
   const { setAdjustments, handleRotate, handleCopyAdjustments, handlePasteAdjustments } = useEditorActions();
-  const { handleRate, handleSetColorLabel } = useLibraryActions();
+  const { handleRate, handleSetColorLabel, handleRotateSelected } = useLibraryActions();
 
   const sortedListRef = useRef(sortedImageList);
   useEffect(() => {
@@ -223,17 +223,20 @@ export const useKeyboardShortcuts = ({
         },
       },
       rotate_left: {
-        shouldFire: (s: any) => !!s.editor.selectedImage,
-        execute: (e: any) => {
+        // In the editor: rotate the open image. In the library: batch-rotate the selection.
+        shouldFire: (s: any) => !!s.editor.selectedImage || s.library.multiSelectedPaths.length > 0,
+        execute: (e: any, s: any) => {
           e.preventDefault();
-          handleRotate(-90);
+          if (s.editor.selectedImage) handleRotate(-90);
+          else handleRotateSelected(-90);
         },
       },
       rotate_right: {
-        shouldFire: (s: any) => !!s.editor.selectedImage,
-        execute: (e: any) => {
+        shouldFire: (s: any) => !!s.editor.selectedImage || s.library.multiSelectedPaths.length > 0,
+        execute: (e: any, s: any) => {
           e.preventDefault();
-          handleRotate(90);
+          if (s.editor.selectedImage) handleRotate(90);
+          else handleRotateSelected(90);
         },
       },
       undo: {
