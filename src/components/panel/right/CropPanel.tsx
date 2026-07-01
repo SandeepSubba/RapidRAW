@@ -442,12 +442,16 @@ export default function CropPanel() {
   const horizontalGuideCount = keystoneLines.length - verticalGuideCount;
   const canApplyGuided = verticalGuideCount >= 2 || horizontalGuideCount >= 2;
 
-  const enterGuided = () =>
-    setAdjustments((prev: Adjustments) => {
-      // Draw on the un-keystoned image: clear perspective, then enter guided mode.
-      setEditor({ guidedKeystoneActive: true, keystoneLines: [] });
-      return { ...prev, transformVertical: 0, transformHorizontal: 0, transformScale: 100 };
-    });
+  const enterGuided = () => {
+    // Draw on the un-keystoned image: clear perspective, then enter guided mode.
+    setAdjustments((prev: Adjustments) => ({
+      ...prev,
+      transformVertical: 0,
+      transformHorizontal: 0,
+      transformScale: 100,
+    }));
+    setEditor({ guidedKeystoneActive: true, keystoneLines: [] });
+  };
 
   const exitGuided = () => setEditor({ guidedKeystoneActive: false, keystoneLines: [] });
 
