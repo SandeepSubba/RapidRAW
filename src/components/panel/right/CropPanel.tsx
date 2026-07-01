@@ -462,13 +462,32 @@ export default function CropPanel() {
 
   const endGeoDrag = useCallback(
     (isDragging: boolean) => {
+      // Flag the drag as interactive so previews take the coalesced, low-latency
+      // live path (like every other slider) instead of full-quality renders.
+      setEditor({ isSliderDragging: isDragging });
       if (!isDragging) {
         commitGeo.flush();
         setLocalGeo((prev) => (Object.keys(prev).length ? {} : prev));
       }
     },
-    [commitGeo],
+    [commitGeo, setEditor],
   );
+
+  // Auto-crop the black borders when a perspective value arrives without a paired
+  // zoom — loaded from a sidecar, undo/redo, or the guided tool. The slider-drag
+  // path already fits Scale in handleGeoChange; this covers every other path. Only
+  // acts while Scale is still at the 100% default, so a manual zoom is never fought.
+  const verticalAdj = (adjustments as any).transformVertical ?? 0;
+  const horizontalAdj = (adjustments as any).transformHorizontal ?? 0;
+  useEffect(() => {
+    if (verticalAdj === 0 && horizontalAdj === 0) return;
+    if (((adjustments as any).transformScale ?? 100) !== 100) return;
+    const fitted = fitScaleForParams(verticalAdj, horizontalAdj);
+    if (Math.abs(fitted - 100) > 0.5) {
+      setAdjustments((prev: Adjustments) => ({ ...prev, transformScale: fitted }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [verticalAdj, horizontalAdj]);
 
   const isVerticalGuide = (l: { x1: number; y1: number; x2: number; y2: number }) =>
     Math.abs(l.y2 - l.y1) >= Math.abs(l.x2 - l.x1);

@@ -67,9 +67,15 @@ export function vanishingPoint(lines: Line[]): { x: number; y: number } | null {
   return best;
 }
 
-// output(x,y) -> source(x,y) using the centered keystone+scale homography.
-// Mirrors build_transform_matrices with rotate=0, aspect=0, offsets=0.
-function forwardSource(
+// output(x,y) -> source(x,y): the TRUE inverse of the backend warp. The backend
+// (warp_image_geometry) builds the source->output matrix then inverts it to
+// sample, so the output->source map is:
+//   X = x-cx, Y = y-cy
+//   w = 1 - pHoriz*X - pVert*Y          (inverse of the perspective row)
+//   srcX = cx + (X / scaleFactor) / w   (inverse of m_scale, so LARGER
+//   srcY = cy + (Y / scaleFactor) / w    scaleFactor pulls the sample toward
+//                                         center => magnify => crops black)
+function invSource(
   x: number,
   y: number,
   pHoriz: number,
@@ -78,10 +84,10 @@ function forwardSource(
   cx: number,
   cy: number,
 ): { x: number; y: number; w: number } {
-  const sx = (x - cx) * scaleFactor;
-  const sy = (y - cy) * scaleFactor;
-  const w = pHoriz * sx + pVert * sy + 1;
-  return { x: cx + sx / w, y: cy + sy / w, w };
+  const X = x - cx;
+  const Y = y - cy;
+  const w = 1 - pHoriz * X - pVert * Y;
+  return { x: cx + X / scaleFactor / w, y: cy + Y / scaleFactor / w, w };
 }
 
 function frameFitsInside(
@@ -97,27 +103,31 @@ function frameFitsInside(
   const ys = [0, cy, height];
   for (const x of xs) {
     for (const y of ys) {
-      const s = forwardSource(x, y, pHoriz, pVert, scaleFactor, cx, cy);
-      if (s.w <= 0) return false;
+      const s = invSource(x, y, pHoriz, pVert, scaleFactor, cx, cy);
+      if (s.w <= 1e-9) return false;
       if (s.x < 0 || s.x > width || s.y < 0 || s.y > height) return false;
     }
   }
   return true;
 }
 
-// Largest scaleFactor in [0.1, 1] that leaves no black border. As the factor
-// shrinks the sampled region moves toward the center, so "fits" is monotonic.
+// Cap the auto-fit zoom at the Scale slider's max (150%).
+const MAX_FIT_SCALE = 1.5;
+
+// Smallest scaleFactor >= 1 that leaves no black border. Zooming in (larger
+// factor) pulls every sampled point toward the center, so "fits" is monotonic
+// in the factor — once it fits it stays fitting.
 function autoFitScale(pHoriz: number, pVert: number, width: number, height: number): number {
   if (frameFitsInside(pHoriz, pVert, 1, width, height)) return 1;
-  let lo = 0.1;
-  let hi = 1;
-  if (!frameFitsInside(pHoriz, pVert, lo, width, height)) return lo;
-  for (let i = 0; i < 28; i++) {
+  let lo = 1;
+  let hi = MAX_FIT_SCALE;
+  if (!frameFitsInside(pHoriz, pVert, hi, width, height)) return hi;
+  for (let i = 0; i < 40; i++) {
     const mid = (lo + hi) / 2;
-    if (frameFitsInside(pHoriz, pVert, mid, width, height)) lo = mid;
-    else hi = mid;
+    if (frameFitsInside(pHoriz, pVert, mid, width, height)) hi = mid;
+    else lo = mid;
   }
-  return lo;
+  return hi;
 }
 
 // Zoom (transformScale) that crops the black borders for a given set of
@@ -126,7 +136,7 @@ const PARAM_TO_P = 100000 / REF_DIM;
 export function fitScaleForParams(vertical: number, horizontal: number): number {
   const pVert = vertical / PARAM_TO_P;
   const pHoriz = -horizontal / PARAM_TO_P;
-  return clamp(autoFitScale(pHoriz, pVert, 1, 1) * 100, 10, 150);
+  return clamp(autoFitScale(pHoriz, pVert, 1, 1) * 100, 100, 150);
 }
 
 export interface SolveInput {
@@ -162,7 +172,7 @@ export function solveKeystone({ verticalGuides, horizontalGuides, width, height 
   return {
     transformVertical: clamp(vertical, -100, 100),
     transformHorizontal: clamp(horizontal, -100, 100),
-    transformScale: clamp(scaleFactor * 100, 10, 150),
+    transformScale: clamp(scaleFactor * 100, 100, 150),
   };
 }
 
