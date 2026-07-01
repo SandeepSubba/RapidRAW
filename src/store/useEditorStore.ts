@@ -54,6 +54,10 @@ interface EditorState {
   liveRotation: number | null;
   brushSettings: BrushSettings | null;
 
+  // Guided keystone: drawn reference lines in normalized (0..1) image coords
+  guidedKeystoneActive: boolean;
+  keystoneLines: Array<{ x1: number; y1: number; x2: number; y2: number }>;
+
   // Masks & AI
   activeMaskContainerId: string | null;
   activeMaskId: string | null;
@@ -115,6 +119,8 @@ export const useEditorStore = create<EditorState>((set) => ({
   isStraightenActive: false,
   isWbPickerActive: false,
   liveRotation: null,
+  guidedKeystoneActive: false,
+  keystoneLines: [],
 
   copiedSectionAdjustments: null,
   copiedMask: null,

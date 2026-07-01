@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Aperture,
+  Check,
   FlipHorizontal,
   FlipVertical,
   Grid3x3,
+  Maximize,
+  PencilRuler,
   RectangleHorizontal,
   RectangleVertical,
   RotateCcw,
@@ -24,10 +27,20 @@ import Slider from '../../ui/Slider';
 import { TEXT_COLOR_KEYS, TextColors, TextVariants, TextWeights } from '../../../types/typography';
 import { useEditorStore } from '../../../store/useEditorStore';
 import { useEditorActions } from '../../../hooks/useEditorActions';
+import { solveKeystone, fitScaleForParams } from '../../../utils/keystone';
 
 const BASE_RATIO = 1.618;
 const ORIGINAL_RATIO = 0;
 const RATIO_TOLERANCE = 0.01;
+
+const PERSPECTIVE_DEFAULTS: Record<string, number> = {
+  transformVertical: 0,
+  transformHorizontal: 0,
+  transformAspect: 0,
+  transformScale: 100,
+  transformXOffset: 0,
+  transformYOffset: 0,
+};
 
 export type OverlayMode = 'none' | 'thirds' | 'goldenTriangle' | 'goldenSpiral' | 'phiGrid' | 'armature' | 'diagonal';
 
@@ -49,6 +62,8 @@ export default function CropPanel() {
   const adjustments = useEditorStore((s) => s.adjustments);
   const isStraightenActive = useEditorStore((s) => s.isStraightenActive);
   const activeOverlay = useEditorStore((s) => s.overlayMode);
+  const guidedKeystoneActive = useEditorStore((s) => s.guidedKeystoneActive);
+  const keystoneLines = useEditorStore((s) => s.keystoneLines);
   const setEditor = useEditorStore((s) => s.setEditor);
   const { setAdjustments } = useEditorActions();
   const [customW, setCustomW] = useState('');
@@ -167,7 +182,7 @@ export default function CropPanel() {
 
   useEffect(() => {
     return () => {
-      setEditor({ liveRotation: null });
+      setEditor({ liveRotation: null, guidedKeystoneActive: false, keystoneLines: [] });
     };
   }, [setEditor]);
 
@@ -383,6 +398,83 @@ export default function CropPanel() {
   }, [rotation]);
 
   const displayRotation = localRotation !== null ? localRotation : fineRotation;
+
+  const PERSPECTIVE_GROUPS = useMemo(
+    () => [
+      {
+        heading: null as string | null,
+        sliders: [
+          { key: 'transformVertical', label: t('modals.transform.vertical'), min: -100, max: 100, step: 1, suffix: '' },
+          {
+            key: 'transformHorizontal',
+            label: t('modals.transform.horizontal'),
+            min: -100,
+            max: 100,
+            step: 1,
+            suffix: '',
+          },
+          { key: 'transformAspect', label: t('modals.transform.aspect'), min: -100, max: 100, step: 1, suffix: '' },
+          { key: 'transformScale', label: t('modals.transform.scale'), min: 50, max: 150, step: 1, suffix: '%' },
+        ],
+      },
+      {
+        heading: t('modals.transform.offset'),
+        sliders: [
+          { key: 'transformXOffset', label: t('modals.transform.xAxis'), min: -100, max: 100, step: 1, suffix: '' },
+          { key: 'transformYOffset', label: t('modals.transform.yAxis'), min: -100, max: 100, step: 1, suffix: '' },
+        ],
+      },
+    ],
+    [t],
+  );
+
+  const isPerspectiveDefault = Object.entries(PERSPECTIVE_DEFAULTS).every(
+    ([k, v]) => ((adjustments as any)[k] ?? v) === v,
+  );
+
+  const resetPerspective = () => setAdjustments((prev: Adjustments) => ({ ...prev, ...PERSPECTIVE_DEFAULTS }));
+
+  // Zoom in until the perspective warp's black borders are gone.
+  const fitPerspective = () =>
+    setAdjustments((prev: Adjustments) => ({
+      ...prev,
+      transformScale: fitScaleForParams(prev.transformVertical ?? 0, prev.transformHorizontal ?? 0),
+    }));
+
+  const setTransform = (key: string, value: number) =>
+    setAdjustments((prev: Adjustments) => ({ ...prev, [key]: value }));
+
+  const isVerticalGuide = (l: { x1: number; y1: number; x2: number; y2: number }) =>
+    Math.abs(l.y2 - l.y1) >= Math.abs(l.x2 - l.x1);
+  const verticalGuideCount = keystoneLines.filter(isVerticalGuide).length;
+  const horizontalGuideCount = keystoneLines.length - verticalGuideCount;
+  const canApplyGuided = verticalGuideCount >= 2 || horizontalGuideCount >= 2;
+
+  const enterGuided = () => {
+    // Draw on the un-keystoned image: clear perspective, then enter guided mode.
+    setAdjustments((prev: Adjustments) => ({
+      ...prev,
+      transformVertical: 0,
+      transformHorizontal: 0,
+      transformScale: 100,
+    }));
+    setEditor({ guidedKeystoneActive: true, keystoneLines: [] });
+  };
+
+  const exitGuided = () => setEditor({ guidedKeystoneActive: false, keystoneLines: [] });
+
+  const applyGuided = () => {
+    const verticalGuides = keystoneLines.filter(isVerticalGuide);
+    const horizontalGuides = keystoneLines.filter((l) => !isVerticalGuide(l));
+    const res = solveKeystone({ verticalGuides, horizontalGuides, width: 1, height: 1 });
+    setAdjustments((prev: Adjustments) => ({
+      ...prev,
+      transformVertical: res.transformVertical,
+      transformHorizontal: res.transformHorizontal,
+      transformScale: res.transformScale,
+    }));
+    setEditor({ guidedKeystoneActive: false, keystoneLines: [] });
+  };
 
   const handleFineRotationChange = (e: any) => {
     const newFineRotation = parseFloat(e.target.value);
@@ -623,6 +715,109 @@ export default function CropPanel() {
                   onDragStateChange={handleDragStateChange}
                 />
               </div>
+            </div>
+
+            <div className="space-y-4">
+              <Text variant={TextVariants.heading} className="mb-2 flex items-center justify-between">
+                {t('modals.transform.perspective')}
+                <div className="flex items-center gap-2">
+                  <button
+                    className={clsx(
+                      'p-1.5 rounded-md transition-colors',
+                      guidedKeystoneActive
+                        ? 'bg-accent text-button-text'
+                        : 'text-text-secondary hover:bg-card-active hover:text-text-primary',
+                    )}
+                    onClick={() => (guidedKeystoneActive ? exitGuided() : enterGuided())}
+                    data-tooltip="Guided keystone: draw 2 lines that should be vertical and/or horizontal"
+                  >
+                    <PencilRuler size={16} />
+                  </button>
+                  <button
+                    className="p-1.5 rounded-md text-text-secondary transition-colors cursor-pointer hover:bg-card-active hover:text-text-primary disabled:opacity-50 disabled:cursor-default"
+                    onClick={fitPerspective}
+                    data-tooltip="Auto-crop black borders"
+                    disabled={(adjustments.transformVertical ?? 0) === 0 && (adjustments.transformHorizontal ?? 0) === 0}
+                  >
+                    <Maximize size={16} />
+                  </button>
+                  <button
+                    className="p-1.5 rounded-md hover:bg-surface transition-colors"
+                    onClick={() => setIsTransformModalOpen(true)}
+                    data-tooltip={t('editor.crop.tooltips.transform')}
+                  >
+                    <Scan size={16} />
+                  </button>
+                  <button
+                    className="p-1.5 rounded-md text-text-secondary transition-colors cursor-pointer hover:bg-card-active hover:text-text-primary disabled:opacity-50 disabled:cursor-default"
+                    onClick={resetPerspective}
+                    data-tooltip={t('modals.transform.resetTooltip')}
+                    disabled={isPerspectiveDefault}
+                  >
+                    <RotateCcw size={14} />
+                  </button>
+                </div>
+              </Text>
+              {guidedKeystoneActive && (
+                <div className="bg-surface p-3 rounded-lg space-y-3">
+                  <Text variant={TextVariants.small} color={TextColors.secondary}>
+                    Drag lines over edges that should be vertical (≥2) or horizontal (≥2). Blue = vertical, green =
+                    horizontal.
+                  </Text>
+                  <Text variant={TextVariants.small} color={TextColors.secondary}>
+                    {`Vertical: ${verticalGuideCount} · Horizontal: ${horizontalGuideCount}`}
+                  </Text>
+                  <div className="flex items-center gap-2">
+                    <button
+                      className="flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-md bg-accent text-button-text disabled:opacity-50 disabled:cursor-default transition-opacity"
+                      onClick={applyGuided}
+                      disabled={!canApplyGuided}
+                    >
+                      <Check size={14} />
+                      <Text color={TextColors.button} variant={TextVariants.small}>
+                        Apply
+                      </Text>
+                    </button>
+                    <button
+                      className="p-1.5 rounded-md text-text-secondary hover:bg-card-active hover:text-text-primary transition-colors disabled:opacity-50 disabled:cursor-default"
+                      onClick={() => setEditor({ keystoneLines: [] })}
+                      data-tooltip={t('modals.transform.resetTooltip')}
+                      disabled={keystoneLines.length === 0}
+                    >
+                      <RotateCcw size={14} />
+                    </button>
+                    <button
+                      className="p-1.5 rounded-md text-text-secondary hover:bg-card-active hover:text-text-primary transition-colors"
+                      onClick={exitGuided}
+                      data-tooltip="Cancel"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                </div>
+              )}
+              {PERSPECTIVE_GROUPS.map((group, gi) => (
+                <div key={gi} className="bg-surface px-4 pt-3 pb-4 rounded-lg space-y-3">
+                  {group.heading && (
+                    <Text variant={TextVariants.small} color={TextColors.secondary}>
+                      {group.heading}
+                    </Text>
+                  )}
+                  {group.sliders.map((s) => (
+                    <Slider
+                      key={s.key}
+                      label={s.label}
+                      min={s.min}
+                      max={s.max}
+                      step={s.step}
+                      suffix={s.suffix}
+                      value={(adjustments as any)[s.key] ?? PERSPECTIVE_DEFAULTS[s.key]}
+                      defaultValue={PERSPECTIVE_DEFAULTS[s.key]}
+                      onChange={(e: any) => setTransform(s.key, parseFloat(e.target.value))}
+                    />
+                  ))}
+                </div>
+              ))}
             </div>
 
             <div className="space-y-4">
