@@ -5,22 +5,20 @@ import {
   FlipHorizontal,
   FlipVertical,
   Grid3x3,
-  Maximize,
   PencilRuler,
   RectangleHorizontal,
   RectangleVertical,
   RotateCcw,
   RotateCw,
   Ruler,
-  Scan,
   X,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Adjustments, INITIAL_ADJUSTMENTS } from '../../../utils/adjustments';
 import clsx from 'clsx';
 import { Orientation } from '../../ui/AppProperties';
-import TransformModal from '../../modals/TransformModal';
 import LensCorrectionModal from '../../modals/LensCorrectionModal';
+import throttle from 'lodash.throttle';
 import { motion } from 'framer-motion';
 import Text from '../../ui/Text';
 import Slider from '../../ui/Slider';
@@ -68,7 +66,6 @@ export default function CropPanel() {
   const { setAdjustments } = useEditorActions();
   const [customW, setCustomW] = useState('');
   const [customH, setCustomH] = useState('');
-  const [isTransformModalOpen, setIsTransformModalOpen] = useState(false);
   const [isLensModalOpen, setIsLensModalOpen] = useState(false);
   const [isRotationActive, setIsRotationActive] = useState(false);
   const [preferPortrait, setPreferPortrait] = useState(false);
@@ -434,15 +431,44 @@ export default function CropPanel() {
 
   const resetPerspective = () => setAdjustments((prev: Adjustments) => ({ ...prev, ...PERSPECTIVE_DEFAULTS }));
 
-  // Zoom in until the perspective warp's black borders are gone.
-  const fitPerspective = () =>
-    setAdjustments((prev: Adjustments) => ({
-      ...prev,
-      transformScale: fitScaleForParams(prev.transformVertical ?? 0, prev.transformHorizontal ?? 0),
-    }));
+  // A geometry change rebuilds a full-resolution warp on the backend, which is
+  // expensive. Keep the slider thumb tracking the mouse via local state, but
+  // throttle the actual commit so we fire ~8/s instead of once per frame.
+  const [localGeo, setLocalGeo] = useState<Record<string, number>>({});
+  const commitGeo = useMemo(
+    () =>
+      throttle(
+        (patch: Record<string, number>) => setAdjustments((prev: Adjustments) => ({ ...prev, ...patch })),
+        120,
+        { leading: true, trailing: true },
+      ),
+    [setAdjustments],
+  );
 
-  const setTransform = (key: string, value: number) =>
-    setAdjustments((prev: Adjustments) => ({ ...prev, [key]: value }));
+  const geoValue = (key: string): number => localGeo[key] ?? (adjustments as any)[key] ?? PERSPECTIVE_DEFAULTS[key];
+
+  const handleGeoChange = (key: string, value: number) => {
+    const patch: Record<string, number> = { [key]: value };
+    // Auto-crop: recompute the zoom that removes the black borders whenever the
+    // perspective (vertical/horizontal) changes — no manual button needed.
+    if (key === 'transformVertical' || key === 'transformHorizontal') {
+      const v = key === 'transformVertical' ? value : geoValue('transformVertical');
+      const h = key === 'transformHorizontal' ? value : geoValue('transformHorizontal');
+      patch.transformScale = fitScaleForParams(v, h);
+    }
+    setLocalGeo((prev) => ({ ...prev, ...patch }));
+    commitGeo(patch);
+  };
+
+  const endGeoDrag = useCallback(
+    (isDragging: boolean) => {
+      if (!isDragging) {
+        commitGeo.flush();
+        setLocalGeo((prev) => (Object.keys(prev).length ? {} : prev));
+      }
+    },
+    [commitGeo],
+  );
 
   const isVerticalGuide = (l: { x1: number; y1: number; x2: number; y2: number }) =>
     Math.abs(l.y2 - l.y1) >= Math.abs(l.x2 - l.x1);
@@ -735,21 +761,6 @@ export default function CropPanel() {
                   </button>
                   <button
                     className="p-1.5 rounded-md text-text-secondary transition-colors cursor-pointer hover:bg-card-active hover:text-text-primary disabled:opacity-50 disabled:cursor-default"
-                    onClick={fitPerspective}
-                    data-tooltip="Auto-crop black borders"
-                    disabled={(adjustments.transformVertical ?? 0) === 0 && (adjustments.transformHorizontal ?? 0) === 0}
-                  >
-                    <Maximize size={16} />
-                  </button>
-                  <button
-                    className="p-1.5 rounded-md hover:bg-surface transition-colors"
-                    onClick={() => setIsTransformModalOpen(true)}
-                    data-tooltip={t('editor.crop.tooltips.transform')}
-                  >
-                    <Scan size={16} />
-                  </button>
-                  <button
-                    className="p-1.5 rounded-md text-text-secondary transition-colors cursor-pointer hover:bg-card-active hover:text-text-primary disabled:opacity-50 disabled:cursor-default"
                     onClick={resetPerspective}
                     data-tooltip={t('modals.transform.resetTooltip')}
                     disabled={isPerspectiveDefault}
@@ -811,9 +822,10 @@ export default function CropPanel() {
                       max={s.max}
                       step={s.step}
                       suffix={s.suffix}
-                      value={(adjustments as any)[s.key] ?? PERSPECTIVE_DEFAULTS[s.key]}
+                      value={geoValue(s.key)}
                       defaultValue={PERSPECTIVE_DEFAULTS[s.key]}
-                      onChange={(e: any) => setTransform(s.key, parseFloat(e.target.value))}
+                      onChange={(e: any) => handleGeoChange(s.key, parseFloat(e.target.value))}
+                      onDragStateChange={endGeoDrag}
                     />
                   ))}
                 </div>
@@ -887,17 +899,7 @@ export default function CropPanel() {
               <Text variant={TextVariants.heading} className="mb-2">
                 {t('editor.crop.geometryHeading')}
               </Text>
-              <div className="grid grid-cols-2 gap-2">
-                <motion.div
-                  className="flex flex-col items-center justify-center p-3 cursor-pointer rounded-lg transition-colors bg-surface text-text-secondary hover:bg-card-active hover:text-text-primary group"
-                  onClick={() => setIsTransformModalOpen(true)}
-                  data-tooltip={t('editor.crop.tooltips.transform')}
-                  whileTap={{ scale: 0.98 }}
-                  transition={{ type: 'spring', stiffness: 400, damping: 17 }}
-                >
-                  <Scan size={20} className="transition-none" />
-                  <span className="text-xs mt-2 transition-none">{t('editor.crop.labels.transform')}</span>
-                </motion.div>
+              <div className="grid grid-cols-1 gap-2">
                 <motion.div
                   className="flex flex-col items-center justify-center p-3  cursor-pointer rounded-lg transition-colors bg-surface text-text-secondary hover:bg-card-active hover:text-text-primary group"
                   onClick={() => setIsLensModalOpen(true)}
@@ -922,25 +924,6 @@ export default function CropPanel() {
           </Text>
         )}
       </div>
-
-      <TransformModal
-        isOpen={isTransformModalOpen}
-        onClose={() => setIsTransformModalOpen(false)}
-        onApply={(newParams) => {
-          setAdjustments((prev: Adjustments) => ({
-            ...prev,
-            transformDistortion: newParams.distortion,
-            transformVertical: newParams.vertical,
-            transformHorizontal: newParams.horizontal,
-            transformRotate: newParams.rotate,
-            transformAspect: newParams.aspect,
-            transformScale: newParams.scale,
-            transformXOffset: newParams.x_offset,
-            transformYOffset: newParams.y_offset,
-          }));
-        }}
-        currentAdjustments={adjustments}
-      />
 
       <LensCorrectionModal
         isOpen={isLensModalOpen}
