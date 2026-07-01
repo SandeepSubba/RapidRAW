@@ -105,19 +105,28 @@ function frameFitsInside(
   return true;
 }
 
-// Largest scaleFactor in [0.5, 1] that leaves no black border. As the factor
+// Largest scaleFactor in [0.1, 1] that leaves no black border. As the factor
 // shrinks the sampled region moves toward the center, so "fits" is monotonic.
 function autoFitScale(pHoriz: number, pVert: number, width: number, height: number): number {
   if (frameFitsInside(pHoriz, pVert, 1, width, height)) return 1;
-  let lo = 0.5;
+  let lo = 0.1;
   let hi = 1;
   if (!frameFitsInside(pHoriz, pVert, lo, width, height)) return lo;
-  for (let i = 0; i < 24; i++) {
+  for (let i = 0; i < 28; i++) {
     const mid = (lo + hi) / 2;
     if (frameFitsInside(pHoriz, pVert, mid, width, height)) lo = mid;
     else hi = mid;
   }
   return lo;
+}
+
+// Zoom (transformScale) that crops the black borders for a given set of
+// perspective params. Scale-invariant, so it runs in normalized coords.
+const PARAM_TO_P = 100000 / REF_DIM;
+export function fitScaleForParams(vertical: number, horizontal: number): number {
+  const pVert = vertical / PARAM_TO_P;
+  const pHoriz = -horizontal / PARAM_TO_P;
+  return clamp(autoFitScale(pHoriz, pVert, 1, 1) * 100, 10, 150);
 }
 
 export interface SolveInput {
@@ -153,7 +162,7 @@ export function solveKeystone({ verticalGuides, horizontalGuides, width, height 
   return {
     transformVertical: clamp(vertical, -100, 100),
     transformHorizontal: clamp(horizontal, -100, 100),
-    transformScale: clamp(scaleFactor * 100, 50, 150),
+    transformScale: clamp(scaleFactor * 100, 10, 150),
   };
 }
 

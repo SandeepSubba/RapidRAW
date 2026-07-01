@@ -28,7 +28,7 @@ assert(Math.abs(vp.x - VPx) < 1 && Math.abs(vp.y - VPy) < 1, 'VP intersection wr
 const expected = ((1 / (VPy - H / 2)) * 100000 * H) / 2000;
 assert(Math.abs(v.transformVertical - expected) < 0.01, `vertical ${v.transformVertical} != ${expected}`);
 assert(v.transformHorizontal === 0, 'horizontal should be 0');
-assert(v.transformScale < 100 && v.transformScale >= 50, 'should zoom in to crop black');
+assert(v.transformScale < 100 && v.transformScale >= 10, 'should zoom in to crop black');
 
 // 2) Already-parallel verticals -> no correction, no crop.
 const p = solveKeystone({
@@ -72,3 +72,14 @@ assert(Math.abs(n.transformVertical - v.transformVertical) < 1e-6, 'vertical sho
 assert(Math.abs(n.transformScale - v.transformScale) < 1e-6, 'crop should be scale invariant');
 
 console.log('ALL KEYSTONE SOLVER CHECKS PASSED');
+
+// 5) Strong keystone can zoom past the old 50% floor.
+const strong = solveKeystone({
+  verticalGuides: [
+    { x1: 200 / W, y1: 3000 / H, x2: 2000 / W, y2: -6000 / H },
+    { x1: 3800 / W, y1: 3000 / H, x2: 2000 / W, y2: -6000 / H },
+  ],
+  horizontalGuides: [], width: 1, height: 1,
+});
+console.log('strong case:', strong);
+assert(strong.transformScale < 100, 'strong keystone should still crop');

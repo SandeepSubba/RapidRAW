@@ -5,6 +5,7 @@ import {
   FlipHorizontal,
   FlipVertical,
   Grid3x3,
+  Maximize,
   PencilRuler,
   RectangleHorizontal,
   RectangleVertical,
@@ -26,7 +27,7 @@ import Slider from '../../ui/Slider';
 import { TEXT_COLOR_KEYS, TextColors, TextVariants, TextWeights } from '../../../types/typography';
 import { useEditorStore } from '../../../store/useEditorStore';
 import { useEditorActions } from '../../../hooks/useEditorActions';
-import { solveKeystone } from '../../../utils/keystone';
+import { solveKeystone, fitScaleForParams } from '../../../utils/keystone';
 
 const BASE_RATIO = 1.618;
 const ORIGINAL_RATIO = 0;
@@ -433,6 +434,13 @@ export default function CropPanel() {
 
   const resetPerspective = () => setAdjustments((prev: Adjustments) => ({ ...prev, ...PERSPECTIVE_DEFAULTS }));
 
+  // Zoom in until the perspective warp's black borders are gone.
+  const fitPerspective = () =>
+    setAdjustments((prev: Adjustments) => ({
+      ...prev,
+      transformScale: fitScaleForParams(prev.transformVertical ?? 0, prev.transformHorizontal ?? 0),
+    }));
+
   const setTransform = (key: string, value: number) =>
     setAdjustments((prev: Adjustments) => ({ ...prev, [key]: value }));
 
@@ -724,6 +732,14 @@ export default function CropPanel() {
                     data-tooltip="Guided keystone: draw 2 lines that should be vertical and/or horizontal"
                   >
                     <PencilRuler size={16} />
+                  </button>
+                  <button
+                    className="p-1.5 rounded-md text-text-secondary transition-colors cursor-pointer hover:bg-card-active hover:text-text-primary disabled:opacity-50 disabled:cursor-default"
+                    onClick={fitPerspective}
+                    data-tooltip="Auto-crop black borders"
+                    disabled={(adjustments.transformVertical ?? 0) === 0 && (adjustments.transformHorizontal ?? 0) === 0}
+                  >
+                    <Maximize size={16} />
                   </button>
                   <button
                     className="p-1.5 rounded-md hover:bg-surface transition-colors"
