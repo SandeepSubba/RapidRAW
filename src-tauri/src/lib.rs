@@ -163,49 +163,46 @@ pub fn generate_transformed_preview(
 ) -> Result<(DynamicImage, f32, (f32, f32)), String> {
     let transform_hash = calculate_transform_hash(adjustments);
 
-    let (transformed_full_res, unscaled_crop_offset) = {
-        let mut cache_lock = state.full_transformed_cache.lock().unwrap();
-        if let Some((hash, img, offset)) = cache_lock.as_ref() {
-            if *hash == transform_hash {
-                (Arc::clone(img), *offset)
-            } else {
-                let (arc_img, offset) = compute_full_transformed_res(loaded_image, adjustments)?;
-                *cache_lock = Some((transform_hash, Arc::clone(&arc_img), offset));
-                (arc_img, offset)
+    {
+        let cache_lock = state.full_transformed_cache.lock().unwrap();
+        if let Some((hash, dim, img, scale, offset)) = cache_lock.as_ref() {
+            if *hash == transform_hash && *dim == preview_dim {
+                return Ok(((**img).clone(), *scale, *offset));
             }
-        } else {
-            let (arc_img, offset) = compute_full_transformed_res(loaded_image, adjustments)?;
-            *cache_lock = Some((transform_hash, Arc::clone(&arc_img), offset));
-            (arc_img, offset)
         }
-    };
+    }
 
-    let (full_res_w, full_res_h) = transformed_full_res.dimensions();
+    let (preview_base, scale_for_gpu, unscaled_crop_offset) =
+        compute_preview_transformed(loaded_image, adjustments, preview_dim)?;
+    let arc_img = Arc::new(preview_base);
 
-    let final_preview_base = if full_res_w > preview_dim || full_res_h > preview_dim {
-        downscale_f32_image(&transformed_full_res, preview_dim, preview_dim)
-    } else {
-        (*transformed_full_res).clone()
-    };
+    *state.full_transformed_cache.lock().unwrap() = Some((
+        transform_hash,
+        preview_dim,
+        Arc::clone(&arc_img),
+        scale_for_gpu,
+        unscaled_crop_offset,
+    ));
 
-    let scale_for_gpu = if full_res_w > 0 {
-        final_preview_base.width() as f32 / full_res_w as f32
-    } else {
-        1.0
-    };
-
-    Ok((final_preview_base, scale_for_gpu, unscaled_crop_offset))
+    Ok(((*arc_img).clone(), scale_for_gpu, unscaled_crop_offset))
 }
 
-fn compute_full_transformed_res(
+// The geometry warp is scale-invariant (see build_transform_matrices: the perspective row
+// scales as ref_dim/height, offsets scale with width/height). So warping a source that has
+// already been downscaled to preview resolution is visually identical to warping full-res and
+// then downscaling — but avoids allocating a full-res (~300MB) f32 warp buffer per edit and
+// makes the warp itself ~10x cheaper. The returned offset is kept in full-res pixels and
+// scale_for_gpu = downscale factor, so `offset * scale` stays in preview-space px as before.
+fn compute_preview_transformed(
     loaded_image: &LoadedImage,
     adjustments: &serde_json::Value,
-) -> Result<(Arc<DynamicImage>, (f32, f32)), String> {
+    preview_dim: u32,
+) -> Result<(DynamicImage, f32, (f32, f32)), String> {
     let has_patches = adjustments
         .get("aiPatches")
         .and_then(|v| v.as_array())
         .is_some_and(|a| !a.is_empty());
-    let patched_original_image = if has_patches {
+    let patched: Cow<DynamicImage> = if has_patches {
         Cow::Owned(
             composite_patches_on_image(&loaded_image.image, adjustments)
                 .map_err(|e| format!("Failed to composite AI patches: {}", e))?,
@@ -214,8 +211,49 @@ fn compute_full_transformed_res(
         Cow::Borrowed(loaded_image.image.as_ref())
     };
 
-    let (transformed_img, offset) = apply_all_transformations(patched_original_image, adjustments);
-    Ok((Arc::new(transformed_img.into_owned()), offset))
+    let (full_w, full_h) = patched.dimensions();
+
+    // The displayed preview is bounded by the *cropped* output, so size the source so the
+    // cropped result fills the preview box (matches the old full-res behavior's resolution).
+    let crop_max = adjustments.get("crop").and_then(|c| {
+        let w = c.get("width")?.as_f64()?;
+        let h = c.get("height")?.as_f64()?;
+        (w > 0.0 && h > 0.0).then(|| w.max(h) as f32)
+    });
+    let target_max = crop_max.unwrap_or(full_w.max(full_h) as f32);
+    let s = preview_dim as f32 / target_max;
+
+    if s < 0.98 {
+        // Fast path: downscale the source, then warp at preview resolution.
+        let small_w = (full_w as f32 * s).round().max(1.0) as u32;
+        let small_h = (full_h as f32 * s).round().max(1.0) as u32;
+        let small_src = downscale_f32_image(patched.as_ref(), small_w, small_h);
+
+        let mut adj = adjustments.clone();
+        if let Some(crop) = adj.get_mut("crop").and_then(|c| c.as_object_mut()) {
+            for k in ["x", "y", "width", "height"] {
+                if let Some(v) = crop.get(k).and_then(|v| v.as_f64()) {
+                    crop[k] = serde_json::json!(v * s as f64);
+                }
+            }
+        }
+
+        let (out, off_small) = apply_all_transformations(Cow::Owned(small_src), &adj);
+        // Report the offset in full-res pixels so downstream `offset * scale` == preview px.
+        let offset = (off_small.0 / s, off_small.1 / s);
+        return Ok((out.into_owned(), s, offset));
+    }
+
+    // Slow path (small image or tight crop): warp at native resolution, then downscale to fit.
+    let (transformed, offset) = apply_all_transformations(patched, adjustments);
+    let (tw, th) = transformed.dimensions();
+    let out = if tw > preview_dim || th > preview_dim {
+        downscale_f32_image(transformed.as_ref(), preview_dim, preview_dim)
+    } else {
+        transformed.into_owned()
+    };
+    let scale = if tw > 0 { out.width() as f32 / tw as f32 } else { 1.0 };
+    Ok((out, scale, offset))
 }
 
 pub fn get_or_load_lut(state: &tauri::State<AppState>, path: &str) -> Result<Arc<Lut>, String> {
@@ -746,8 +784,19 @@ fn generate_uncropped_preview(
         .clone()
         .ok_or("No original image loaded")?;
 
+    // Coalesce: a fast perspective/crop drag fires this on every change. Bump a
+    // generation counter and let superseded jobs bail before doing any work, so
+    // we never run several full previews concurrently.
+    let my_generation = state
+        .uncropped_preview_generation
+        .fetch_add(1, Ordering::SeqCst)
+        + 1;
+
     thread::spawn(move || {
         let state = app_handle.state::<AppState>();
+        if state.uncropped_preview_generation.load(Ordering::SeqCst) != my_generation {
+            return; // a newer request already superseded this one
+        }
         let path = loaded_image.path.clone();
         let is_raw = loaded_image.is_raw;
         let unique_hash = calculate_full_job_hash(&path, &adjustments_clone);
@@ -768,7 +817,25 @@ fn generate_uncropped_preview(
             Cow::Borrowed(loaded_image.image.as_ref())
         };
 
-        let warped_image = apply_geometry_warp(patched_image, &adjustments_clone);
+        let settings = load_settings(app_handle.clone()).unwrap_or_default();
+        let preview_dim = settings.editor_preview_resolution.unwrap_or(1920);
+
+        // Warp at preview resolution: downscale the source FIRST, then warp. The
+        // keystone/geometry homography is scale-invariant, so this is visually
+        // identical to warping full-res and downscaling — but avoids the ~300MB
+        // full-res f32 warp buffer and is ~10x cheaper. There is no crop here, so
+        // the whole (downscaled) frame maps to ~preview_dim.
+        let (full_w, full_h) = patched_image.dimensions();
+        let s = (preview_dim as f32 / full_w.max(full_h) as f32).min(1.0);
+        let warp_input: Cow<DynamicImage> = if s < 0.98 {
+            let sw = (full_w as f32 * s).round().max(1.0) as u32;
+            let sh = (full_h as f32 * s).round().max(1.0) as u32;
+            Cow::Owned(downscale_f32_image(patched_image.as_ref(), sw, sh))
+        } else {
+            patched_image
+        };
+
+        let warped_image = apply_geometry_warp(warp_input, &adjustments_clone);
 
         let orientation_steps = adjustments_clone["orientationSteps"].as_u64().unwrap_or(0) as u8;
         let coarse_rotated_image = apply_coarse_rotation(warped_image, orientation_steps);
@@ -781,23 +848,14 @@ fn generate_uncropped_preview(
         let flipped_image =
             apply_flip(coarse_rotated_image, flip_horizontal, flip_vertical).into_owned();
 
-        let settings = load_settings(app_handle.clone()).unwrap_or_default();
-        let preview_dim = settings.editor_preview_resolution.unwrap_or(1920);
+        // scale_for_gpu maps full-res coords -> this preview (used for masks).
+        // Since we downscaled the source by s before warping, that factor is s.
+        let processing_base = flipped_image;
+        let scale_for_gpu = if s < 0.98 { s } else { 1.0 };
 
-        let (rotated_w, rotated_h) = flipped_image.dimensions();
-
-        let (processing_base, scale_for_gpu) = if rotated_w > preview_dim || rotated_h > preview_dim
-        {
-            let base = downscale_f32_image(&flipped_image, preview_dim, preview_dim);
-            let scale = if rotated_w > 0 {
-                base.width() as f32 / rotated_w as f32
-            } else {
-                1.0
-            };
-            (base, scale)
-        } else {
-            (flipped_image.clone(), 1.0)
-        };
+        if state.uncropped_preview_generation.load(Ordering::SeqCst) != my_generation {
+            return; // superseded while we were warping
+        }
 
         let (preview_width, preview_height) = processing_base.dimensions();
 
@@ -2223,6 +2281,7 @@ pub fn run() {
             thumbnail_geometry_cache: Mutex::new(HashMap::new()),
             lens_db: Mutex::new(None),
             load_image_generation: Arc::new(AtomicUsize::new(0)),
+            uncropped_preview_generation: Arc::new(AtomicUsize::new(0)),
             full_warped_cache: Mutex::new(None),
             full_transformed_cache: Mutex::new(None),
             decoded_image_cache: Mutex::new(DecodedImageCache::new(5)),

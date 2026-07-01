@@ -104,7 +104,8 @@ impl ThumbnailManager {
     }
 }
 
-pub type TransformedImageCache = (u64, Arc<DynamicImage>, (f32, f32));
+// (transform_hash, preview_dim, preview-resolution transformed image, scale_for_gpu, unscaled_crop_offset)
+pub type TransformedImageCache = (u64, u32, Arc<DynamicImage>, f32, (f32, f32));
 
 pub struct AppState {
     pub window_setup_complete: AtomicBool,
@@ -133,6 +134,9 @@ pub struct AppState {
     pub thumbnail_geometry_cache: Mutex<HashMap<String, (u64, DynamicImage, f32)>>,
     pub lens_db: Mutex<Option<Arc<LensDatabase>>>,
     pub load_image_generation: Arc<AtomicUsize>,
+    // Bumped on every uncropped-preview request so stale in-flight jobs (from a
+    // fast drag) can detect they've been superseded and bail before doing work.
+    pub uncropped_preview_generation: Arc<AtomicUsize>,
     pub full_warped_cache: Mutex<Option<(u64, Arc<DynamicImage>)>>,
     pub full_transformed_cache: Mutex<Option<TransformedImageCache>>,
     pub decoded_image_cache: Mutex<DecodedImageCache>,

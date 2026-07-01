@@ -37,17 +37,19 @@ export default function GuidedKeystoneOverlay({ renderSize }: { renderSize: Rend
   const { width, height, offsetX, offsetY } = renderSize;
   if (!width || !height) return null;
 
-  // client px -> normalized 0..1 image coords (getScreenCTM handles pan/zoom)
+  // client px -> normalized 0..1 image coords. Use the SVG's on-screen rect,
+  // which already reflects the pan/zoom CSS transform on the ancestor content
+  // div — getScreenCTM() does not reliably fold in ancestor HTML transforms, so
+  // handles landed offset from the cursor when panned/zoomed.
   const toNorm = (clientX: number, clientY: number): { x: number; y: number } | null => {
     const svg = svgRef.current;
     if (!svg) return null;
-    const ctm = svg.getScreenCTM();
-    if (!ctm) return null;
-    const pt = svg.createSVGPoint();
-    pt.x = clientX;
-    pt.y = clientY;
-    const p = pt.matrixTransform(ctm.inverse());
-    return { x: clamp01(p.x / width), y: clamp01(p.y / height) };
+    const rect = svg.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
+    return {
+      x: clamp01((clientX - rect.left) / rect.width),
+      y: clamp01((clientY - rect.top) / rect.height),
+    };
   };
 
   const getLines = () => useEditorStore.getState().keystoneLines;
