@@ -424,7 +424,52 @@ pub fn eject_drive(mount_point: String) -> Result<(), String> {
             Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
         }
     }
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+        // Windows has no simple eject CLI, so drive the same shell "Eject" verb that
+        // Explorer's right-click -> Eject uses: it flushes caches and safely removes the
+        // volume without elevation. `mount_point` from sysinfo looks like "E:\".
+        let drive = mount_point.trim_end_matches(['\\', '/']).to_string();
+        if drive.len() < 2 {
+            return Err(format!("Invalid drive path: {mount_point}"));
+        }
+
+        // Fire the Eject verb, then poll (up to ~3s) until the drive letter disappears so
+        // we can report a real success/failure instead of firing blindly.
+        let script = format!(
+            "$ErrorActionPreference='Stop'; \
+             $drive='{drive}'; \
+             $item=(New-Object -ComObject Shell.Application).Namespace(17).ParseName($drive); \
+             if ($null -eq $item) {{ throw \"Drive $drive not found\" }} \
+             $item.InvokeVerb('Eject'); \
+             for ($i=0; $i -lt 20; $i++) {{ if (-not (Test-Path -LiteralPath ($drive + '\\'))) {{ exit 0 }} Start-Sleep -Milliseconds 150 }} \
+             throw 'The card is still mounted; it may still be in use.'"
+        );
+        // Pass as UTF-16LE base64 so we don't fight cmd/PowerShell quoting rules.
+        let wide: Vec<u8> = script.encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
+        let encoded = general_purpose::STANDARD.encode(&wide);
+
+        let out = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-EncodedCommand", &encoded])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output()
+            .map_err(|e| e.to_string())?;
+        if out.status.success() {
+            Ok(())
+        } else {
+            let msg = String::from_utf8_lossy(&out.stderr);
+            let msg = msg.trim();
+            if msg.is_empty() {
+                Err("Failed to eject the card.".to_string())
+            } else {
+                Err(msg.to_string())
+            }
+        }
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
     {
         let _ = mount_point;
         Err("Eject is not supported on this platform.".into())
