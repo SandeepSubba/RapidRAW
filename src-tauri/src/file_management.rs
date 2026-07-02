@@ -160,6 +160,10 @@ pub struct ImportSettings {
     pub organize_by_date: bool,
     pub date_folder_format: String,
     pub delete_after_import: bool,
+    /// When true, imported files whose camera/lens is found in the Lensfun
+    /// database get an `auto` lens-correction profile written into their sidecar.
+    #[serde(default)]
+    pub auto_lens_correction: bool,
 }
 
 pub fn parse_virtual_path(virtual_path: &str) -> (PathBuf, PathBuf) {
@@ -1710,6 +1714,90 @@ pub fn resolve_lens_params_in_adjustments(
     }
 }
 
+/// Auto-apply lens correction to a freshly-imported file based on its EXIF.
+///
+/// Reads the image's maker/lens/focal metadata, matches it against the Lensfun
+/// database via [`resolve_lens_params_in_adjustments`], and — only when a lens
+/// profile is actually found — writes an `auto` lens-correction block into the
+/// image's sidecar adjustments. It's a no-op (leaving the file untouched, no
+/// sidecar written) when the DB is unavailable, EXIF is missing, or no matching
+/// lens profile exists. Failures are logged and swallowed so one bad file never
+/// aborts an import.
+fn apply_auto_lens_correction(
+    dest_path: &Path,
+    lens_db: Option<&crate::lens_correction::LensDatabase>,
+) {
+    let Some(db) = lens_db else {
+        return;
+    };
+
+    let path_str = dest_path.to_string_lossy().to_string();
+    let bytes = match fs::read(dest_path) {
+        Ok(b) => b,
+        Err(e) => {
+            log::warn!("Auto lens correction: failed to read {}: {}", path_str, e);
+            return;
+        }
+    };
+
+    let exif = crate::exif_processing::read_exif_data_from_bytes(&path_str, &bytes);
+    if exif.is_empty() {
+        return;
+    }
+
+    let sidecar_path = crate::exif_processing::get_primary_sidecar_path(dest_path);
+    let mut metadata = crate::exif_processing::load_sidecar(&sidecar_path);
+    if metadata.exif.is_none() {
+        metadata.exif = Some(exif);
+    }
+
+    let mut adjustments = metadata.adjustments.clone();
+    if adjustments.is_null() {
+        adjustments = serde_json::json!({});
+    }
+    if let Some(map) = adjustments.as_object_mut() {
+        map.insert("lensCorrectionMode".to_string(), serde_json::json!("auto"));
+        map.insert("lensDistortionEnabled".to_string(), serde_json::json!(true));
+        map.insert("lensTcaEnabled".to_string(), serde_json::json!(true));
+        map.insert("lensVignetteEnabled".to_string(), serde_json::json!(true));
+        map.entry("lensDistortionAmount")
+            .or_insert(serde_json::json!(100));
+        map.entry("lensVignetteAmount")
+            .or_insert(serde_json::json!(100));
+        map.entry("lensTcaAmount").or_insert(serde_json::json!(100));
+    }
+
+    resolve_lens_params_in_adjustments(&mut adjustments, &metadata.exif, Some(db));
+
+    // Only persist when a lens profile was actually matched; otherwise leave the
+    // imported file untouched (no sidecar written for unrecognised lenses).
+    let matched = adjustments
+        .get("lensDistortionParams")
+        .map(|v| !v.is_null())
+        .unwrap_or(false);
+    if !matched {
+        return;
+    }
+
+    metadata.adjustments = adjustments;
+    match serde_json::to_string_pretty(&metadata) {
+        Ok(json) => {
+            if let Err(e) = fs::write(&sidecar_path, json) {
+                log::warn!(
+                    "Auto lens correction: failed to write sidecar {}: {}",
+                    sidecar_path.display(),
+                    e
+                );
+            }
+        }
+        Err(e) => log::warn!(
+            "Auto lens correction: serialize failed for {}: {}",
+            path_str,
+            e
+        ),
+    }
+}
+
 #[tauri::command]
 pub fn get_supported_file_types() -> Result<serde_json::Value, String> {
     let raw_extensions: Vec<&str> = crate::formats::RAW_EXTENSIONS
@@ -3087,6 +3175,19 @@ pub async fn import_files(
     let total_files = source_paths.len();
     let _ = app_handle.emit("import-start", serde_json::json!({ "total": total_files }));
 
+    // Snapshot the shared Lensfun DB once (cheap Arc clone) so the blocking loop can
+    // auto-apply lens correction without holding the AppState lock per file.
+    let lens_db = if settings.auto_lens_correction {
+        app_handle
+            .state::<crate::AppState>()
+            .lens_db
+            .lock()
+            .ok()
+            .and_then(|guard| guard.clone())
+    } else {
+        None
+    };
+
     tauri::async_runtime::spawn_blocking(move || {
         for (i, source_path_str) in source_paths.iter().enumerate() {
             let _ = app_handle.emit(
@@ -3211,6 +3312,10 @@ pub async fn import_files(
                     dest_rrexif_name.push(".rrexif");
                     let dest_rrexif = dest_file_path.with_file_name(dest_rrexif_name);
                     let _ = fs::copy(&source_rrexif, &dest_rrexif);
+                }
+
+                if settings.auto_lens_correction {
+                    apply_auto_lens_correction(&dest_file_path, lens_db.as_deref());
                 }
 
                 if settings.delete_after_import {

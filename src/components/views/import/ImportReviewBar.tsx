@@ -56,6 +56,16 @@ export default function ImportReviewBar() {
               onChange={(v: boolean) => setImport({ importSettings: { ...importSettings, deleteAfterImport: v } })}
             />
             <Switch
+              label="Auto lens correction (from metadata)"
+              checked={importSettings.autoLensCorrection}
+              onChange={(v: boolean) => setImport({ importSettings: { ...importSettings, autoLensCorrection: v } })}
+            />
+            {importSettings.autoLensCorrection && (
+              <span className="text-xs text-text-secondary">
+                Applies a Lensfun distortion/vignette/CA profile to imported photos whose lens is recognised.
+              </span>
+            )}
+            <Switch
               label="Exclude already-imported (skip duplicates)"
               checked={excludeImported}
               onChange={(v: boolean) => setExcludeImported(v)}

@@ -21,6 +21,7 @@ export default function ImportSettingsModal({ fileCount, isOpen, onClose, onSave
   const [organizeByDate, setOrganizeByDate] = useState(false);
   const [dateFolderFormat, setDateFolderFormat] = useState('YYYY/MM-DD');
   const [deleteAfterImport, setDeleteAfterImport] = useState(false);
+  const [autoLensCorrection, setAutoLensCorrection] = useState(true);
   const filenameInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -52,9 +53,19 @@ export default function ImportSettingsModal({ fileCount, isOpen, onClose, onSave
       organizeByDate,
       dateFolderFormat,
       deleteAfterImport,
+      autoLensCorrection,
     });
     onClose();
-  }, [onSave, onClose, filenameTemplate, organizeByDate, dateFolderFormat, deleteAfterImport, fileCount]);
+  }, [
+    onSave,
+    onClose,
+    filenameTemplate,
+    organizeByDate,
+    dateFolderFormat,
+    deleteAfterImport,
+    autoLensCorrection,
+    fileCount,
+  ]);
 
   const handleKeyDown = useCallback(
     (e: any) => {
@@ -171,6 +182,22 @@ export default function ImportSettingsModal({ fileCount, isOpen, onClose, onSave
             {deleteAfterImport && (
               <Text variant={TextVariants.small} className="mt-1">
                 {t('modals.importSettings.deleteWarning')}
+              </Text>
+            )}
+          </div>
+
+          <div>
+            <Text variant={TextVariants.heading} className="block mb-2">
+              {t('modals.importSettings.corrections')}
+            </Text>
+            <Switch
+              checked={autoLensCorrection}
+              label={t('modals.importSettings.autoLensCorrection')}
+              onChange={setAutoLensCorrection}
+            />
+            {autoLensCorrection && (
+              <Text variant={TextVariants.small} className="mt-1">
+                {t('modals.importSettings.autoLensCorrectionHint')}
               </Text>
             )}
           </div>

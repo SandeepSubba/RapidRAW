@@ -20,6 +20,7 @@ export interface ImportFileSettings {
   organizeByDate: boolean;
   dateFolderFormat: string;
   deleteAfterImport: boolean;
+  autoLensCorrection: boolean;
 }
 
 export type ImportStage = 'source' | 'scanning' | 'culling' | 'scoring' | 'review' | 'importing';
@@ -109,6 +110,7 @@ const INITIAL: Omit<ImportState, 'setImport' | 'toggleKeep' | 'reset'> = {
     organizeByDate: false,
     dateFolderFormat: 'YYYY/MM-DD',
     deleteAfterImport: false,
+    autoLensCorrection: true,
   },
   excludeImported: false,
   alreadyImported: new Set<string>(),
