@@ -1190,7 +1190,10 @@
       "title": "Merge to HDR"
     },
     "importSettings": {
+      "autoLensCorrection": "Auto lens correction from metadata",
+      "autoLensCorrectionHint": "Applies a Lensfun distortion/vignette/chromatic-aberration profile to imported photos whose lens is recognised.",
       "cancel": "Cancel",
+      "corrections": "Corrections",
       "dateFormat": "Date Format",
       "dateFormatPlaceholder": "e.g., YYYY/MM-DD",
       "deleteAfterImport": "Delete originals after successful import",
