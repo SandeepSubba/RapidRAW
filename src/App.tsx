@@ -287,6 +287,16 @@ function App() {
 
   const sortedImageList = useSortedLibrary();
 
+  // Consume "open with file" requests forwarded by a second instance (e.g. the user
+  // double-clicks a raw in Finder while the app is already running). The listener in
+  // useTauriListeners only stores the path; without this effect it was never acted on.
+  const initialFileToOpen = useProcessStore((s) => s.initialFileToOpen);
+  useEffect(() => {
+    if (!initialFileToOpen) return;
+    useProcessStore.getState().setProcess({ initialFileToOpen: null });
+    handleImageSelect(initialFileToOpen);
+  }, [initialFileToOpen, handleImageSelect]);
+
   // When the currently-focused image drops out of the filtered/sorted view (e.g. its
   // rating is lowered below the active star filter), keep the cursor on the view by
   // advancing to the nearest still-visible image instead of losing the selection.

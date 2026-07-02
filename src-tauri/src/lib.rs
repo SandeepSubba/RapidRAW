@@ -1960,21 +1960,23 @@ pub fn run() {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
-            log::info!(
-                "New instance launched with args: {:?}. Focusing main window.",
-                argv
-            );
-            if let Some(window) = app.get_webview_window("main") {
-                if let Err(e) = window.unminimize() {
-                    log::error!("Failed to unminimize window: {}", e);
-                }
-                if let Err(e) = window.set_focus() {
-                    log::error!("Failed to set focus on window: {}", e);
+            log::info!("New instance launched with args: {:?}.", argv);
+            // --background: forward the file without unminimizing/stealing focus, so
+            // external tooling (tests, automation) can drive the app while the user
+            // keeps working in another app.
+            let background = argv.iter().any(|a| a == "--background");
+            if !background {
+                if let Some(window) = app.get_webview_window("main") {
+                    if let Err(e) = window.unminimize() {
+                        log::error!("Failed to unminimize window: {}", e);
+                    }
+                    if let Err(e) = window.set_focus() {
+                        log::error!("Failed to set focus on window: {}", e);
+                    }
                 }
             }
 
-            if argv.len() > 1 {
-                let path_str = &argv[1];
+            if let Some(path_str) = argv.iter().skip(1).find(|a| !a.starts_with("--")) {
                 if let Err(e) = app.emit("open-with-file", path_str) {
                     log::error!(
                         "Failed to emit open-with-file from single-instance handler: {}",
@@ -2411,7 +2413,11 @@ pub fn run() {
                             if let Some(path_str) = path.to_str() {
                                 let state = app_handle.state::<AppState>();
                                 *state.initial_file_path.lock().unwrap() = Some(path_str.to_string());
-                                log::info!("macOS initial open: Stored path {} for later.", path_str);
+                                log::info!("macOS open: Stored path {} for later.", path_str);
+                                // Also forward to the running frontend: files opened while the
+                                // app is already up (Finder "Open With", `open -g`) previously
+                                // went nowhere because only the startup path consumed this.
+                                let _ = app_handle.emit("open-with-file", path_str);
                             }
                         }
                     }

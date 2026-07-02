@@ -563,6 +563,27 @@ pub fn generate_thumbnail_data(
         .as_ref()
         .map_or(serde_json::Value::Null, |m| m.adjustments.clone());
 
+    // Fast path for unedited raws: use the camera's embedded preview instead of a full
+    // decode + demosaic. This is what OOMed the SD-card review grid — hundreds of large
+    // X-Trans raws each triggering a full-resolution decode. Edited raws (non-null
+    // adjustments) still take the full RAW pipeline below so their edits are reflected.
+    if is_raw
+        && adjustments.is_null()
+        && preloaded_image.is_none()
+        && let Some(preview) = crate::culling::fast_raw_preview(&source_path_str)
+    {
+        let target_res = load_settings(app_handle.clone())
+            .unwrap_or_default()
+            .thumbnail_resolution
+            .unwrap_or(720);
+        let (w, h) = preview.dimensions();
+        return Ok(if w.max(h) > target_res {
+            preview.thumbnail(target_res, target_res)
+        } else {
+            preview
+        });
+    }
+
     if let (Some(context), Some(meta)) = (gpu_context, metadata)
         && !meta.adjustments.is_null()
     {

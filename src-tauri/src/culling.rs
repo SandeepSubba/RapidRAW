@@ -39,6 +39,36 @@ fn load_for_analysis(
     image_loader::load_base_image_from_bytes(&file_bytes, path, true, settings, None).map_err(|e| e.to_string())
 }
 
+/// Cheap RAW preview: the camera's embedded full-size JPEG (RAF fast path) or rawler's
+/// extracted preview. Never demosaics the raw — that's the point. Returns None when neither
+/// is available so callers can fall back to a full decode. Used both for import analysis and
+/// for thumbnail generation, where a folder of large raws was OOMing when every thumbnail
+/// triggered a full-resolution X-Trans decode.
+pub fn fast_raw_preview(path: &str) -> Option<DynamicImage> {
+    let img = match try_fast_embedded_preview(path) {
+        Some(img) => img,
+        None => rawler::analyze::extract_preview_pixels(path, &RawDecodeParams::default()).ok()?,
+    };
+    // Embedded previews are stored unrotated; apply the file's EXIF orientation like
+    // the full-decode path does, or portrait raws render sideways in the library grid.
+    let orientation = std::fs::File::open(path).ok().and_then(|f| {
+        let mut r = std::io::BufReader::new(f);
+        exif::Reader::new()
+            .read_from_container(&mut r)
+            .ok()?
+            .get_field(exif::Tag::Orientation, exif::In::PRIMARY)?
+            .value
+            .get_uint(0)
+    });
+    Some(match orientation {
+        Some(o) if o > 1 => crate::image_processing::apply_orientation(
+            img,
+            rawler::Orientation::from_u16(o as u16),
+        ),
+        _ => img,
+    })
+}
+
 /// Opportunistic, low-I/O embedded-preview extraction. Uses a lazy memory map (no
 /// MAP_POPULATE) and reads only the bytes of the embedded JPEG, so analyzing a folder
 /// of large raws doesn't read every full file off the (often slow) card. Returns None
