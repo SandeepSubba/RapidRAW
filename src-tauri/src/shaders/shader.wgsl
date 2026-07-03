@@ -735,7 +735,15 @@ fn apply_skin_smoothing(
         clarity_blurred = srgb_to_linear(clarity_blurred);
         sharpness_blurred = srgb_to_linear(sharpness_blurred);
     }
-    let a = clamp(amount, 0.0, 1.0);
+    // Edge guard: blotches are low-amplitude relative to their surround, while
+    // structural edges (eyes, brows, hair boundaries) are high-amplitude. Fade
+    // the smoothing out as the normalized mid-band contrast rises, so edges
+    // stay crisp and only tonal unevenness is flattened.
+    let mid_delta = color_linear - clarity_blurred;
+    let surround_luma = max(get_luma(clarity_blurred), 0.02);
+    let rel_contrast = get_luma(abs(mid_delta)) / surround_luma;
+    let edge_protect = 1.0 - smoothstep(0.12, 0.4, rel_contrast);
+    let a = clamp(amount, 0.0, 1.0) * edge_protect;
     let fine_detail = color_linear - sharpness_blurred;
     let smoothed_base = mix(color_linear, clarity_blurred, a);
     return max(smoothed_base + fine_detail * a * 0.9, vec3<f32>(0.0));
