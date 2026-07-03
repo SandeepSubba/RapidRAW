@@ -38,8 +38,9 @@ export interface AdjustmentNudge {
 export const ADJUSTMENT_NUDGES: AdjustmentNudge[] = [
   // Exposure — Capture One uses Ctrl/Cmd + +/-, but that combo is bound to Zoom
   // here, so exposure moves to Alt + +/-. Step matches Capture One (0.1 EV).
-  { action: 'exposure_up', description: 'settings.keybinds.actions.exposure_up', defaultCombo: ['alt', 'Equal'], adjustmentKey: 'exposure', delta: 0.1, min: -5, max: 5 },
-  { action: 'exposure_down', description: 'settings.keybinds.actions.exposure_down', defaultCombo: ['alt', 'Minus'], adjustmentKey: 'exposure', delta: -0.1, min: -5, max: 5 },
+  // Note: the UI's Exposure slider writes `brightness`; `exposure` is the EV Shift slider.
+  { action: 'exposure_up', description: 'settings.keybinds.actions.exposure_up', defaultCombo: ['alt', 'Equal'], adjustmentKey: 'brightness', delta: 0.1, min: -5, max: 5 },
+  { action: 'exposure_down', description: 'settings.keybinds.actions.exposure_down', defaultCombo: ['alt', 'Minus'], adjustmentKey: 'brightness', delta: -0.1, min: -5, max: 5 },
   // Contrast — matches Capture One's Ctrl(+Shift+Cmd) modifier family.
   { action: 'contrast_up', description: 'settings.keybinds.actions.contrast_up', defaultCombo: ['ctrl', 'shift', 'Equal'], adjustmentKey: 'contrast', delta: 5, min: -100, max: 100 },
   { action: 'contrast_down', description: 'settings.keybinds.actions.contrast_down', defaultCombo: ['ctrl', 'shift', 'Minus'], adjustmentKey: 'contrast', delta: -5, min: -100, max: 100 },
