@@ -83,6 +83,16 @@ export default function DetailsPanel({
             onDragStateChange={onDragStateChange}
           />
           <Slider
+            defaultValue={50}
+            label={t('adjustments.details.skinTexture')}
+            max={100}
+            min={0}
+            onChange={(e: any) => handleAdjustmentChange(DetailsAdjustment.SkinTexture, e.target.value)}
+            step={1}
+            value={adjustments.skinTexture}
+            onDragStateChange={onDragStateChange}
+          />
+          <Slider
             label={t('adjustments.details.dehaze')}
             max={100}
             min={-100}

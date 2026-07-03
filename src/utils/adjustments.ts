@@ -61,6 +61,7 @@ export enum ColorGrading {
 export enum DetailsAdjustment {
   Clarity = 'clarity',
   SkinSmoothing = 'skinSmoothing',
+  SkinTexture = 'skinTexture',
   Dehaze = 'dehaze',
   Structure = 'structure',
   Centré = 'centré',
@@ -156,6 +157,7 @@ export interface Adjustments {
   centré: number;
   clarity: number;
   skinSmoothing: number;
+  skinTexture: number;
   chromaticAberrationBlueYellow: number;
   chromaticAberrationRedCyan: number;
   colorCalibration: ColorCalibration;
@@ -298,6 +300,7 @@ export interface MaskAdjustments {
   brightness: number;
   clarity: number;
   skinSmoothing: number;
+  skinTexture: number;
   colorGrading: ColorGradingProps;
   colorNoiseReduction: number;
   contrast: number;
@@ -427,6 +430,7 @@ export const INITIAL_MASK_ADJUSTMENTS: MaskAdjustments = {
   brightness: 0,
   clarity: 0,
   skinSmoothing: 0,
+  skinTexture: 50,
   colorGrading: { ...INITIAL_COLOR_GRADING },
   colorNoiseReduction: 0,
   contrast: 0,
@@ -487,6 +491,7 @@ export const INITIAL_ADJUSTMENTS: Adjustments = {
   centré: 0,
   clarity: 0,
   skinSmoothing: 0,
+  skinTexture: 50,
   chromaticAberrationBlueYellow: 0,
   chromaticAberrationRedCyan: 0,
   colorCalibration: { ...INITIAL_COLOR_CALIBRATION },
@@ -740,6 +745,7 @@ export const ADJUSTMENT_GROUPS: Record<string, AdjustmentGroup[]> = {
       keys: [
         DetailsAdjustment.Clarity,
         DetailsAdjustment.SkinSmoothing,
+        DetailsAdjustment.SkinTexture,
         DetailsAdjustment.Structure,
         DetailsAdjustment.Dehaze,
         DetailsAdjustment.Centré,
