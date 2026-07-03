@@ -60,6 +60,7 @@ export enum ColorGrading {
 
 export enum DetailsAdjustment {
   Clarity = 'clarity',
+  SkinSmoothing = 'skinSmoothing',
   Dehaze = 'dehaze',
   Structure = 'structure',
   Centré = 'centré',
@@ -154,6 +155,7 @@ export interface Adjustments {
   brightness: number;
   centré: number;
   clarity: number;
+  skinSmoothing: number;
   chromaticAberrationBlueYellow: number;
   chromaticAberrationRedCyan: number;
   colorCalibration: ColorCalibration;
@@ -295,6 +297,7 @@ export interface MaskAdjustments {
   blacks: number;
   brightness: number;
   clarity: number;
+  skinSmoothing: number;
   colorGrading: ColorGradingProps;
   colorNoiseReduction: number;
   contrast: number;
@@ -423,6 +426,7 @@ export const INITIAL_MASK_ADJUSTMENTS: MaskAdjustments = {
   blacks: 0,
   brightness: 0,
   clarity: 0,
+  skinSmoothing: 0,
   colorGrading: { ...INITIAL_COLOR_GRADING },
   colorNoiseReduction: 0,
   contrast: 0,
@@ -482,6 +486,7 @@ export const INITIAL_ADJUSTMENTS: Adjustments = {
   brightness: 0,
   centré: 0,
   clarity: 0,
+  skinSmoothing: 0,
   chromaticAberrationBlueYellow: 0,
   chromaticAberrationRedCyan: 0,
   colorCalibration: { ...INITIAL_COLOR_CALIBRATION },
@@ -734,6 +739,7 @@ export const ADJUSTMENT_GROUPS: Record<string, AdjustmentGroup[]> = {
       label: 'modals.copyPaste.groups.clarityDehaze',
       keys: [
         DetailsAdjustment.Clarity,
+        DetailsAdjustment.SkinSmoothing,
         DetailsAdjustment.Structure,
         DetailsAdjustment.Dehaze,
         DetailsAdjustment.Centré,

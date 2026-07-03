@@ -1291,7 +1291,7 @@ pub struct GlobalAdjustments {
     pub chromatic_aberration_blue_yellow: f32,
     pub show_clipping: u32,
     pub is_raw_image: u32,
-    _pad_ca1: f32,
+    pub skin_smoothing: f32,
 
     pub has_lut: u32,
     pub lut_intensity: f32,
@@ -1370,7 +1370,7 @@ pub struct MaskAdjustments {
     pub sharpness_threshold: f32,
 
     pub hue: f32,
-    _pad_cg1: f32,
+    pub skin_smoothing: f32,
     _pad_cg2: f32,
     pub color_grading_shadows: ColorGradeSettings,
     pub color_grading_midtones: ColorGradeSettings,
@@ -1427,6 +1427,7 @@ struct AdjustmentScales {
     luma_noise_reduction: f32,
     color_noise_reduction: f32,
     clarity: f32,
+    skin_smoothing: f32,
     dehaze: f32,
     structure: f32,
     centré: f32,
@@ -1476,6 +1477,7 @@ const SCALES: AdjustmentScales = AdjustmentScales {
     luma_noise_reduction: 100.0,
     color_noise_reduction: 100.0,
     clarity: 200.0,
+    skin_smoothing: 100.0,
     dehaze: 750.0,
     structure: 200.0,
     centré: 250.0,
@@ -2071,7 +2073,7 @@ fn get_global_adjustments_from_json(
             0
         },
         is_raw_image: if is_raw { 1 } else { 0 },
-        _pad_ca1: 0.0,
+        skin_smoothing: get_val("details", "skinSmoothing", SCALES.skin_smoothing, None),
 
         has_lut,
         lut_intensity,
@@ -2234,7 +2236,7 @@ fn get_mask_adjustments_from_json(adj: &serde_json::Value) -> MaskAdjustments {
         sharpness_threshold: get_val("details", "sharpnessThreshold", SCALES.sharpness_threshold),
 
         hue: get_val("color", "hue", 1.0),
-        _pad_cg1: 0.0,
+        skin_smoothing: get_val("details", "skinSmoothing", SCALES.skin_smoothing),
         _pad_cg2: 0.0,
         color_grading_shadows: if is_visible("color") {
             parse_color_grade_settings(&cg_obj["shadows"])

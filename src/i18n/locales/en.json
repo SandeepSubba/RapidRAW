@@ -98,7 +98,7 @@
       "blueYellow": "Blue/Yellow",
       "centre": "Centré",
       "chromaticAberration": "Chromatic Aberration",
-      "clarity": "Clarity",
+      "clarity": "Clarity", "skinSmoothing": "Skin Smoothing",
       "color": "Color",
       "dehaze": "Dehaze",
       "luminance": "Luminance",
