@@ -93,6 +93,15 @@ export default function DetailsPanel({
             onDragStateChange={onDragStateChange}
           />
           <Slider
+            label={t('adjustments.details.skinSmoothingScale')}
+            max={100}
+            min={0}
+            onChange={(e: any) => handleAdjustmentChange(DetailsAdjustment.SkinSmoothingScale, e.target.value)}
+            step={1}
+            value={adjustments.skinSmoothingScale}
+            onDragStateChange={onDragStateChange}
+          />
+          <Slider
             label={t('adjustments.details.dehaze')}
             max={100}
             min={-100}

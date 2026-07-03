@@ -72,7 +72,7 @@ struct GlobalAdjustments {
     lut_intensity: f32,
     tonemapper_mode: u32,
     skin_texture: f32,
-    _pad_lut3: f32,
+    skin_smoothing_scale: f32,
     _pad_lut4: f32,
     _pad_lut5: f32,
 
@@ -151,7 +151,7 @@ struct MaskAdjustments {
     color_grading_global: ColorGradeSettings,
     color_grading_blending: f32,
     color_grading_balance: f32,
-    _pad5: f32,
+    skin_smoothing_scale: f32,
     _pad6: f32,
 
     hsl: array<HslColor, 8>,
@@ -722,26 +722,34 @@ fn apply_color_grading(color: vec3<f32>, shadows: ColorGradeSettings, midtones: 
 fn apply_skin_smoothing(
     color_linear: vec3<f32>,
     clarity_blurred_input: vec3<f32>,
+    structure_blurred_input: vec3<f32>,
     tonal_blurred_input: vec3<f32>,
     amount: f32,
     texture_amount: f32,
+    scale_amount: f32,
     is_raw: u32,
 ) -> vec3<f32> {
     if (amount <= 0.001) {
         return color_linear;
     }
     var clarity_blurred = clarity_blurred_input;
+    var structure_blurred = structure_blurred_input;
     var tonal_blurred = tonal_blurred_input;
     if (is_raw != 1u) {
         clarity_blurred = srgb_to_linear(clarity_blurred);
+        structure_blurred = srgb_to_linear(structure_blurred);
         tonal_blurred = srgb_to_linear(tonal_blurred);
     }
+    // Separation point (Picktorial's "radius"): blend the flatten base from the
+    // clarity blur (8px, micro-blotches) toward the structure blur (40px,
+    // large tonal patches) so the smoothing scale can match the shot.
+    let base_blurred = mix(clarity_blurred, structure_blurred, clamp(scale_amount, 0.0, 1.0));
     // Edge guard: blotches are low-amplitude relative to their surround, while
     // structural edges (eyes, brows, hair boundaries) are high-amplitude. Fade
     // the smoothing out as the normalized mid-band contrast rises, so edges
     // stay crisp and only tonal unevenness is flattened.
-    let mid_delta = color_linear - clarity_blurred;
-    let surround_luma = max(get_luma(clarity_blurred), 0.02);
+    let mid_delta = color_linear - base_blurred;
+    let surround_luma = max(get_luma(base_blurred), 0.02);
     let rel_contrast = get_luma(abs(mid_delta)) / surround_luma;
     let edge_protect = 1.0 - smoothstep(0.12, 0.4, rel_contrast);
     let a = clamp(amount, 0.0, 1.0) * edge_protect;
@@ -750,7 +758,7 @@ fn apply_skin_smoothing(
     // clarity radii — skin blotchiness — is actually flattened.
     let tf = clamp(texture_amount, 0.0, 2.0);
     let fine_detail = color_linear - tonal_blurred;
-    let smoothed_base = mix(color_linear, clarity_blurred, a);
+    let smoothed_base = mix(color_linear, base_blurred, a);
     return max(smoothed_base + fine_detail * a * tf, vec3<f32>(0.0));
 }
 
@@ -1520,6 +1528,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     var t_structure = adjustments.global.structure;
     var t_skin_smoothing = adjustments.global.skin_smoothing;
     var t_skin_texture = adjustments.global.skin_texture - 1.0;
+    var t_skin_scale = adjustments.global.skin_smoothing_scale;
     var t_glow = adjustments.global.glow_amount;
     var t_halation = adjustments.global.halation_amount;
     var t_flare = adjustments.global.flare_amount;
@@ -1560,6 +1569,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
             t_structure += m.structure * influence;
             t_skin_smoothing += m.skin_smoothing * influence;
             t_skin_texture += (m.skin_texture - 1.0) * influence;
+            t_skin_scale += m.skin_smoothing_scale * influence;
 
             t_glow += m.glow_amount * influence;
             t_halation += m.halation_amount * influence;
@@ -1618,7 +1628,8 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     locally_contrasted_rgb += sharpness_delta;
 
     locally_contrasted_rgb = apply_skin_smoothing(
-        locally_contrasted_rgb, clarity_blurred, tonal_blurred, t_skin_smoothing, 1.0 + t_skin_texture, is_raw
+        locally_contrasted_rgb, clarity_blurred, structure_blurred, tonal_blurred,
+        t_skin_smoothing, 1.0 + t_skin_texture, t_skin_scale, is_raw
     );
     locally_contrasted_rgb = apply_local_contrast(locally_contrasted_rgb, clarity_blurred, t_clarity, is_raw, 1u, 0.0);
     locally_contrasted_rgb = apply_local_contrast(locally_contrasted_rgb, structure_blurred, t_structure, is_raw, 1u, 0.0);

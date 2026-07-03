@@ -1297,7 +1297,7 @@ pub struct GlobalAdjustments {
     pub lut_intensity: f32,
     pub tonemapper_mode: u32,
     pub skin_texture: f32,
-    _pad_lut3: f32,
+    pub skin_smoothing_scale: f32,
     _pad_lut4: f32,
     _pad_lut5: f32,
 
@@ -1378,7 +1378,7 @@ pub struct MaskAdjustments {
     pub color_grading_global: ColorGradeSettings,
     pub color_grading_blending: f32,
     pub color_grading_balance: f32,
-    _pad5: f32,
+    pub skin_smoothing_scale: f32,
     _pad6: f32,
 
     pub hsl: [HslColor; 8],
@@ -1429,6 +1429,7 @@ struct AdjustmentScales {
     clarity: f32,
     skin_smoothing: f32,
     skin_texture: f32,
+    skin_smoothing_scale: f32,
     dehaze: f32,
     structure: f32,
     centré: f32,
@@ -1480,6 +1481,7 @@ const SCALES: AdjustmentScales = AdjustmentScales {
     clarity: 200.0,
     skin_smoothing: 100.0,
     skin_texture: 50.0,
+    skin_smoothing_scale: 100.0,
     dehaze: 750.0,
     structure: 200.0,
     centré: 250.0,
@@ -2083,7 +2085,7 @@ fn get_global_adjustments_from_json(
         tonemapper_mode: tonemapper_override
             .unwrap_or_else(|| if tone_mapper == "agx" { 1 } else { 0 }),
         skin_texture: get_val("details", "skinTexture", SCALES.skin_texture, Some(50.0)),
-        _pad_lut3: 0.0,
+        skin_smoothing_scale: get_val("details", "skinSmoothingScale", SCALES.skin_smoothing_scale, None),
         _pad_lut4: 0.0,
         _pad_lut5: 0.0,
 
@@ -2275,7 +2277,7 @@ fn get_mask_adjustments_from_json(adj: &serde_json::Value) -> MaskAdjustments {
         } else {
             0.0
         },
-        _pad5: 0.0,
+        skin_smoothing_scale: get_val("details", "skinSmoothingScale", SCALES.skin_smoothing_scale),
         _pad6: 0.0,
 
         hsl: if is_visible("color") {
