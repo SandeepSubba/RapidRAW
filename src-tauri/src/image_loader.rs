@@ -5,7 +5,9 @@ use crate::exif_processing;
 use crate::file_management::{parse_virtual_path, read_file_mapped};
 use crate::formats::is_raw_file;
 use crate::image_processing::ImageMetadata;
-use crate::image_processing::{apply_orientation, remove_raw_artifacts_and_enhance};
+use crate::image_processing::{
+    apply_orientation, apply_srgb_to_linear, remove_raw_artifacts_and_enhance,
+};
 use crate::mask_generation::{MaskDefinition, SubMask, generate_mask_bitmap};
 use crate::raw_processing::develop_raw_image;
 use anyhow::{Context, Result, anyhow};
@@ -118,6 +120,20 @@ pub fn load_base_image_from_bytes(
                     path_for_ext_check,
                     classified
                 );
+                // Some raws carry raw data rawler cannot decode (e.g. DNG 1.7 with
+                // 8-bit lossy JPEG compression) but include a full-size embedded
+                // preview. Fall back to that — linearized, since the raw pipeline
+                // expects linear input it will tone-map again — so the file stays
+                // viewable and editable instead of failing outright.
+                if let Some(preview) = crate::culling::fast_raw_preview(path_for_ext_check) {
+                    log::warn!(
+                        "Using embedded preview fallback for '{}' ({}x{})",
+                        path_for_ext_check,
+                        preview.width(),
+                        preview.height()
+                    );
+                    return Ok(apply_srgb_to_linear(preview));
+                }
                 Err(classified)
             }
             Err(_) => {
