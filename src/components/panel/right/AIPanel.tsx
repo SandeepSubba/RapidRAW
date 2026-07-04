@@ -92,13 +92,13 @@ const SUB_MASK_CONFIG: any = {
   [Mask.AiEyes]: {
     parameters: [
       { key: 'grow', min: -100, max: 100, step: 1, defaultValue: 0 },
-      { key: 'feather', min: 0, max: 100, step: 1, defaultValue: 10 },
+      { key: 'feather', min: 0, max: 100, step: 1, defaultValue: 25 },
     ],
   },
   [Mask.AiMouth]: {
     parameters: [
       { key: 'grow', min: -100, max: 100, step: 1, defaultValue: 0 },
-      { key: 'feather', min: 0, max: 100, step: 1, defaultValue: 10 },
+      { key: 'feather', min: 0, max: 100, step: 1, defaultValue: 25 },
     ],
   },
   [Mask.AiSubject]: {
