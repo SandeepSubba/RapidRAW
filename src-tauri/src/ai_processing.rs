@@ -61,11 +61,11 @@ const DEPTH_SHA256: &str = "d2b11a11c1d4a12b47608fa65a17ee9a4c605b55ee1730c8e3b5
 // UltraFace (version-RFB-320): a ~1.2 MB face detector used by the SD-import culling to
 // find faces so the per-face eye/gaze check can run where the eyes actually are. Output
 // is already decoded corner-form boxes, so postprocessing is just threshold + NMS.
-const FACE_MODEL_URL: &str = "https://github.com/onnx/models/raw/main/validated/vision/body_analysis/ultraface/models/version-RFB-320.onnx";
-const FACE_MODEL_FILENAME: &str = "ultraface_rfb_320.onnx";
-const FACE_MODEL_SHA256: &str = "34cd7e60aeff28744c657de7a3dc64e872d506741de66987f3426f2b79f88017";
-const FACE_INPUT_W: u32 = 320;
-const FACE_INPUT_H: u32 = 240;
+const FACE_MODEL_URL: &str = "https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx";
+const FACE_MODEL_FILENAME: &str = "face_detection_yunet_2023mar.onnx";
+const FACE_MODEL_SHA256: &str = "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4";
+const FACE_INPUT_W: u32 = 640;
+const FACE_INPUT_H: u32 = 640;
 
 pub struct AiModels {
     pub sam_encoder: Mutex<Session>,
@@ -493,6 +493,8 @@ pub struct FaceBox {
     pub x2: f32,
     pub y2: f32,
     pub score: f32,
+    /// eye_r, eye_l, nose, mouth_r, mouth_l (subject's right = image left)
+    pub landmarks: [(f32, f32); 5],
 }
 
 fn face_area(b: &FaceBox) -> f32 {
@@ -509,15 +511,10 @@ fn face_iou(a: &FaceBox, b: &FaceBox) -> f32 {
     if union <= 0.0 { 0.0 } else { inter / union }
 }
 
-/// Run UltraFace on `image`, returning face boxes in `image`'s pixel space, filtered by
-/// confidence and de-duplicated with NMS, ordered largest-first (bigger faces matter most
-/// for eye-state). The model already outputs decoded corner-form boxes, so we only need a
-/// threshold + NMS here.
-
 /// Feathered ellipse mask over detected facial regions (`"eyes"` or `"mouth"`),
-/// placed anthropometrically inside UltraFace boxes. Precise enough to subtract
-/// features from skin-smoothing masks; a landmark model is the upgrade path for
-/// strongly tilted faces.
+/// anchored on YuNet's 5 landmarks and rotated to the eye/mouth axis, so placement
+/// tracks the actual features across head tilt and odd detector boxes. Sizes are
+/// anthropometric: scaled by interocular distance (eyes) / corner distance (mouth).
 pub fn generate_face_region_mask(
     image: &DynamicImage,
     face_session: &Mutex<Session>,
@@ -527,36 +524,82 @@ pub fn generate_face_region_mask(
     let (w, h) = (image.width(), image.height());
     let mut mask = image::GrayImage::new(w, h);
     for f in &faces {
-        let fw = f.x2 - f.x1;
-        let fh = f.y2 - f.y1;
-        if fw < 8.0 || fh < 8.0 {
+        // Second pass on the face crop: the face fills the 640px input instead of a
+        // fraction of it, which sharpens the keypoints considerably (they are only
+        // detector by-products). Fall back to the full-frame keypoints if it misses.
+        let bw = f.x2 - f.x1;
+        let bh = f.y2 - f.y1;
+        let cx0 = (f.x1 - 0.25 * bw).max(0.0) as u32;
+        let cy0 = (f.y1 - 0.25 * bh).max(0.0) as u32;
+        let cx1 = ((f.x2 + 0.25 * bw) as u32).min(w);
+        let cy1 = ((f.y2 + 0.25 * bh) as u32).min(h);
+        let landmarks = if cx1 > cx0 + 16 && cy1 > cy0 + 16 {
+            let crop = image.crop_imm(cx0, cy0, cx1 - cx0, cy1 - cy0);
+            match run_face_detection(&crop, face_session)?.first() {
+                Some(rf) => rf
+                    .landmarks
+                    .map(|(x, y)| (x + cx0 as f32, y + cy0 as f32)),
+                None => f.landmarks,
+            }
+        } else {
+            f.landmarks
+        };
+        let [eye_r, eye_l, _nose, mouth_r, mouth_l] = landmarks;
+        let iod = (eye_l.0 - eye_r.0).hypot(eye_l.1 - eye_r.1);
+        if iod < 8.0 {
             continue;
         }
-        let cx = (f.x1 + f.x2) * 0.5;
-        // (center_x, center_y, radius_x, radius_y), fractions of the face box
-        let ellipses: &[(f32, f32, f32, f32)] = match region {
-            "eyes" => &[
-                (cx - 0.20 * fw, f.y1 + 0.40 * fh, 0.18 * fw, 0.13 * fh),
-                (cx + 0.20 * fw, f.y1 + 0.40 * fh, 0.18 * fw, 0.13 * fh),
-            ],
-            "mouth" => &[(cx, f.y1 + 0.77 * fh, 0.25 * fw, 0.14 * fh)],
-            _ => &[],
-        };
-        for &(ex, ey, rx, ry) in ellipses {
-            // solid inside 80% of the radius, fading out to 120%
-            let x0 = (ex - rx * 1.2).floor().max(0.0) as u32;
-            let x1 = ((ex + rx * 1.2).ceil() as u32).min(w.saturating_sub(1));
-            let y0 = (ey - ry * 1.2).floor().max(0.0) as u32;
-            let y1 = ((ey + ry * 1.2).ceil() as u32).min(h.saturating_sub(1));
+        // (center_x, center_y, radius_x, radius_y, angle)
+        let mut ellipses: Vec<(f32, f32, f32, f32, f32)> = Vec::new();
+        match region {
+            "eyes" => {
+                let ang = (eye_l.1 - eye_r.1).atan2(eye_l.0 - eye_r.0);
+                // shift up toward the brow so lid + brow are covered
+                let (up_x, up_y) = (ang.sin(), -ang.cos());
+                for &(ex, ey) in &[eye_r, eye_l] {
+                    ellipses.push((
+                        ex + 0.03 * iod * up_x,
+                        ey + 0.03 * iod * up_y,
+                        0.36 * iod,
+                        0.28 * iod,
+                        ang,
+                    ));
+                }
+            }
+            "mouth" => {
+                let mw = (mouth_l.0 - mouth_r.0).hypot(mouth_l.1 - mouth_r.1);
+                let ang = (mouth_l.1 - mouth_r.1).atan2(mouth_l.0 - mouth_r.0);
+                // corners sit on the lip seam; the lower lip is taller, so bias down
+                let (up_x, up_y) = (ang.sin(), -ang.cos());
+                ellipses.push((
+                    (mouth_r.0 + mouth_l.0) * 0.5 - 0.06 * mw * up_x,
+                    (mouth_r.1 + mouth_l.1) * 0.5 - 0.06 * mw * up_y,
+                    0.72 * mw,
+                    0.42 * mw,
+                    ang,
+                ));
+            }
+            _ => {}
+        }
+        for &(ex, ey, rx, ry, ang) in &ellipses {
+            let (sa, ca) = ang.sin_cos();
+            // solid inside 90% of the radius, fading out to 105%
+            let reach = rx.max(ry) * 1.05;
+            let x0 = (ex - reach).floor().max(0.0) as u32;
+            let x1 = ((ex + reach).ceil() as u32).min(w.saturating_sub(1));
+            let y0 = (ey - reach).floor().max(0.0) as u32;
+            let y1 = ((ey + reach).ceil() as u32).min(h.saturating_sub(1));
             for py in y0..=y1 {
                 for px in x0..=x1 {
-                    let dx = (px as f32 - ex) / rx.max(1.0);
-                    let dy = (py as f32 - ey) / ry.max(1.0);
-                    let d = (dx * dx + dy * dy).sqrt();
-                    let v = ((1.0 - (d - 0.8) / 0.4).clamp(0.0, 1.0) * 255.0) as u8;
-                    if v > 0 {
+                    let ox = px as f32 - ex;
+                    let oy = py as f32 - ey;
+                    let u = (ox * ca + oy * sa) / rx.max(1.0);
+                    let v = (-ox * sa + oy * ca) / ry.max(1.0);
+                    let d = (u * u + v * v).sqrt();
+                    let val = ((1.0 - (d - 0.9) / 0.15).clamp(0.0, 1.0) * 255.0) as u8;
+                    if val > 0 {
                         let pix = mask.get_pixel_mut(px, py);
-                        pix[0] = pix[0].max(v);
+                        pix[0] = pix[0].max(val);
                     }
                 }
             }
@@ -565,52 +608,81 @@ pub fn generate_face_region_mask(
     Ok(mask)
 }
 
+/// Run YuNet on `image`, returning face boxes + 5 landmarks in `image`'s pixel space,
+/// filtered by confidence and de-duplicated with NMS, ordered largest-first. Anchor-free
+/// decode over strides 8/16/32: score = sqrt(cls * obj), box center/size and keypoints
+/// are cell-relative (sizes log-encoded).
 pub fn run_face_detection(
     image: &DynamicImage,
     face_session: &Mutex<Session>,
 ) -> Result<Vec<FaceBox>> {
-    const SCORE_THRESH: f32 = 0.7;
+    // 0.8 validated against the sample library: real faces score >= 0.81 (even tiny,
+    // backlit, or red-lit ones), while false positives (bare backs, foliage bokeh)
+    // top out at 0.72.
+    const SCORE_THRESH: f32 = 0.8;
     const NMS_IOU: f32 = 0.3;
 
     let (orig_w, orig_h) = image.dimensions();
-    let resized = image
-        .resize_exact(FACE_INPUT_W, FACE_INPUT_H, FilterType::Triangle)
-        .to_rgb8();
+    // Letterbox instead of squashing: aspect distortion measurably degrades landmark
+    // precision. Scale to fit, pad the rest with black (zeros).
+    let scale = (FACE_INPUT_W as f32 / orig_w as f32).min(FACE_INPUT_H as f32 / orig_h as f32);
+    let rw = ((orig_w as f32 * scale).round() as u32).clamp(1, FACE_INPUT_W);
+    let rh = ((orig_h as f32 * scale).round() as u32).clamp(1, FACE_INPUT_H);
+    let resized = image.resize_exact(rw, rh, FilterType::Triangle).to_rgb8();
 
+    // YuNet expects raw 0-255 BGR
     let mut input = Array::zeros((1, 3, FACE_INPUT_H as usize, FACE_INPUT_W as usize));
     for (x, y, p) in resized.enumerate_pixels() {
-        input[[0, 0, y as usize, x as usize]] = (p[0] as f32 - 127.0) / 128.0;
-        input[[0, 1, y as usize, x as usize]] = (p[1] as f32 - 127.0) / 128.0;
-        input[[0, 2, y as usize, x as usize]] = (p[2] as f32 - 127.0) / 128.0;
+        input[[0, 0, y as usize, x as usize]] = p[2] as f32;
+        input[[0, 1, y as usize, x as usize]] = p[1] as f32;
+        input[[0, 2, y as usize, x as usize]] = p[0] as f32;
     }
     let input_dyn = input.into_dyn();
     let t = Tensor::from_array(input_dyn.as_standard_layout().into_owned())?;
 
     let mut session = face_session.lock().unwrap();
     let outputs = session.run(ort::inputs![t])?;
-    // Graph output order is [scores, boxes].
-    let scores = outputs[0]
-        .try_extract_array::<f32>()?
-        .to_owned()
-        .into_dimensionality::<ndarray::Dim<[usize; 3]>>()?; // [1, N, 2]
-    let boxes = outputs[1]
-        .try_extract_array::<f32>()?
-        .to_owned()
-        .into_dimensionality::<ndarray::Dim<[usize; 3]>>()?; // [1, N, 4]
 
-    let n = scores.shape()[1];
+    let sx = 1.0 / scale;
+    let sy = sx;
     let mut cands: Vec<FaceBox> = Vec::new();
-    for i in 0..n {
-        let face_p = scores[[0, i, 1]];
-        if face_p < SCORE_THRESH {
-            continue;
-        }
-        let x1 = boxes[[0, i, 0]].clamp(0.0, 1.0) * orig_w as f32;
-        let y1 = boxes[[0, i, 1]].clamp(0.0, 1.0) * orig_h as f32;
-        let x2 = boxes[[0, i, 2]].clamp(0.0, 1.0) * orig_w as f32;
-        let y2 = boxes[[0, i, 3]].clamp(0.0, 1.0) * orig_h as f32;
-        if x2 > x1 && y2 > y1 {
-            cands.push(FaceBox { x1, y1, x2, y2, score: face_p });
+    for stride in [8usize, 16, 32] {
+        let cols = FACE_INPUT_W as usize / stride;
+        let extract = |name: &str| -> Result<ndarray::Array3<f32>> {
+            Ok(outputs[format!("{}_{}", name, stride).as_str()]
+                .try_extract_array::<f32>()?
+                .to_owned()
+                .into_dimensionality::<ndarray::Dim<[usize; 3]>>()?)
+        };
+        let cls = extract("cls")?; // [1, N, 1]
+        let obj = extract("obj")?; // [1, N, 1]
+        let bbox = extract("bbox")?; // [1, N, 4]
+        let kps = extract("kps")?; // [1, N, 10]
+        let s = stride as f32;
+        for i in 0..cls.shape()[1] {
+            let score = (cls[[0, i, 0]].clamp(0.0, 1.0) * obj[[0, i, 0]].clamp(0.0, 1.0)).sqrt();
+            if score < SCORE_THRESH {
+                continue;
+            }
+            let (row, col) = ((i / cols) as f32, (i % cols) as f32);
+            let cx = (col + bbox[[0, i, 0]]) * s;
+            let cy = (row + bbox[[0, i, 1]]) * s;
+            let bw = bbox[[0, i, 2]].exp() * s;
+            let bh = bbox[[0, i, 3]].exp() * s;
+            let mut landmarks = [(0.0f32, 0.0f32); 5];
+            for (k, lm) in landmarks.iter_mut().enumerate() {
+                *lm = (
+                    (col + kps[[0, i, 2 * k]]) * s * sx,
+                    (row + kps[[0, i, 2 * k + 1]]) * s * sy,
+                );
+            }
+            let x1 = (cx - bw * 0.5) * sx;
+            let y1 = (cy - bh * 0.5) * sy;
+            let x2 = (cx + bw * 0.5) * sx;
+            let y2 = (cy + bh * 0.5) * sy;
+            if x2 > x1 && y2 > y1 {
+                cands.push(FaceBox { x1, y1, x2, y2, score, landmarks });
+            }
         }
     }
 
@@ -625,8 +697,8 @@ pub fn run_face_detection(
     Ok(keep)
 }
 
-/// Lazily download + load the UltraFace face-detection model. Mirrors the other model
-/// accessors; stored as `face_model` on `AiState`.
+/// Lazily download + load the YuNet face-detection model (box + 5 landmarks, MIT,
+/// opencv_zoo). Mirrors the other model accessors; stored as `face_model` on `AiState`.
 pub async fn get_or_init_face_model(
     app_handle: &tauri::AppHandle,
     ai_state_mutex: &Mutex<Option<AiState>>,
