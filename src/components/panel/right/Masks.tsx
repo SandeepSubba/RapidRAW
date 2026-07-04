@@ -1,5 +1,7 @@
 import {
   Brush,
+  Eye,
+  Smile,
   BringToFront,
   Circle,
   Cloud,
@@ -19,6 +21,8 @@ export enum Mask {
   AiDepth = 'ai-depth',
   AiForeground = 'ai-foreground',
   AiSky = 'ai-sky',
+  AiEyes = 'ai-eyes',
+  AiMouth = 'ai-mouth',
   AiSubject = 'ai-subject',
   All = 'all',
   Brush = 'brush',
@@ -68,6 +72,8 @@ export function formatMaskTypeName(type: string) {
   if (type === Mask.AiSubject) return i18n.t('masks.types.subject');
   if (type === Mask.AiForeground) return i18n.t('masks.types.foreground');
   if (type === Mask.AiSky) return i18n.t('masks.types.sky');
+  if (type === Mask.AiEyes) return i18n.t('masks.types.eyes');
+  if (type === Mask.AiMouth) return i18n.t('masks.types.mouth');
   if (type === Mask.All) return i18n.t('masks.types.all');
   if (type === Mask.QuickEraser) return i18n.t('masks.types.quickEraser');
   if (type === Mask.Brush) return i18n.t('masks.types.brush');
@@ -95,6 +101,8 @@ export const MASK_ICON_MAP: Record<Mask, any> = {
   [Mask.AiDepth]: BringToFront,
   [Mask.AiForeground]: User,
   [Mask.AiSky]: Cloud,
+  [Mask.AiEyes]: Eye,
+  [Mask.AiMouth]: Smile,
   [Mask.AiSubject]: Sparkles,
   [Mask.All]: RectangleHorizontal,
   [Mask.Brush]: Brush,
@@ -167,6 +175,18 @@ export const AI_PANEL_CREATION_TYPES: Array<MaskType> = [
   },
   {
     disabled: false,
+    icon: Eye,
+    name: 'Eyes',
+    type: Mask.AiEyes,
+  },
+  {
+    disabled: false,
+    icon: Smile,
+    name: 'Mouth',
+    type: Mask.AiMouth,
+  },
+  {
+    disabled: false,
     icon: Brush,
     name: 'Brush',
     type: Mask.Brush,
@@ -234,6 +254,18 @@ export const OTHERS_MASK_TYPES: Array<MaskType> = [
   },
   {
     disabled: false,
+    icon: Eye,
+    name: 'Eyes',
+    type: Mask.AiEyes,
+  },
+  {
+    disabled: false,
+    icon: Smile,
+    name: 'Mouth',
+    type: Mask.AiMouth,
+  },
+  {
+    disabled: false,
     icon: Droplet,
     name: 'Color',
     type: Mask.Color,
@@ -276,6 +308,18 @@ export const AI_SUB_MASK_COMPONENT_TYPES: Array<MaskType> = [
     icon: User,
     name: 'Foreground',
     type: Mask.AiForeground,
+  },
+  {
+    disabled: false,
+    icon: Eye,
+    name: 'Eyes',
+    type: Mask.AiEyes,
+  },
+  {
+    disabled: false,
+    icon: Smile,
+    name: 'Mouth',
+    type: Mask.AiMouth,
   },
   {
     disabled: false,

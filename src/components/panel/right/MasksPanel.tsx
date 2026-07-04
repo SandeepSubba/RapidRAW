@@ -120,6 +120,18 @@ const SUB_MASK_CONFIG: Record<Mask, any> = {
   [Mask.AiDepth]: {
     parameters: [{ key: 'feather', min: 0, max: 100, step: 1, defaultValue: 15 }],
   },
+  [Mask.AiEyes]: {
+    parameters: [
+      { key: 'grow', min: -100, max: 100, step: 1, defaultValue: 0 },
+      { key: 'feather', min: 0, max: 100, step: 1, defaultValue: 10 },
+    ],
+  },
+  [Mask.AiMouth]: {
+    parameters: [
+      { key: 'grow', min: -100, max: 100, step: 1, defaultValue: 0 },
+      { key: 'feather', min: 0, max: 100, step: 1, defaultValue: 10 },
+    ],
+  },
   [Mask.AiSubject]: {
     parameters: [
       { key: 'grow', min: -100, max: 100, step: 1, defaultValue: 0 },
@@ -559,7 +571,8 @@ function DepthRangePicker({
 export default function MasksPanel() {
   const { t } = useTranslation();
   const { setAdjustments } = useEditorActions();
-  const { handleGenerateAiDepthMask, handleGenerateAiForegroundMask, handleGenerateAiSkyMask } = useAiMasking();
+  const { handleGenerateAiDepthMask, handleGenerateAiForegroundMask, handleGenerateAiSkyMask, handleGenerateAiFaceRegionMask } =
+    useAiMasking();
   const setCustomEscapeHandler = useUIStore((s) => s.setCustomEscapeHandler);
   const { appSettings } = useSettingsStore(
     useShallow((state) => ({
@@ -809,6 +822,8 @@ export default function MasksPanel() {
     if (type === Mask.Brush || type === Mask.Flow) selectBrushToolForNewMask();
     if (type === Mask.AiForeground) handleGenerateAiForegroundMask(subMask.id);
     else if (type === Mask.AiSky) handleGenerateAiSkyMask(subMask.id);
+    else if (type === Mask.AiEyes) handleGenerateAiFaceRegionMask(subMask.id, 'eyes');
+    else if (type === Mask.AiMouth) handleGenerateAiFaceRegionMask(subMask.id, 'mouth');
     else if (type === Mask.AiDepth) handleGenerateAiDepthMask(subMask.id, subMask.parameters);
   };
 
@@ -840,6 +855,8 @@ export default function MasksPanel() {
     if (type === Mask.Brush || type === Mask.Flow) selectBrushToolForNewMask();
     if (type === Mask.AiForeground) handleGenerateAiForegroundMask(subMask.id);
     else if (type === Mask.AiSky) handleGenerateAiSkyMask(subMask.id);
+    else if (type === Mask.AiEyes) handleGenerateAiFaceRegionMask(subMask.id, 'eyes');
+    else if (type === Mask.AiMouth) handleGenerateAiFaceRegionMask(subMask.id, 'mouth');
     else if (type === Mask.AiDepth) handleGenerateAiDepthMask(subMask.id, subMask.parameters);
   };
 

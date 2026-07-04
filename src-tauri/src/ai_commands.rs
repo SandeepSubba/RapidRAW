@@ -13,7 +13,7 @@ use crate::ai_connector;
 use crate::ai_processing::{
     self, AiDepthMaskParameters, AiForegroundMaskParameters, AiSkyMaskParameters,
     AiSubjectMaskParameters, CachedDepthMap, generate_image_embeddings, get_or_init_ai_models,
-    run_depth_anything_model, run_sam_decoder, run_sky_seg_model, run_u2netp_model,
+    run_depth_anything_model, run_sam_decoder, run_sky_seg_model, run_u2netp_model, generate_face_region_mask, get_or_init_face_model,
 };
 use crate::app_settings::load_settings;
 use crate::app_state::AppState;
@@ -83,6 +83,36 @@ pub async fn generate_ai_sky_mask(
         run_sky_seg_model(warped_image.as_ref(), &models.sky_seg).map_err(|e| e.to_string())?;
     let base64_data = encode_to_base64_png(&full_mask_image)?;
 
+    Ok(AiSkyMaskParameters {
+        mask_data_base64: Some(base64_data),
+        rotation: Some(rotation),
+        flip_horizontal: Some(flip_horizontal),
+        flip_vertical: Some(flip_vertical),
+        orientation_steps: Some(orientation_steps),
+    })
+}
+
+/// Feathered masks over detected eyes or mouths (`region`: "eyes" | "mouth"),
+/// e.g. to subtract facial features from a skin-smoothing mask. Same parameter
+/// shape as the sky mask: a full-image bitmap plus the view transform.
+#[tauri::command]
+pub async fn generate_ai_face_region_mask(
+    js_adjustments: serde_json::Value,
+    region: String,
+    rotation: f32,
+    flip_horizontal: bool,
+    flip_vertical: bool,
+    orientation_steps: u8,
+    state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<AiSkyMaskParameters, String> {
+    let face_session = get_or_init_face_model(&app_handle, &state.ai_state, &state.ai_init_lock)
+        .await
+        .map_err(|e| e.to_string())?;
+    let warped_image = get_cached_full_warped_image(&state, &js_adjustments)?;
+    let mask = generate_face_region_mask(warped_image.as_ref(), &face_session, &region)
+        .map_err(|e| e.to_string())?;
+    let base64_data = encode_to_base64_png(&mask)?;
     Ok(AiSkyMaskParameters {
         mask_data_base64: Some(base64_data),
         rotation: Some(rotation),

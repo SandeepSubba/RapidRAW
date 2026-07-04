@@ -89,6 +89,18 @@ const SUB_MASK_CONFIG: any = {
   },
   [Mask.Brush]: { showBrushTools: true },
   [Mask.Linear]: { parameters: [] },
+  [Mask.AiEyes]: {
+    parameters: [
+      { key: 'grow', min: -100, max: 100, step: 1, defaultValue: 0 },
+      { key: 'feather', min: 0, max: 100, step: 1, defaultValue: 10 },
+    ],
+  },
+  [Mask.AiMouth]: {
+    parameters: [
+      { key: 'grow', min: -100, max: 100, step: 1, defaultValue: 0 },
+      { key: 'feather', min: 0, max: 100, step: 1, defaultValue: 10 },
+    ],
+  },
   [Mask.AiSubject]: {
     parameters: [
       { key: 'grow', min: -100, max: 100, step: 1, defaultValue: 50 },
@@ -291,7 +303,8 @@ export default function AIPanel() {
   const setCustomEscapeHandler = useUIStore((s) => s.setCustomEscapeHandler);
 
   const { setAdjustments } = useEditorActions();
-  const { handleGenerativeReplace, handleDeleteAiPatch, handleGenerateAiForegroundMask } = useAiMasking();
+  const { handleGenerativeReplace, handleDeleteAiPatch, handleGenerateAiForegroundMask, handleGenerateAiFaceRegionMask } =
+    useAiMasking();
   const appSettings = useSettingsStore((s) => s.appSettings);
   const aiProvider = appSettings?.aiProvider || 'cpu';
 
@@ -528,6 +541,8 @@ export default function AIPanel() {
     if (type === Mask.Brush) selectBrushToolForNewMask();
 
     if (type === Mask.AiForeground) handleGenerateAiForegroundMask(subMask.id);
+    if (type === Mask.AiEyes) handleGenerateAiFaceRegionMask(subMask.id, 'eyes');
+    if (type === Mask.AiMouth) handleGenerateAiFaceRegionMask(subMask.id, 'mouth');
   };
 
   const handleAddSubMask = (
@@ -554,6 +569,8 @@ export default function AIPanel() {
     setExpandedContainers((prev) => new Set(prev).add(containerId));
     if (type === Mask.Brush) selectBrushToolForNewMask();
     if (type === Mask.AiForeground) handleGenerateAiForegroundMask(subMask.id);
+    if (type === Mask.AiEyes) handleGenerateAiFaceRegionMask(subMask.id, 'eyes');
+    if (type === Mask.AiMouth) handleGenerateAiFaceRegionMask(subMask.id, 'mouth');
   };
 
   const handleAddAiContextMenu = (event: React.MouseEvent, targetContainerId?: string | null) => {

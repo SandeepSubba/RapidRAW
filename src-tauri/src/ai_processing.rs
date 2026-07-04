@@ -513,6 +513,58 @@ fn face_iou(a: &FaceBox, b: &FaceBox) -> f32 {
 /// confidence and de-duplicated with NMS, ordered largest-first (bigger faces matter most
 /// for eye-state). The model already outputs decoded corner-form boxes, so we only need a
 /// threshold + NMS here.
+
+/// Feathered ellipse mask over detected facial regions (`"eyes"` or `"mouth"`),
+/// placed anthropometrically inside UltraFace boxes. Precise enough to subtract
+/// features from skin-smoothing masks; a landmark model is the upgrade path for
+/// strongly tilted faces.
+pub fn generate_face_region_mask(
+    image: &DynamicImage,
+    face_session: &Mutex<Session>,
+    region: &str,
+) -> Result<image::GrayImage> {
+    let faces = run_face_detection(image, face_session)?;
+    let (w, h) = (image.width(), image.height());
+    let mut mask = image::GrayImage::new(w, h);
+    for f in &faces {
+        let fw = f.x2 - f.x1;
+        let fh = f.y2 - f.y1;
+        if fw < 8.0 || fh < 8.0 {
+            continue;
+        }
+        let cx = (f.x1 + f.x2) * 0.5;
+        // (center_x, center_y, radius_x, radius_y), fractions of the face box
+        let ellipses: &[(f32, f32, f32, f32)] = match region {
+            "eyes" => &[
+                (cx - 0.20 * fw, f.y1 + 0.40 * fh, 0.18 * fw, 0.13 * fh),
+                (cx + 0.20 * fw, f.y1 + 0.40 * fh, 0.18 * fw, 0.13 * fh),
+            ],
+            "mouth" => &[(cx, f.y1 + 0.77 * fh, 0.25 * fw, 0.14 * fh)],
+            _ => &[],
+        };
+        for &(ex, ey, rx, ry) in ellipses {
+            // solid inside 80% of the radius, fading out to 120%
+            let x0 = (ex - rx * 1.2).floor().max(0.0) as u32;
+            let x1 = ((ex + rx * 1.2).ceil() as u32).min(w.saturating_sub(1));
+            let y0 = (ey - ry * 1.2).floor().max(0.0) as u32;
+            let y1 = ((ey + ry * 1.2).ceil() as u32).min(h.saturating_sub(1));
+            for py in y0..=y1 {
+                for px in x0..=x1 {
+                    let dx = (px as f32 - ex) / rx.max(1.0);
+                    let dy = (py as f32 - ey) / ry.max(1.0);
+                    let d = (dx * dx + dy * dy).sqrt();
+                    let v = ((1.0 - (d - 0.8) / 0.4).clamp(0.0, 1.0) * 255.0) as u8;
+                    if v > 0 {
+                        let pix = mask.get_pixel_mut(px, py);
+                        pix[0] = pix[0].max(v);
+                    }
+                }
+            }
+        }
+    }
+    Ok(mask)
+}
+
 pub fn run_face_detection(
     image: &DynamicImage,
     face_session: &Mutex<Session>,

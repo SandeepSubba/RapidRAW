@@ -1306,6 +1306,10 @@ fn generate_sub_mask_bitmap(
             generate_ai_foreground_bitmap(&sub_mask.parameters, width, height, scale, crop_offset)
         }
         "ai-sky" => generate_ai_sky_bitmap(&sub_mask.parameters, width, height, scale, crop_offset),
+        // Eyes/mouth reuse the sky parameter shape: full-image bitmap + transform.
+        "ai-eyes" | "ai-mouth" => {
+            generate_ai_sky_bitmap(&sub_mask.parameters, width, height, scale, crop_offset)
+        }
         "ai-depth" => {
             generate_ai_depth_bitmap(&sub_mask.parameters, width, height, scale, crop_offset)
         }
