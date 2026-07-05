@@ -135,6 +135,18 @@ export const MASK_PANEL_CREATION_TYPES: Array<MaskType> = [
   },
   {
     disabled: false,
+    icon: Eye,
+    name: 'Eyes',
+    type: Mask.AiEyes,
+  },
+  {
+    disabled: false,
+    icon: Smile,
+    name: 'Mouth',
+    type: Mask.AiMouth,
+  },
+  {
+    disabled: false,
     icon: TriangleRight,
     name: 'Linear',
     type: Mask.Linear,
@@ -226,6 +238,18 @@ export const SUB_MASK_COMPONENT_TYPES: Array<MaskType> = [
   },
   {
     disabled: false,
+    icon: Eye,
+    name: 'Eyes',
+    type: Mask.AiEyes,
+  },
+  {
+    disabled: false,
+    icon: Smile,
+    name: 'Mouth',
+    type: Mask.AiMouth,
+  },
+  {
+    disabled: false,
     icon: TriangleRight,
     name: 'Linear',
     type: Mask.Linear,
@@ -251,18 +275,6 @@ export const OTHERS_MASK_TYPES: Array<MaskType> = [
     icon: BringToFront,
     name: 'Depth',
     type: Mask.AiDepth,
-  },
-  {
-    disabled: false,
-    icon: Eye,
-    name: 'Eyes',
-    type: Mask.AiEyes,
-  },
-  {
-    disabled: false,
-    icon: Smile,
-    name: 'Mouth',
-    type: Mask.AiMouth,
   },
   {
     disabled: false,

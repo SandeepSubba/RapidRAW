@@ -500,6 +500,7 @@
     },
     "masks": {
       "actions": {
+        "addComponent": "Add",
         "addNewComponent": "Add New Component",
         "applyPreset": "Apply Preset",
         "copyComponent": "Copy Component",
@@ -521,12 +522,19 @@
         "resetMaskAdjustments": "Reset Mask Adjustments",
         "showComponent": "Show Component",
         "showMask": "Show Mask",
+        "subtractComponent": "Subtract",
         "subtractFromMask": "Subtract from Mask",
         "switchToAdd": "Switch to Add",
         "switchToIntersect": "Switch to Intersect",
         "switchToSubtract": "Switch to Subtract"
       },
       "addNewMask": "Add New Mask",
+      "portrait": {
+        "oneClick": "One-Click Portrait",
+        "skin": "Skin Smoothing",
+        "eyes": "Eye Enhance",
+        "teeth": "Teeth Whitening"
+      },
       "brush": {
         "brush": "Brush",
         "eraser": "Eraser",
