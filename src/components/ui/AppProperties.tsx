@@ -53,6 +53,7 @@ export enum Invokes {
   FrontendLog = 'frontend_log',
   GenerateAiForegroundMask = 'generate_ai_foreground_mask',
   GenerateAiSkyMask = 'generate_ai_sky_mask',
+  GenerateAiFaceRegionMask = 'generate_ai_face_region_mask',
   GenerateAiSubjectMask = 'generate_ai_subject_mask',
   GenerateFullscreenPreview = 'generate_fullscreen_preview',
   GeneratePreviewForPath = 'generate_preview_for_path',

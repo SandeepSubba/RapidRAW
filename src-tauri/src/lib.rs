@@ -2300,6 +2300,7 @@ pub fn run() {
             app_settings::load_settings,
             app_settings::save_settings,
             ai_commands::generate_ai_subject_mask,
+            ai_commands::generate_ai_face_region_mask,
             ai_commands::precompute_ai_subject_mask,
             ai_commands::generate_ai_foreground_mask,
             ai_commands::generate_ai_sky_mask,

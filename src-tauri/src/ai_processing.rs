@@ -58,6 +58,14 @@ const DEPTH_FILENAME: &str = "depth_anything_v2_vits.onnx";
 const DEPTH_INPUT_SIZE: u32 = 518;
 const DEPTH_SHA256: &str = "d2b11a11c1d4a12b47608fa65a17ee9a4c605b55ee1730c8e3b526304f2562be";
 
+// YuNet (opencv_zoo, MIT, ~230 KB): face detector that also returns 5 landmarks
+// (eye centers, nose tip, mouth corners). Powers the Eyes/Mouth mask components.
+const FACE_MODEL_URL: &str = "https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx";
+const FACE_MODEL_FILENAME: &str = "face_detection_yunet_2023mar.onnx";
+const FACE_MODEL_SHA256: &str = "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4";
+const FACE_INPUT_W: u32 = 640;
+const FACE_INPUT_H: u32 = 640;
+
 pub struct AiModels {
     pub sam_encoder: Mutex<Session>,
     pub sam_decoder: Mutex<Session>,
@@ -90,6 +98,7 @@ pub struct AiState {
     pub denoise_model: Option<Arc<Mutex<Session>>>,
     pub clip_models: Option<Arc<ClipModels>>,
     pub lama_model: Option<Arc<Mutex<Session>>>,
+    pub face_model: Option<Arc<Mutex<Session>>>,
     pub embeddings: Option<ImageEmbeddings>,
     pub depth_map: Option<CachedDepthMap>,
 }
@@ -333,6 +342,7 @@ pub async fn get_or_init_ai_models(
             denoise_model: None,
             clip_models: None,
             lama_model: None,
+            face_model: None,
             embeddings: None,
             depth_map: None,
         });
@@ -393,6 +403,7 @@ pub async fn get_or_init_denoise_model(
             denoise_model: Some(denoise_model.clone()),
             clip_models: None,
             lama_model: None,
+            face_model: None,
             embeddings: None,
             depth_map: None,
         });
@@ -464,12 +475,302 @@ pub async fn get_or_init_clip_models(
             denoise_model: None,
             clip_models: Some(clip_models.clone()),
             lama_model: None,
+            face_model: None,
             embeddings: None,
             depth_map: None,
         });
     }
 
     Ok(clip_models)
+}
+
+/// A detected face, in pixel coordinates of the image passed to `run_face_detection`.
+#[derive(Clone, Copy, Debug)]
+pub struct FaceBox {
+    pub x1: f32,
+    pub y1: f32,
+    pub x2: f32,
+    pub y2: f32,
+    pub score: f32,
+    /// eye_r, eye_l, nose, mouth_r, mouth_l (subject's right = image left)
+    pub landmarks: [(f32, f32); 5],
+}
+
+fn face_area(b: &FaceBox) -> f32 {
+    (b.x2 - b.x1).max(0.0) * (b.y2 - b.y1).max(0.0)
+}
+
+fn face_iou(a: &FaceBox, b: &FaceBox) -> f32 {
+    let ix1 = a.x1.max(b.x1);
+    let iy1 = a.y1.max(b.y1);
+    let ix2 = a.x2.min(b.x2);
+    let iy2 = a.y2.min(b.y2);
+    let inter = (ix2 - ix1).max(0.0) * (iy2 - iy1).max(0.0);
+    let union = face_area(a) + face_area(b) - inter;
+    if union <= 0.0 { 0.0 } else { inter / union }
+}
+
+/// Feathered ellipse mask over detected facial regions (`"eyes"` or `"mouth"`),
+/// anchored on YuNet's 5 landmarks and rotated to the eye/mouth axis, so placement
+/// tracks the actual features across head tilt and odd detector boxes. Sizes are
+/// anthropometric: scaled by interocular distance (eyes) / corner distance (mouth).
+pub fn generate_face_region_mask(
+    image: &DynamicImage,
+    face_session: &Mutex<Session>,
+    region: &str,
+) -> Result<image::GrayImage> {
+    let faces = run_face_detection(image, face_session)?;
+    let (w, h) = (image.width(), image.height());
+    let mut mask = image::GrayImage::new(w, h);
+    for f in &faces {
+        // Second pass on the face crop: the face fills the 640px input instead of a
+        // fraction of it, which sharpens the keypoints considerably (they are only
+        // detector by-products). Fall back to the full-frame keypoints if it misses.
+        let bw = f.x2 - f.x1;
+        let bh = f.y2 - f.y1;
+        let cx0 = (f.x1 - 0.25 * bw).max(0.0) as u32;
+        let cy0 = (f.y1 - 0.25 * bh).max(0.0) as u32;
+        let cx1 = ((f.x2 + 0.25 * bw) as u32).min(w);
+        let cy1 = ((f.y2 + 0.25 * bh) as u32).min(h);
+        let landmarks = if cx1 > cx0 + 16 && cy1 > cy0 + 16 {
+            let crop = image.crop_imm(cx0, cy0, cx1 - cx0, cy1 - cy0);
+            match run_face_detection(&crop, face_session)?.first() {
+                Some(rf) => rf.landmarks.map(|(x, y)| (x + cx0 as f32, y + cy0 as f32)),
+                None => f.landmarks,
+            }
+        } else {
+            f.landmarks
+        };
+        let [eye_r, eye_l, _nose, mouth_r, mouth_l] = landmarks;
+        let iod = (eye_l.0 - eye_r.0).hypot(eye_l.1 - eye_r.1);
+        if iod < 8.0 {
+            continue;
+        }
+        // (center_x, center_y, radius_x, radius_y, angle)
+        let mut ellipses: Vec<(f32, f32, f32, f32, f32)> = Vec::new();
+        match region {
+            "eyes" => {
+                let ang = (eye_l.1 - eye_r.1).atan2(eye_l.0 - eye_r.0);
+                // shift up toward the brow so lid + brow are covered
+                let (up_x, up_y) = (ang.sin(), -ang.cos());
+                for &(ex, ey) in &[eye_r, eye_l] {
+                    ellipses.push((
+                        ex + 0.03 * iod * up_x,
+                        ey + 0.03 * iod * up_y,
+                        0.36 * iod,
+                        0.28 * iod,
+                        ang,
+                    ));
+                }
+            }
+            "mouth" => {
+                let mw = (mouth_l.0 - mouth_r.0).hypot(mouth_l.1 - mouth_r.1);
+                let ang = (mouth_l.1 - mouth_r.1).atan2(mouth_l.0 - mouth_r.0);
+                // corners sit on the lip seam; the lower lip is taller, so bias down
+                let (up_x, up_y) = (ang.sin(), -ang.cos());
+                ellipses.push((
+                    (mouth_r.0 + mouth_l.0) * 0.5 - 0.06 * mw * up_x,
+                    (mouth_r.1 + mouth_l.1) * 0.5 - 0.06 * mw * up_y,
+                    0.72 * mw,
+                    0.42 * mw,
+                    ang,
+                ));
+            }
+            _ => {}
+        }
+        for &(ex, ey, rx, ry, ang) in &ellipses {
+            let (sa, ca) = ang.sin_cos();
+            // solid inside 90% of the radius, fading out to 105%
+            let reach = rx.max(ry) * 1.05;
+            let x0 = (ex - reach).floor().max(0.0) as u32;
+            let x1 = ((ex + reach).ceil() as u32).min(w.saturating_sub(1));
+            let y0 = (ey - reach).floor().max(0.0) as u32;
+            let y1 = ((ey + reach).ceil() as u32).min(h.saturating_sub(1));
+            for py in y0..=y1 {
+                for px in x0..=x1 {
+                    let ox = px as f32 - ex;
+                    let oy = py as f32 - ey;
+                    let u = (ox * ca + oy * sa) / rx.max(1.0);
+                    let v = (-ox * sa + oy * ca) / ry.max(1.0);
+                    let d = (u * u + v * v).sqrt();
+                    let val = ((1.0 - (d - 0.9) / 0.15).clamp(0.0, 1.0) * 255.0) as u8;
+                    if val > 0 {
+                        let pix = mask.get_pixel_mut(px, py);
+                        pix[0] = pix[0].max(val);
+                    }
+                }
+            }
+        }
+    }
+    Ok(mask)
+}
+
+/// Run YuNet on `image`, returning face boxes + 5 landmarks in `image`'s pixel space,
+/// filtered by confidence and de-duplicated with NMS, ordered largest-first. Anchor-free
+/// decode over strides 8/16/32: score = sqrt(cls * obj), box center/size and keypoints
+/// are cell-relative (sizes log-encoded).
+pub fn run_face_detection(
+    image: &DynamicImage,
+    face_session: &Mutex<Session>,
+) -> Result<Vec<FaceBox>> {
+    // 0.8 validated against the sample library: real faces score >= 0.81 (even tiny,
+    // backlit, or red-lit ones), while false positives (bare backs, foliage bokeh)
+    // top out at 0.72.
+    const SCORE_THRESH: f32 = 0.8;
+    const NMS_IOU: f32 = 0.3;
+
+    let (orig_w, orig_h) = image.dimensions();
+    // Letterbox instead of squashing: aspect distortion measurably degrades landmark
+    // precision. Scale to fit, pad the rest with black (zeros).
+    let scale = (FACE_INPUT_W as f32 / orig_w as f32).min(FACE_INPUT_H as f32 / orig_h as f32);
+    let rw = ((orig_w as f32 * scale).round() as u32).clamp(1, FACE_INPUT_W);
+    let rh = ((orig_h as f32 * scale).round() as u32).clamp(1, FACE_INPUT_H);
+    let resized = image.resize_exact(rw, rh, FilterType::Triangle).to_rgb8();
+
+    // YuNet expects raw 0-255 BGR
+    let mut input = Array::zeros((1, 3, FACE_INPUT_H as usize, FACE_INPUT_W as usize));
+    for (x, y, p) in resized.enumerate_pixels() {
+        input[[0, 0, y as usize, x as usize]] = p[2] as f32;
+        input[[0, 1, y as usize, x as usize]] = p[1] as f32;
+        input[[0, 2, y as usize, x as usize]] = p[0] as f32;
+    }
+    let input_dyn = input.into_dyn();
+    let t = Tensor::from_array(input_dyn.as_standard_layout().into_owned())?;
+
+    let mut session = face_session.lock().unwrap();
+    let outputs = session.run(ort::inputs![t])?;
+
+    let sx = 1.0 / scale;
+    let sy = sx;
+    let mut cands: Vec<FaceBox> = Vec::new();
+    for stride in [8usize, 16, 32] {
+        let cols = FACE_INPUT_W as usize / stride;
+        let extract = |name: &str| -> Result<ndarray::Array3<f32>> {
+            Ok(outputs[format!("{}_{}", name, stride).as_str()]
+                .try_extract_array::<f32>()?
+                .to_owned()
+                .into_dimensionality::<ndarray::Dim<[usize; 3]>>()?)
+        };
+        let cls = extract("cls")?; // [1, N, 1]
+        let obj = extract("obj")?; // [1, N, 1]
+        let bbox = extract("bbox")?; // [1, N, 4]
+        let kps = extract("kps")?; // [1, N, 10]
+        let s = stride as f32;
+        for i in 0..cls.shape()[1] {
+            let score = (cls[[0, i, 0]].clamp(0.0, 1.0) * obj[[0, i, 0]].clamp(0.0, 1.0)).sqrt();
+            if score < SCORE_THRESH {
+                continue;
+            }
+            let (row, col) = ((i / cols) as f32, (i % cols) as f32);
+            let cx = (col + bbox[[0, i, 0]]) * s;
+            let cy = (row + bbox[[0, i, 1]]) * s;
+            let bw = bbox[[0, i, 2]].exp() * s;
+            let bh = bbox[[0, i, 3]].exp() * s;
+            let mut landmarks = [(0.0f32, 0.0f32); 5];
+            for (k, lm) in landmarks.iter_mut().enumerate() {
+                *lm = (
+                    (col + kps[[0, i, 2 * k]]) * s * sx,
+                    (row + kps[[0, i, 2 * k + 1]]) * s * sy,
+                );
+            }
+            let x1 = (cx - bw * 0.5) * sx;
+            let y1 = (cy - bh * 0.5) * sy;
+            let x2 = (cx + bw * 0.5) * sx;
+            let y2 = (cy + bh * 0.5) * sy;
+            if x2 > x1 && y2 > y1 {
+                cands.push(FaceBox {
+                    x1,
+                    y1,
+                    x2,
+                    y2,
+                    score,
+                    landmarks,
+                });
+            }
+        }
+    }
+
+    cands.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let mut keep: Vec<FaceBox> = Vec::new();
+    for c in cands {
+        if !keep.iter().any(|k| face_iou(k, &c) > NMS_IOU) {
+            keep.push(c);
+        }
+    }
+    keep.sort_by(|a, b| {
+        face_area(b)
+            .partial_cmp(&face_area(a))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    Ok(keep)
+}
+
+/// Lazily download + load the YuNet face-detection model (box + 5 landmarks, MIT,
+/// opencv_zoo). Mirrors the other model accessors; stored as `face_model` on `AiState`.
+pub async fn get_or_init_face_model(
+    app_handle: &tauri::AppHandle,
+    ai_state_mutex: &Mutex<Option<AiState>>,
+    ai_init_lock: &TokioMutex<()>,
+) -> Result<Arc<Mutex<Session>>> {
+    if let Some(m) = ai_state_mutex
+        .lock()
+        .unwrap()
+        .as_ref()
+        .and_then(|state| state.face_model.clone())
+    {
+        return Ok(m);
+    }
+
+    let _guard = ai_init_lock.lock().await;
+
+    if let Some(m) = ai_state_mutex
+        .lock()
+        .unwrap()
+        .as_ref()
+        .and_then(|state| state.face_model.clone())
+    {
+        return Ok(m);
+    }
+
+    let models_dir = get_models_dir(app_handle)?;
+    download_and_verify_model(
+        app_handle,
+        &models_dir,
+        FACE_MODEL_FILENAME,
+        FACE_MODEL_URL,
+        FACE_MODEL_SHA256,
+        "Face Detector",
+    )
+    .await?;
+
+    let _ = ort::init().with_name("Face-Detection").commit();
+    let face_model_path = models_dir.join(FACE_MODEL_FILENAME);
+    let face_model = Arc::new(Mutex::new(
+        Session::builder()?.commit_from_file(face_model_path)?,
+    ));
+
+    crate::register_exit_handler();
+
+    let mut ai_state_lock = ai_state_mutex.lock().unwrap();
+    if let Some(state) = ai_state_lock.as_mut() {
+        state.face_model = Some(face_model.clone());
+    } else {
+        *ai_state_lock = Some(AiState {
+            models: None,
+            denoise_model: None,
+            clip_models: None,
+            lama_model: None,
+            face_model: Some(face_model.clone()),
+            embeddings: None,
+            depth_map: None,
+        });
+    }
+
+    Ok(face_model)
 }
 
 pub async fn get_or_init_lama_model(
@@ -524,6 +825,7 @@ pub async fn get_or_init_lama_model(
             denoise_model: None,
             clip_models: None,
             lama_model: Some(lama_model.clone()),
+            face_model: None,
             embeddings: None,
             depth_map: None,
         });
