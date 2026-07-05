@@ -38,6 +38,7 @@ import {
   Plus,
   PlusSquare,
   RotateCcw,
+  ScanFace,
   Trash2,
   SwatchBook,
   SquaresIntersect,
@@ -951,6 +952,79 @@ export default function MasksPanel() {
     showContextMenu(rect.left, rect.bottom + 5, options);
   };
 
+  // Flat, mode-scoped component menu for the Add / Subtract chips — one click,
+  // no hover-nested submenus.
+  const handleAddComponentModeMenu = (event: React.MouseEvent, containerId: string, mode: SubMaskMode) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    const toOption = (maskType: MaskType) => ({
+      label: getMaskTypeName(maskType),
+      icon: maskType.icon,
+      disabled: maskType.disabled,
+      onClick: () => handleAddSubMask(containerId, maskType.type, mode),
+    });
+    const options: any[] = MASK_PANEL_CREATION_TYPES.filter((m) => m.id !== 'others').map(toOption);
+    const others = MASK_PANEL_CREATION_TYPES.find((m) => m.id === 'others');
+    if (others) {
+      options.push({
+        label: getMaskTypeName(others),
+        icon: others.icon,
+        submenu: OTHERS_MASK_TYPES.map(toOption),
+      });
+    }
+    showContextMenu(rect.left, rect.bottom + 5, options);
+  };
+
+  // One-click portrait retouch stack: skin (foreground minus eyes/mouth) with
+  // smoothing dialed in, plus eye-enhance and teeth-whitening masks from the
+  // same face landmarks. Async bitmaps amend the same history entry, so the
+  // whole setup is a single undo step.
+  const handleCreatePortraitSetup = () => {
+    if (!selectedImage) return;
+    const skinBase = createMaskLogic(Mask.AiForeground);
+    const skinEyes = createMaskLogic(Mask.AiEyes, SubMaskMode.Subtractive);
+    const skinMouth = createMaskLogic(Mask.AiMouth, SubMaskMode.Subtractive);
+    const enhanceEyes = createMaskLogic(Mask.AiEyes);
+    const teethMouth = createMaskLogic(Mask.AiMouth);
+
+    const makeContainer = (name: string, subMasks: any[], adj: Record<string, any>) => ({
+      ...INITIAL_MASK_CONTAINER,
+      id: uuidv4(),
+      name,
+      subMasks,
+      adjustments: { ...INITIAL_MASK_ADJUSTMENTS, ...adj },
+    });
+    const containers = [
+      makeContainer(t('editor.masks.portrait.skin'), [skinBase, skinEyes, skinMouth], {
+        skinSmoothing: 40,
+        skinSmoothingScale: 30,
+      }),
+      makeContainer(t('editor.masks.portrait.eyes'), [enhanceEyes], {
+        clarity: 15,
+        sharpness: 10,
+        exposure: 0.1,
+        saturation: 8,
+      }),
+      makeContainer(t('editor.masks.portrait.teeth'), [teethMouth], {
+        hsl: {
+          ...INITIAL_MASK_ADJUSTMENTS.hsl,
+          yellows: { hue: 0, saturation: -35, luminance: 15 },
+        },
+      }),
+    ];
+
+    setAdjustments((prev: Adjustments) => ({ ...prev, masks: [...(prev.masks || []), ...containers] }));
+    onSelectContainer(containers[0].id);
+    onSelectMask(null);
+    setExpandedContainers((prev) => new Set(prev).add(containers[0].id));
+    handleGenerateAiForegroundMask(skinBase.id);
+    handleGenerateAiFaceRegionMask(skinEyes.id, 'eyes');
+    handleGenerateAiFaceRegionMask(skinMouth.id, 'mouth');
+    handleGenerateAiFaceRegionMask(enhanceEyes.id, 'eyes');
+    handleGenerateAiFaceRegionMask(teethMouth.id, 'mouth');
+  };
+
   const updateContainer = (id: string, data: any) =>
     setAdjustments((prev: Adjustments) => ({
       ...prev,
@@ -1371,6 +1445,16 @@ export default function MasksPanel() {
                     />
                   ))}
                 </div>
+                <button
+                  className="mt-2 w-full flex items-center justify-center gap-2 p-2 rounded-md bg-surface hover:bg-card-active transition-colors text-text-secondary hover:text-text-primary"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleCreatePortraitSetup();
+                  }}
+                >
+                  <ScanFace size={16} />
+                  <span className="text-sm font-medium select-none">{t('editor.masks.portrait.oneClick')}</span>
+                </button>
               </motion.div>
             ) : (
               <motion.div
@@ -1436,6 +1520,9 @@ export default function MasksPanel() {
                       analyzingSubMaskId={analyzingSubMaskId}
                       setIsMaskControlHovered={setIsMaskControlHovered}
                       onAddComponent={(e: React.MouseEvent) => handleAddMaskContextMenu(e, container.id)}
+                      onSubtractComponent={(e: React.MouseEvent) =>
+                        handleAddComponentModeMenu(e, container.id, SubMaskMode.Subtractive)
+                      }
                     />
                   ))}
                 </AnimatePresence>
@@ -1456,6 +1543,20 @@ export default function MasksPanel() {
                     <Plus size={18} />
                   </div>
                   <span>{t('editor.masks.addNewMask')}</span>
+                </Text>
+                <Text
+                  as="div"
+                  weight={TextWeights.medium}
+                  className="flex items-center gap-2 p-2 rounded-md transition-colors transition-opacity opacity-70 hover:opacity-100 hover:bg-card-active cursor-pointer hover:text-text-primary"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleCreatePortraitSetup();
+                  }}
+                >
+                  <div className="p-0.5">
+                    <ScanFace size={18} />
+                  </div>
+                  <span>{t('editor.masks.portrait.oneClick')}</span>
                 </Text>
               </motion.div>
             )}
@@ -1659,6 +1760,7 @@ function ContainerRow({
   analyzingSubMaskId,
   setIsMaskControlHovered,
   onAddComponent,
+  onSubtractComponent,
 }: any) {
   const { t } = useTranslation();
   const { setNodeRef: setDroppableRef, isOver } = useDroppable({
@@ -1910,20 +2012,38 @@ function ContainerRow({
                   exit={{ opacity: 0, height: 0, overflow: 'hidden' }}
                   transition={{ duration: 0.2 }}
                 >
-                  <Text
-                    as="div"
-                    weight={TextWeights.medium}
-                    className="flex items-center gap-2 p-2 rounded-md transition-colors transition-opacity opacity-70 hover:opacity-100 hover:bg-card-active cursor-pointer hover:text-text-primary"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onAddComponent(e);
-                    }}
-                  >
-                    <div className="relative w-4 h-4 ml-1 shrink-0 flex items-center justify-center">
-                      <Plus size={16} />
-                    </div>
-                    <span className="select-none">{t('editor.masks.actions.addNewComponent')}</span>
-                  </Text>
+                  <div className="flex items-center gap-1">
+                    <Text
+                      as="div"
+                      weight={TextWeights.medium}
+                      className="flex-1 flex items-center gap-2 p-2 rounded-md transition-colors transition-opacity opacity-70 hover:opacity-100 hover:bg-card-active cursor-pointer hover:text-text-primary"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onAddComponent(e);
+                      }}
+                    >
+                      <div className="relative w-4 h-4 ml-1 shrink-0 flex items-center justify-center">
+                        <Plus size={16} />
+                      </div>
+                      <span className="select-none">{t('editor.masks.actions.addComponent')}</span>
+                    </Text>
+                    {container.subMasks.length > 0 && (
+                      <Text
+                        as="div"
+                        weight={TextWeights.medium}
+                        className="flex-1 flex items-center gap-2 p-2 rounded-md transition-colors transition-opacity opacity-70 hover:opacity-100 hover:bg-card-active cursor-pointer hover:text-text-primary"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onSubtractComponent(e);
+                        }}
+                      >
+                        <div className="relative w-4 h-4 ml-1 shrink-0 flex items-center justify-center">
+                          <Minus size={16} />
+                        </div>
+                        <span className="select-none">{t('editor.masks.actions.subtractComponent')}</span>
+                      </Text>
+                    )}
+                  </div>
                 </motion.div>
               )}
             </AnimatePresence>

@@ -78,6 +78,7 @@ interface EditorState {
   // Actions
   setEditor: (updater: Partial<EditorState> | ((state: EditorState) => Partial<EditorState>)) => void;
   pushHistory: (newAdjustments: Adjustments) => void;
+  amendHistory: (newAdjustments: Adjustments) => void;
   undo: () => void;
   redo: () => void;
   resetHistory: (initialState: Adjustments) => void;
@@ -142,6 +143,20 @@ export const useEditorStore = create<EditorState>((set) => ({
       newHistory.push(newAdj);
       if (newHistory.length > 50) newHistory.shift();
       return { history: newHistory, historyIndex: newHistory.length - 1 };
+    }),
+
+  // Replace the current history entry instead of pushing a new one. Used for the
+  // async tail of a single user action (e.g. an AI mask's generated bitmap landing
+  // seconds after its creation), so one action stays one undo step.
+  amendHistory: (newAdj) =>
+    set((state) => {
+      if (state.historyIndex === 0) {
+        const newHistory = [...state.history, newAdj];
+        return { history: newHistory, historyIndex: newHistory.length - 1, adjustments: newAdj };
+      }
+      const newHistory = state.history.slice(0, state.historyIndex + 1);
+      newHistory[state.historyIndex] = newAdj;
+      return { history: newHistory, adjustments: newAdj };
     }),
 
   undo: () =>

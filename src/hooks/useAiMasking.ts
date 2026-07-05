@@ -2,7 +2,7 @@ import { useCallback, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'react-toastify';
 import { useEditorStore } from '../store/useEditorStore';
-import { useEditorActions } from './useEditorActions';
+import { useEditorActions, debouncedSetHistory } from './useEditorActions';
 import { Adjustments, AiPatch, MaskContainer, Coord } from '../utils/adjustments';
 import { SubMask } from '../components/panel/right/Masks';
 import { Invokes } from '../components/ui/AppProperties';
@@ -33,9 +33,19 @@ export function useAiMasking() {
   const setEditor = useEditorStore((state) => state.setEditor);
   const { getToken } = useAuth();
 
+  // Write the async tail of a generation into the CURRENT history entry instead of
+  // pushing a new one, so "create AI mask" (creation + bitmap landing seconds later)
+  // stays a single undo step. Flush first so the creation entry itself is committed.
+  const amendAdjustments = useCallback((updater: (prev: Adjustments) => Adjustments) => {
+    debouncedSetHistory.flush();
+    const store = useEditorStore.getState();
+    const newAdjustments = updater(store.adjustments);
+    store.amendHistory(newAdjustments);
+  }, []);
+
   const updateSubMask = useCallback(
     (subMaskId: string, updatedData: any) => {
-      setAdjustments((prev: Adjustments) => ({
+      amendAdjustments((prev: Adjustments) => ({
         ...prev,
         masks: prev.masks.map((c: MaskContainer) => ({
           ...c,
@@ -47,7 +57,7 @@ export function useAiMasking() {
         })),
       }));
     },
-    [setAdjustments],
+    [amendAdjustments],
   );
 
   const handleGenerativeReplace = useCallback(
@@ -80,7 +90,7 @@ export function useAiMasking() {
         const newPatchData = JSON.parse(newPatchDataJson);
         patchesSentToBackend.delete(patchId);
 
-        setAdjustments((prev: Adjustments) => ({
+        amendAdjustments((prev: Adjustments) => ({
           ...prev,
           aiPatches: prev.aiPatches.map((p: AiPatch) =>
             p.id === patchId
@@ -96,7 +106,7 @@ export function useAiMasking() {
         setEditor({ activeAiPatchContainerId: null, activeAiSubMaskId: null });
       } catch (err) {
         toast.error(`AI Replace Failed: ${err}`);
-        setAdjustments((prev: Adjustments) => ({
+        amendAdjustments((prev: Adjustments) => ({
           ...prev,
           aiPatches: prev.aiPatches.map((p: AiPatch) => (p.id === patchId ? { ...p, isLoading: false } : p)),
         }));
@@ -104,7 +114,7 @@ export function useAiMasking() {
         setEditor({ isGeneratingAi: false });
       }
     },
-    [setAdjustments, setEditor],
+    [setAdjustments, amendAdjustments, setEditor],
   );
 
   const handleQuickErase = useCallback(
@@ -167,7 +177,7 @@ export function useAiMasking() {
         const newPatchData = JSON.parse(newPatchDataJson);
         patchesSentToBackend.delete(patchId);
 
-        setAdjustments((prev: Partial<Adjustments>) => ({
+        amendAdjustments((prev: Adjustments) => ({
           ...prev,
           aiPatches: prev.aiPatches?.map((p: AiPatch) =>
             p.id === patchId
@@ -185,7 +195,7 @@ export function useAiMasking() {
         setEditor({ activeAiPatchContainerId: null, activeAiSubMaskId: null });
       } catch (err: any) {
         toast.error(`Quick Erase Failed: ${err.message || String(err)}`);
-        setAdjustments((prev: Partial<Adjustments>) => ({
+        amendAdjustments((prev: Adjustments) => ({
           ...prev,
           aiPatches: prev.aiPatches?.map((p: AiPatch) => (p.id === patchId ? { ...p, isLoading: false } : p)),
         }));
@@ -193,7 +203,7 @@ export function useAiMasking() {
         setEditor({ isGeneratingAi: false });
       }
     },
-    [setAdjustments, setEditor],
+    [setAdjustments, amendAdjustments, setEditor],
   );
 
   const handleDeleteMaskContainer = useCallback(
