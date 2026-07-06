@@ -324,6 +324,19 @@ pub fn default_open_tree_sections() -> Vec<String> {
     vec!["current".to_string()]
 }
 
+/// Personal auto-correct targets learned from the user's own edits: cached
+/// thumbnails are rendered with adjustments applied, so measuring them tells us
+/// how bright this user actually likes faces and midtones.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoProfile {
+    pub face_target_luma: f64,
+    pub midtone_target_luma: f64,
+    pub face_samples: u32,
+    pub global_samples: u32,
+    pub learned_at: u64,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
@@ -388,6 +401,8 @@ pub struct AppSettings {
     pub enable_folder_image_counts: Option<bool>,
     #[serde(default)]
     pub display_edit_icon: Option<bool>,
+    #[serde(default)]
+    pub auto_profile: Option<AutoProfile>,
     #[serde(default = "default_linear_raw_mode")]
     pub linear_raw_mode: String,
     #[serde(default)]
@@ -488,6 +503,7 @@ impl Default for AppSettings {
             high_res_zoom_multiplier: Some(1.0),
             enable_folder_image_counts: Some(false),
             display_edit_icon: Some(true),
+            auto_profile: None,
             linear_raw_mode: default_linear_raw_mode(),
             enable_xmp_sync: Some(true),
             create_xmp_if_missing: Some(false),

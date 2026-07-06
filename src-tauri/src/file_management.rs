@@ -1729,6 +1729,17 @@ pub fn save_metadata_and_update_thumbnail(
                 "thumbnail-generated",
                 serde_json::json!({ "path": path_clone, "data": thumbnail_data, "rating": rating, "is_edited": is_edited }),
             );
+
+            // Continuous auto-profile learning: the edited thumbnail is in the
+            // cache now, so fold this edit into the user's learned targets.
+            if is_edited {
+                tauri::async_runtime::spawn(
+                    crate::image_processing::update_auto_profile_from_image(
+                        app_handle_clone.clone(),
+                        path_clone.clone(),
+                    ),
+                );
+            }
         }
 
         increment_thumbnail_progress(&state, &app_handle_clone);
@@ -2071,7 +2082,9 @@ pub async fn apply_auto_adjustments_to_paths(
                 )
                 .map_err(|e| e.to_string())?;
 
-                let auto_results = perform_auto_analysis(&image);
+                // Batch auto runs inside spawn_blocking without the async face model;
+                // it stays global-metered. The editor's auto command is face-aware.
+                let auto_results = perform_auto_analysis(&image, None, settings.auto_profile.as_ref());
                 let auto_adjustments_json = auto_results_to_json(&auto_results);
 
                 let mut existing_metadata = crate::exif_processing::load_sidecar(&sidecar_path);

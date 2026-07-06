@@ -447,8 +447,29 @@ pub fn calculate_waveform_from_image(
     })
 }
 
-pub fn perform_auto_analysis(image: &DynamicImage) -> AutoAdjustmentResults {
+/// `face_median_luma`: median luma (0-255) of the dominant detected face, when one
+/// exists. Auto must never brighten a face past proper skin exposure — global
+/// median-targeting on portraits with dark surroundings would otherwise wash the
+/// subject out while "fixing" the background.
+pub fn perform_auto_analysis(
+    image: &DynamicImage,
+    face_median_luma: Option<f64>,
+    profile: Option<&crate::app_settings::AutoProfile>,
+) -> AutoAdjustmentResults {
     const ANALYSIS_MAX_DIM: u32 = 1024;
+    const FACE_TARGET_LUMA: f64 = 165.0;
+    const MIN_PROFILE_SAMPLES: u32 = 3;
+
+    // Personalized targets learned from the user's own edits, falling back to the
+    // stock constants until enough edited photos exist to learn from.
+    let face_target = profile
+        .filter(|p| p.face_samples >= MIN_PROFILE_SAMPLES)
+        .map(|p| p.face_target_luma)
+        .unwrap_or(FACE_TARGET_LUMA);
+    let midtone_target = profile
+        .filter(|p| p.global_samples >= MIN_PROFILE_SAMPLES)
+        .map(|p| p.midtone_target_luma)
+        .unwrap_or(128.0);
 
     const LUMA_R: f32 = 0.2126;
     const LUMA_G: f32 = 0.7152;
@@ -473,6 +494,8 @@ pub fn perform_auto_analysis(image: &DynamicImage) -> AutoAdjustmentResults {
     const SHADOW_MAX: f64 = 50.0;
     const HIGHLIGHT_BOOST_SCALE: f64 = 120.0;
     const HIGHLIGHT_MAX: f64 = 70.0;
+    const HIGHLIGHT_RECOVERY_FLOOR: f64 = 30.0;
+    const CLIPPED_RECOVERY_SCALE: f64 = 800.0;
 
     const VIBRANCY_SAT_THRESHOLD: f32 = 0.2;
     const VIBRANCY_SCALE: f64 = 120.0;
@@ -569,13 +592,21 @@ pub fn perform_auto_analysis(image: &DynamicImage) -> AutoAdjustmentResults {
     let clipped_percent =
         luma_hist[CLIPPED_LUMA_THRESHOLD..256].iter().sum::<u32>() as f64 / total_pixels;
 
-    let mut exposure = (EXPOSURE_MIDPOINT - p50 as f64) * EXPOSURE_SCALE;
+    let mut exposure = (midtone_target - p50 as f64) * EXPOSURE_SCALE;
 
-    if white_point > WHITE_POINT_HARD_LIMIT
+    let highlights_at_risk = white_point > WHITE_POINT_HARD_LIMIT
         || highlight_percent > HIGHLIGHT_PERCENT_THRESHOLD
-        || clipped_percent > CLIPPED_PERCENT_THRESHOLD
-    {
+        || clipped_percent > CLIPPED_PERCENT_THRESHOLD;
+
+    if highlights_at_risk {
         exposure = exposure.min(0.0);
+    }
+
+    // Face-aware cap: positive boosts may only take the face up to proper skin
+    // brightness, never past it.
+    let face_headroom = face_median_luma.map(|fm| (face_target - fm).max(0.0));
+    if let Some(headroom) = face_headroom {
+        exposure = exposure.min(headroom);
     }
 
     if white_point as f64 + exposure > EXPOSURE_CEILING {
@@ -599,7 +630,12 @@ pub fn perform_auto_analysis(image: &DynamicImage) -> AutoAdjustmentResults {
 
     let mut highlights = 0.0f64;
     if highlight_percent > HIGHLIGHT_PERCENT_THRESHOLD {
-        highlights = -(highlight_percent * HIGHLIGHT_BOOST_SCALE).min(HIGHLIGHT_MAX);
+        // Linear scaling alone lands at token values (a few percent of near-white
+        // pixels -> -4); when highlights are genuinely at risk, recover with a
+        // meaningful floor and grow with the clipped mass.
+        let recovery = (highlight_percent * HIGHLIGHT_BOOST_SCALE)
+            .max(HIGHLIGHT_RECOVERY_FLOOR + clipped_percent * CLIPPED_RECOVERY_SCALE);
+        highlights = -recovery.min(HIGHLIGHT_MAX);
     }
 
     let mut vibrancy = 0.0f64;
@@ -650,7 +686,19 @@ pub fn perform_auto_analysis(image: &DynamicImage) -> AutoAdjustmentResults {
     let adj_p99 = percentile(&adjusted_luma_hist, 0.99);
     let blacks: f64 = -(adj_p1 as f64 * BLACKS_SCALE);
     let whites: f64 = (adj_p99 as f64 - 255.0) * WHITES_SCALE;
-    let brightness: f64 = (MID_GRAY - adj_p50 as f64) * BRIGHTNESS_SCALE;
+    // Brightness (the filmic post-tonemap gain) needs the same highlight guard as
+    // exposure: median-targeting on a high-key scene would otherwise re-blow the
+    // highlights the exposure guard just protected.
+    let mut brightness: f64 = (midtone_target - adj_p50 as f64) * BRIGHTNESS_SCALE;
+    if highlights_at_risk {
+        brightness = brightness.min(0.0);
+    }
+    if let Some(headroom) = face_headroom {
+        // exposure already consumed part of the face's headroom (both are ~luma-linear;
+        // brightness units are luma * BRIGHTNESS_SCALE)
+        let remaining = (headroom - exposure.max(0.0)).max(0.0);
+        brightness = brightness.min(remaining * BRIGHTNESS_SCALE);
+    }
 
     AutoAdjustmentResults {
         exposure: (exposure / EXPOSURE_OUTPUT_SCALE).clamp(-5.0, 5.0),
@@ -693,20 +741,356 @@ pub fn auto_results_to_json(results: &AutoAdjustmentResults) -> serde_json::Valu
     })
 }
 
-#[tauri::command]
-pub fn calculate_auto_adjustments(
-    state: tauri::State<AppState>,
-) -> Result<serde_json::Value, String> {
-    let original_image = state
-        .original_image
-        .lock()
-        .unwrap()
-        .as_ref()
-        .ok_or("No image loaded for auto adjustments")?
-        .image
-        .clone();
+/// Median luma of a region (or the whole image when `rect` is None).
+fn luma_median(image: &image::GrayImage, rect: Option<(u32, u32, u32, u32)>) -> Option<f64> {
+    let (x0, y0, w, h) = rect.unwrap_or((0, 0, image.width(), image.height()));
+    if w < 4 || h < 4 {
+        return None;
+    }
+    let mut hist = [0u32; 256];
+    for y in y0..(y0 + h).min(image.height()) {
+        for x in x0..(x0 + w).min(image.width()) {
+            hist[image.get_pixel(x, y)[0] as usize] += 1;
+        }
+    }
+    let total: u32 = hist.iter().sum();
+    if total == 0 {
+        return None;
+    }
+    let mut cumulative = 0u32;
+    for (i, &v) in hist.iter().enumerate() {
+        cumulative += v;
+        if cumulative >= total / 2 {
+            return Some(i as f64);
+        }
+    }
+    None
+}
 
-    let results = perform_auto_analysis(&original_image);
+fn median_f64(values: &mut Vec<f64>) -> Option<f64> {
+    if values.is_empty() {
+        return None;
+    }
+    values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    Some(values[values.len() / 2])
+}
+
+/// Learn the user's personal auto-correct targets from photos they have already
+/// edited in `folder`. Cached thumbnails are rendered WITH adjustments applied,
+/// so the face / midtone brightness measured there is exactly the output this
+/// user chose. Cache-only: photos without a cached edited thumbnail are skipped.
+pub async fn learn_auto_profile_from_folder(
+    app_handle: &tauri::AppHandle,
+    state: &AppState,
+    folder: &std::path::Path,
+) -> Option<crate::app_settings::AutoProfile> {
+    const MIN_SAMPLES: usize = 3;
+    const EDIT_KEYS: [&str; 7] = [
+        "exposure",
+        "brightness",
+        "contrast",
+        "highlights",
+        "shadows",
+        "whites",
+        "blacks",
+    ];
+
+    let thumb_dir = crate::file_management::get_thumb_cache_dir(app_handle).ok()?;
+    let face_session = crate::ai_processing::get_or_init_face_model(
+        app_handle,
+        &state.ai_state,
+        &state.ai_init_lock,
+    )
+    .await
+    .ok();
+
+    let mut face_lumas: Vec<f64> = Vec::new();
+    let mut global_lumas: Vec<f64> = Vec::new();
+
+    for entry in std::fs::read_dir(folder).ok()?.flatten() {
+        let sidecar = entry.path();
+        if sidecar.extension().and_then(|e| e.to_str()) != Some("rrdata") {
+            continue;
+        }
+        let Ok(content) = std::fs::read_to_string(&sidecar) else {
+            continue;
+        };
+        let Ok(meta) = serde_json::from_str::<serde_json::Value>(&content) else {
+            continue;
+        };
+        let adj = &meta["adjustments"];
+        let edited = EDIT_KEYS
+            .iter()
+            .any(|k| adj[k].as_f64().map(|v| v.abs() > 0.001).unwrap_or(false));
+        if !edited {
+            continue;
+        }
+
+        // image path = sidecar path minus the .rrdata suffix
+        let image_path = sidecar.with_extension("");
+        let Some(image_path_str) = image_path.to_str() else {
+            continue;
+        };
+        if !image_path.exists() {
+            continue;
+        }
+        let Some(hash) = crate::file_management::get_cache_key_hash(image_path_str) else {
+            continue;
+        };
+        let thumb_path = thumb_dir.join(format!("{}.jpg", hash));
+        let Ok(thumb) = image::open(&thumb_path) else {
+            continue;
+        };
+        let gray = thumb.to_luma8();
+
+        let mut counted_face = false;
+        if let Some(session) = &face_session {
+            if let Ok(faces) = crate::ai_processing::run_face_detection(&thumb, session) {
+                if let Some(face) = faces.first() {
+                    let x0 = face.x1.max(0.0) as u32;
+                    let y0 = face.y1.max(0.0) as u32;
+                    let w = (face.x2 - face.x1).max(0.0) as u32;
+                    let h = (face.y2 - face.y1).max(0.0) as u32;
+                    if let Some(m) = luma_median(&gray, Some((x0, y0, w, h))) {
+                        face_lumas.push(m);
+                        counted_face = true;
+                    }
+                }
+            }
+        }
+        if !counted_face {
+            if let Some(m) = luma_median(&gray, None) {
+                global_lumas.push(m);
+            }
+        }
+    }
+
+    let face_n = face_lumas.len();
+    let global_n = global_lumas.len();
+    if face_n < MIN_SAMPLES && global_n < MIN_SAMPLES {
+        return None;
+    }
+
+    let face_target = median_f64(&mut face_lumas)
+        .map(|m| m.clamp(140.0, 215.0))
+        .unwrap_or(165.0);
+    let midtone_target = median_f64(&mut global_lumas)
+        .map(|m| m.clamp(105.0, 160.0))
+        .unwrap_or(128.0);
+
+    let learned_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    Some(crate::app_settings::AutoProfile {
+        face_target_luma: face_target,
+        midtone_target_luma: midtone_target,
+        face_samples: face_n as u32,
+        global_samples: global_n as u32,
+        learned_at,
+    })
+}
+
+/// Median luma (0-255) of the dominant (largest) detected face, or None when no
+/// face is found or the detector is unavailable (e.g. model not downloaded yet).
+async fn detect_face_median_luma(
+    app_handle: &tauri::AppHandle,
+    state: &AppState,
+    image: &DynamicImage,
+) -> Option<f64> {
+    let face_session =
+        crate::ai_processing::get_or_init_face_model(app_handle, &state.ai_state, &state.ai_init_lock)
+            .await
+            .ok()?;
+    let faces = crate::ai_processing::run_face_detection(image, &face_session).ok()?;
+    let face = faces.first()?;
+    let (w, h) = (image.width() as f32, image.height() as f32);
+    let x0 = face.x1.clamp(0.0, w - 1.0) as u32;
+    let y0 = face.y1.clamp(0.0, h - 1.0) as u32;
+    let bw = ((face.x2 - face.x1).max(1.0) as u32).min(image.width() - x0);
+    let bh = ((face.y2 - face.y1).max(1.0) as u32).min(image.height() - y0);
+    if bw < 8 || bh < 8 {
+        return None;
+    }
+    let crop = image.crop_imm(x0, y0, bw, bh).to_luma8();
+    let mut hist = [0u32; 256];
+    for p in crop.pixels() {
+        hist[p[0] as usize] += 1;
+    }
+    let half = (crop.width() * crop.height()) / 2;
+    let mut cumulative = 0u32;
+    for (i, &v) in hist.iter().enumerate() {
+        cumulative += v;
+        if cumulative >= half {
+            return Some(i as f64);
+        }
+    }
+    None
+}
+
+/// Continuously fold one freshly saved edit into the learned profile (EMA).
+/// Called after every sidecar save, once the edited thumbnail is in the cache.
+/// Per-photo debounce: slider drags save every few hundred ms; sampling a photo
+/// at most once a minute keeps intermediate states from polluting the profile.
+pub async fn update_auto_profile_from_image(app_handle: tauri::AppHandle, image_path: String) {
+    const EMA_ALPHA: f64 = 0.15;
+    const MIN_SECS_BETWEEN_SAMPLES: u64 = 60;
+
+    static LAST_SAMPLED: once_cell::sync::Lazy<
+        std::sync::Mutex<std::collections::HashMap<String, u64>>,
+    > = once_cell::sync::Lazy::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    {
+        let mut last = LAST_SAMPLED.lock().unwrap();
+        if now.saturating_sub(last.get(&image_path).copied().unwrap_or(0))
+            < MIN_SECS_BETWEEN_SAMPLES
+        {
+            return;
+        }
+        last.insert(image_path.clone(), now);
+    }
+
+    let state = tauri::Manager::state::<AppState>(&app_handle);
+    let Ok(thumb_dir) = crate::file_management::get_thumb_cache_dir(&app_handle) else {
+        return;
+    };
+    let Some(hash) = crate::file_management::get_cache_key_hash(&image_path) else {
+        return;
+    };
+    let Ok(thumb) = image::open(thumb_dir.join(format!("{}.jpg", hash))) else {
+        return;
+    };
+    let gray = thumb.to_luma8();
+
+    let face_sample = match crate::ai_processing::get_or_init_face_model(
+        &app_handle,
+        &state.ai_state,
+        &state.ai_init_lock,
+    )
+    .await
+    {
+        Ok(session) => crate::ai_processing::run_face_detection(&thumb, &session)
+            .ok()
+            .and_then(|faces| faces.first().copied())
+            .and_then(|f| {
+                luma_median(
+                    &gray,
+                    Some((
+                        f.x1.max(0.0) as u32,
+                        f.y1.max(0.0) as u32,
+                        (f.x2 - f.x1).max(0.0) as u32,
+                        (f.y2 - f.y1).max(0.0) as u32,
+                    )),
+                )
+            }),
+        Err(_) => None,
+    };
+    let global_sample = if face_sample.is_none() {
+        luma_median(&gray, None)
+    } else {
+        None
+    };
+
+    let Ok(mut settings) = crate::app_settings::load_settings(app_handle.clone()) else {
+        return;
+    };
+    let mut profile = settings
+        .auto_profile
+        .clone()
+        .unwrap_or(crate::app_settings::AutoProfile {
+            face_target_luma: 165.0,
+            midtone_target_luma: 128.0,
+            face_samples: 0,
+            global_samples: 0,
+            learned_at: 0,
+        });
+
+    if let Some(s) = face_sample {
+        let s = s.clamp(140.0, 215.0);
+        profile.face_target_luma = if profile.face_samples == 0 {
+            s
+        } else {
+            profile.face_target_luma * (1.0 - EMA_ALPHA) + s * EMA_ALPHA
+        };
+        profile.face_samples += 1;
+    } else if let Some(s) = global_sample {
+        let s = s.clamp(105.0, 160.0);
+        profile.midtone_target_luma = if profile.global_samples == 0 {
+            s
+        } else {
+            profile.midtone_target_luma * (1.0 - EMA_ALPHA) + s * EMA_ALPHA
+        };
+        profile.global_samples += 1;
+    } else {
+        return;
+    }
+    profile.learned_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    log::info!(
+        "[auto-profile] updated from edit: face {:.0} (n={}), midtone {:.0} (n={})",
+        profile.face_target_luma,
+        profile.face_samples,
+        profile.midtone_target_luma,
+        profile.global_samples
+    );
+    settings.auto_profile = Some(profile);
+    let _ = crate::app_settings::save_settings(settings, app_handle);
+}
+
+#[tauri::command]
+pub async fn calculate_auto_adjustments(
+    state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<serde_json::Value, String> {
+    let (original_image, image_path) = {
+        let guard = state.original_image.lock().unwrap();
+        let loaded = guard
+            .as_ref()
+            .ok_or("No image loaded for auto adjustments")?;
+        (loaded.image.clone(), loaded.path.clone())
+    };
+
+    let settings = crate::app_settings::load_settings(app_handle.clone()).unwrap_or_default();
+    let profile = settings.auto_profile.clone();
+
+    // Bootstrap: with no learned profile yet, scan the current folder's edited
+    // thumbnails in the background so the NEXT auto benefits. Ongoing learning
+    // happens incrementally on every edit save.
+    if profile.is_none() {
+        if let Some(folder) = std::path::Path::new(&image_path)
+            .parent()
+            .map(|p| p.to_path_buf())
+        {
+            let handle = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                let state = tauri::Manager::state::<AppState>(&handle);
+                if let Some(p) = learn_auto_profile_from_folder(&handle, &state, &folder).await {
+                    if let Ok(mut s) = crate::app_settings::load_settings(handle.clone()) {
+                        log::info!(
+                            "[auto-profile] bootstrapped from folder: face {:.0} (n={}), midtone {:.0} (n={})",
+                            p.face_target_luma,
+                            p.face_samples,
+                            p.midtone_target_luma,
+                            p.global_samples
+                        );
+                        s.auto_profile = Some(p);
+                        let _ = crate::app_settings::save_settings(s, handle);
+                    }
+                }
+            });
+        }
+    }
+
+    let face_median = detect_face_median_luma(&app_handle, &state, &original_image).await;
+    let results = perform_auto_analysis(&original_image, face_median, profile.as_ref());
 
     Ok(auto_results_to_json(&results))
 }
