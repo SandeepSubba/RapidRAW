@@ -46,6 +46,10 @@ interface EditorState {
   originalSize: ImageDimensions;
 
   // Tools State
+  // Crop is a mode you opt into (fork behaviour): entering the Crop panel no longer
+  // activates the crop overlay automatically — the user toggles it on with the crop
+  // icon. Off by default and reset when the image or panel changes.
+  cropToolActive: boolean;
   isRotationActive: boolean;
   overlayMode: OverlayMode;
   overlayRotation: number;
@@ -113,6 +117,7 @@ export const useEditorStore = create<EditorState>((set) => ({
   baseRenderSize: { width: 0, height: 0 },
   originalSize: { width: 0, height: 0 },
 
+  cropToolActive: false,
   isRotationActive: false,
   overlayMode: 'thirds',
   overlayRotation: 0,

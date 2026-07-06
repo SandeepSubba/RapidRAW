@@ -138,6 +138,11 @@ export default function Editor({ onBackToLibrary, onContextMenu, transformWrappe
   const [crop, setCrop] = useState<Crop | null>(null);
   const prevCropParams = useRef<any>(null);
   const lastValidCropRef = useRef<PercentCrop | null>(null);
+  // Only persist a crop that came from real user interaction. Opening the crop tool
+  // seeds a display crop programmatically (and react-image-crop fires onComplete for
+  // it); without this guard that seed gets saved, marking an untouched image as
+  // cropped/edited. Reset whenever the image or crop-tool visibility changes.
+  const cropUserInteractedRef = useRef(false);
 
   const [isMaskHovered, setIsMaskHovered] = useState(false);
   const [isMaskTouchInteracting, setIsMaskTouchInteracting] = useState(false);
@@ -299,6 +304,12 @@ export default function Editor({ onBackToLibrary, onContextMenu, transformWrappe
   const isCropping = activeRightPanel === Panel.Crop;
   const isMasking = activeRightPanel === Panel.Masks;
   const isAiEditing = activeRightPanel === Panel.Ai;
+
+  // Crop is opt-in: reset it to off whenever the crop panel opens/closes or the
+  // image changes, so it never activates by itself (fork behaviour).
+  useEffect(() => {
+    setEditor({ cropToolActive: false });
+  }, [isCropping, selectedImage, setEditor]);
 
   const croppedDimensions = useMemo<ImageDimensions | null>(() => {
     if (!selectedImage?.width || !selectedImage?.height) {
@@ -1571,7 +1582,29 @@ export default function Editor({ onBackToLibrary, onContextMenu, transformWrappe
       } else {
         prevCropParams.current = { rotation, aspectRatio, orientationSteps };
 
-        if (
+        // Opening the crop tool on a never-cropped image computes a full-frame crop
+        // just to seed the overlay. Persisting it would mark an untouched image as
+        // cropped/edited, so only show the handles at full extent — a real crop is
+        // saved when the user drags or picks a (non-original) aspect.
+        const wasUncropped = !currentAdjCrop;
+        const isFullFrame =
+          nextPixelCrop != null &&
+          nextPixelCrop.x <= 1 &&
+          nextPixelCrop.y <= 1 &&
+          nextPixelCrop.width >= W - 1 &&
+          nextPixelCrop.height >= H - 1;
+
+        if (nextPixelCrop && wasUncropped && isFullFrame) {
+          const pc: PercentCrop = {
+            unit: '%',
+            x: (nextPixelCrop.x / W) * 100,
+            y: (nextPixelCrop.y / H) * 100,
+            width: (nextPixelCrop.width / W) * 100,
+            height: (nextPixelCrop.height / H) * 100,
+          };
+          setCrop(pc);
+          lastValidCropRef.current = pc;
+        } else if (
           nextPixelCrop &&
           (!currentAdjCrop ||
             Math.abs(currentAdjCrop.x - nextPixelCrop.x) > 1 ||
@@ -1624,9 +1657,18 @@ export default function Editor({ onBackToLibrary, onContextMenu, transformWrappe
     }
   }, [isCropping, adjustments.crop, adjustments.orientationSteps, selectedImage, liveRotation]);
 
+  // Reset the "user interacted" flag whenever the image changes or the crop tool is
+  // opened/closed, so a freshly seeded crop is never mistaken for a real one.
+  useEffect(() => {
+    cropUserInteractedRef.current = false;
+  }, [selectedImage, isCropping]);
+
   const handleCropChange = useCallback(
     (_pixelCrop: Crop, percentCrop: PercentCrop) => {
       if (!selectedImage) return;
+      // react-image-crop calls onChange only on user drag/resize, so this marks a
+      // genuine crop edit (vs. the programmatic seed on open).
+      cropUserInteractedRef.current = true;
 
       const orientationSteps = adjustments.orientationSteps || 0;
       const isSwapped = orientationSteps === 1 || orientationSteps === 3;
@@ -1896,6 +1938,11 @@ export default function Editor({ onBackToLibrary, onContextMenu, transformWrappe
   const handleCropComplete = useCallback(
     (_: any, pc: PercentCrop) => {
       if (!pc.width || !pc.height || !selectedImage?.width) {
+        return;
+      }
+      // Ignore the completion react-image-crop fires for the programmatic seed crop
+      // on open — only persist once the user has actually dragged/resized.
+      if (!cropUserInteractedRef.current) {
         return;
       }
       if (liveRotation !== null && liveRotation !== undefined) {

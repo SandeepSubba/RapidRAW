@@ -9,6 +9,7 @@ import { AppSettings, BrushSettings, SelectedImage } from '../../ui/AppPropertie
 import { RenderSize } from '../../../hooks/useImageRenderSize';
 import type { OverlayMode } from '../right/CropPanel';
 import CompositionOverlays from './overlays/CompositionOverlays';
+import { useEditorStore } from '../../../store/useEditorStore';
 
 interface CursorPreview {
   visible: boolean;
@@ -1039,6 +1040,9 @@ const ImageCanvas = memo(
     transformState,
     hasRenderedFirstFrame,
   }: ImageCanvasProps) => {
+    // Crop is opt-in: the overlay only shows once the user activates the crop tool
+    // (via the crop icon in the panel), not merely by opening the Crop panel.
+    const cropToolActive = useEditorStore((s) => s.cropToolActive);
     const [isCropViewVisible, setIsCropViewVisible] = useState(false);
     const cropImageRef = useRef<HTMLImageElement>(null);
     const [displayedMaskUrl, setDisplayedMaskUrl] = useState<string | null>(null);
@@ -2630,7 +2634,7 @@ const ImageCanvas = memo(
           {/* Letterbox rotate layer: dragging anywhere outside the image also rotates,
               so straightening works even when the crop fills the whole frame. Sits
               behind the crop container (which intercepts events over the image). */}
-          {cropPreviewUrl && uncroppedImageRenderSize && !isStraightenActive && (
+          {cropToolActive && cropPreviewUrl && uncroppedImageRenderSize && !isStraightenActive && (
             <div
               onPointerDown={handleRotatePointerDown}
               style={{ position: 'absolute', inset: 0, zIndex: 0, cursor: ROTATE_CURSOR, touchAction: 'none' }}
@@ -2645,30 +2649,47 @@ const ImageCanvas = memo(
                 width: uncroppedImageRenderSize.width,
               }}
             >
-              <ReactCrop
-                aspect={adjustments.aspectRatio}
-                crop={crop}
-                onChange={setCrop}
-                onComplete={handleCropComplete}
-                ruleOfThirds={false}
-                renderSelectionAddon={() => {
-                  const { width, height } = getCropDimensions();
-                  if (width <= 0 || height <= 0) {
-                    return null;
-                  }
-                  const showDenseGrid = isRotationActive && !isStraightenActive;
-                  const currentOverlayMode = isRotationActive || isStraightenActive ? 'none' : overlayMode || 'none';
-                  return (
-                    <CompositionOverlays
-                      width={width}
-                      height={height}
-                      mode={currentOverlayMode}
-                      rotation={overlayRotation || 0}
-                      denseVisible={showDenseGrid}
-                    />
-                  );
-                }}
-              >
+              {cropToolActive ? (
+                <ReactCrop
+                  aspect={adjustments.aspectRatio}
+                  crop={crop}
+                  onChange={setCrop}
+                  onComplete={handleCropComplete}
+                  ruleOfThirds={false}
+                  renderSelectionAddon={() => {
+                    const { width, height } = getCropDimensions();
+                    if (width <= 0 || height <= 0) {
+                      return null;
+                    }
+                    const showDenseGrid = isRotationActive && !isStraightenActive;
+                    const currentOverlayMode = isRotationActive || isStraightenActive ? 'none' : overlayMode || 'none';
+                    return (
+                      <CompositionOverlays
+                        width={width}
+                        height={height}
+                        mode={currentOverlayMode}
+                        rotation={overlayRotation || 0}
+                        denseVisible={showDenseGrid}
+                      />
+                    );
+                  }}
+                >
+                  <img
+                    alt="Crop preview"
+                    ref={cropImageRef}
+                    src={cropPreviewUrl}
+                    style={{
+                      display: 'block',
+                      width: `${uncroppedImageRenderSize.width}px`,
+                      height: `${uncroppedImageRenderSize.height}px`,
+                      objectFit: 'contain',
+                      transform: cropImageTransforms,
+                      imageRendering: isMaxZoom ? 'pixelated' : 'auto',
+                    }}
+                  />
+                </ReactCrop>
+              ) : (
+                // Crop tool inactive: show the (uncropped) image without crop handles.
                 <img
                   alt="Crop preview"
                   ref={cropImageRef}
@@ -2682,11 +2703,13 @@ const ImageCanvas = memo(
                     imageRendering: isMaxZoom ? 'pixelated' : 'auto',
                   }}
                 />
-              </ReactCrop>
+              )}
 
               {/* Drag in the margin just outside the crop to rotate the image, like
-                  Lightroom/Capture One. Hidden while the straighten tool is active. */}
-              {!isStraightenActive &&
+                  Lightroom/Capture One. Hidden while the straighten tool is active or
+                  the crop tool is not activated. */}
+              {cropToolActive &&
+                !isStraightenActive &&
                 rotateZones.map((z) => (
                   <div
                     key={z.key}

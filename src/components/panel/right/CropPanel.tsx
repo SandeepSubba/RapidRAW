@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Aperture,
   Check,
+  Crop,
   FlipHorizontal,
   FlipVertical,
   Grid3x3,
@@ -62,6 +63,7 @@ export default function CropPanel() {
   const activeOverlay = useEditorStore((s) => s.overlayMode);
   const guidedKeystoneActive = useEditorStore((s) => s.guidedKeystoneActive);
   const keystoneLines = useEditorStore((s) => s.keystoneLines);
+  const cropToolActive = useEditorStore((s) => s.cropToolActive);
   const setEditor = useEditorStore((s) => s.setEditor);
   const { setAdjustments } = useEditorActions();
   const [customW, setCustomW] = useState('');
@@ -593,13 +595,26 @@ export default function CropPanel() {
     <div className="flex flex-col h-full">
       <div className="p-4 flex justify-between items-center shrink-0 border-b border-surface">
         <Text variant={TextVariants.title}>{t('editor.crop.title')}</Text>
-        <button
-          className="p-2 rounded-full hover:bg-surface transition-colors"
-          onClick={handleReset}
-          data-tooltip={t('editor.crop.resetTooltip')}
-        >
-          <RotateCcw size={18} />
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Crop is opt-in: entering this panel no longer auto-activates the crop
+              overlay. Toggle it on here when you actually want to crop. */}
+          <button
+            className={`p-2 rounded-full transition-colors ${
+              cropToolActive ? 'bg-accent text-button-text' : 'hover:bg-surface'
+            }`}
+            onClick={() => setEditor({ cropToolActive: !cropToolActive })}
+            data-tooltip={cropToolActive ? t('editor.crop.deactivateTooltip') : t('editor.crop.activateTooltip')}
+          >
+            <Crop size={18} />
+          </button>
+          <button
+            className="p-2 rounded-full hover:bg-surface transition-colors"
+            onClick={handleReset}
+            data-tooltip={t('editor.crop.resetTooltip')}
+          >
+            <RotateCcw size={18} />
+          </button>
+        </div>
       </div>
 
       <div className="grow overflow-y-auto p-4 space-y-8">
