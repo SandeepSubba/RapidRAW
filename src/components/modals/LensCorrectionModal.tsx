@@ -333,6 +333,13 @@ export default function LensCorrectionModal({
           .catch(console.error);
       }
 
+      // If the image is already in Auto mode but no lens profile is resolved yet
+      // (e.g. opened right after an import set the mode to auto), actively detect
+      // from EXIF so the status resolves instead of hanging on "Waiting…".
+      if (initParams.lensCorrectionMode === 'auto' && !initParams.lensDistortionParams) {
+        handleAutoDetect();
+      }
+
       return () => clearTimeout(timer);
     } else {
       setShow(false);
@@ -343,7 +350,10 @@ export default function LensCorrectionModal({
       }, 300);
       return () => clearTimeout(timer);
     }
-  }, [isOpen, currentAdjustments]);
+    // Initialise once per open; intentionally not re-running on currentAdjustments
+    // reference changes (which would reset in-progress auto-detection).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
 
   const handleMakerChange = (maker: string) => {
     const newParams = {
