@@ -192,6 +192,18 @@ export const useImportStore = create<ImportState>()(
         sortKey: state.sortKey,
         sortOrder: state.sortOrder,
       }),
+      // Deep-merge nested prefs so defaults for newly-added fields survive when an
+      // older persisted `importSettings` (saved before the field existed) lacks them.
+      // Without this, zustand's shallow merge replaces `importSettings` wholesale and
+      // e.g. `autoLensCorrection` comes back `undefined` instead of its default.
+      merge: (persisted, current) => {
+        const p = (persisted ?? {}) as Partial<ImportState>;
+        return {
+          ...current,
+          ...p,
+          importSettings: { ...current.importSettings, ...(p.importSettings ?? {}) },
+        };
+      },
     },
   ),
 );
