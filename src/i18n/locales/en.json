@@ -389,7 +389,11 @@
       }
     },
     "crop": {
+      "activate": "Crop",
+      "activateTooltip": "Activate crop tool",
       "aspectRatioHeading": "Aspect Ratio",
+      "cropping": "Cropping",
+      "deactivateTooltip": "Deactivate crop tool",
       "custom": {
         "hPlaceholder": "H",
         "hTooltip": "Height",
