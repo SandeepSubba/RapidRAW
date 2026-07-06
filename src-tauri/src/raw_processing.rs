@@ -12,6 +12,17 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
 };
 
+// How far a highlight must push past 1.0 (in linear scene space, after white
+// balance) before it is treated as a fully-clipped highlight and desaturated to
+// neutral white. White-balance multipliers spread a clipped *neutral* highlight
+// into a colored one — a blown white surface arrives tinted by the R/B WB gains
+// and reads magenta/pink — so blown highlights must roll back to white the way
+// Lightroom/Capture One render them. Kept smaller than the highlight-compression
+// ceiling so it neutralizes the cast without touching how much headroom the tone
+// mapper gets. ponytail: single knob; widen if colored highlights desaturate too
+// eagerly, tighten if pink survives on blown neutrals.
+const HIGHLIGHT_DESAT_RANGE: f32 = 1.0;
+
 pub fn develop_raw_image(
     file_bytes: &[u8],
     fast_demosaic: bool,
@@ -160,24 +171,18 @@ fn develop_internal(
                 let max_c = r.max(g).max(b);
 
                 let (final_r, final_g, final_b) = if max_c > 1.0 {
-                    let min_c = r.min(g).min(b);
-                    let compression_factor =
-                        (1.0 - (max_c - 1.0) / (safe_highlight_compression - 1.0)).clamp(0.0, 1.0);
-                    let compressed_r = min_c + (r - min_c) * compression_factor;
-                    let compressed_g = min_c + (g - min_c) * compression_factor;
-                    let compressed_b = min_c + (b - min_c) * compression_factor;
-                    let compressed_max = compressed_r.max(compressed_g).max(compressed_b);
-
-                    if compressed_max > 1e-6 {
-                        let rescale = max_c / compressed_max;
-                        (
-                            compressed_r * rescale,
-                            compressed_g * rescale,
-                            compressed_b * rescale,
-                        )
-                    } else {
-                        (max_c, max_c, max_c)
-                    }
+                    // Desaturate the highlight toward its (luminance-preserving) peak as it
+                    // pushes past 1.0. Blending each channel toward max_c collapses the
+                    // WB-gain colour of a clipped neutral highlight back to white; by
+                    // HIGHLIGHT_DESAT_RANGE over 1.0 it is fully neutral. The peak (max_c)
+                    // is left intact so the tone mapper still gets the full highlight range
+                    // up to clamp_limit for its rolloff.
+                    let t = ((max_c - 1.0) / HIGHLIGHT_DESAT_RANGE).clamp(0.0, 1.0);
+                    (
+                        r + (max_c - r) * t,
+                        g + (max_c - g) * t,
+                        b + (max_c - b) * t,
+                    )
                 } else {
                     (r, g, b)
                 };
