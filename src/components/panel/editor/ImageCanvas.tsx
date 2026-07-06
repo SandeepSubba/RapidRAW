@@ -1356,13 +1356,16 @@ const ImageCanvas = memo(
     }, [activeContainer, activeMaskId, activeAiSubMaskId, isMasking, isAiEditing]);
 
     useEffect(() => {
-      if (isCropping && uncroppedAdjustedPreviewUrl) {
+      // Show the uncropped crop-editing layer only while the crop tool is active.
+      // When the Crop panel is open but the tool is off (opt-in fork behaviour),
+      // keep showing the normal cropped preview like every other module.
+      if (isCropping && cropToolActive && uncroppedAdjustedPreviewUrl) {
         const timer = setTimeout(() => setIsCropViewVisible(true), 10);
         return () => clearTimeout(timer);
       } else {
         setIsCropViewVisible(false);
       }
-    }, [isCropping, uncroppedAdjustedPreviewUrl]);
+    }, [isCropping, cropToolActive, uncroppedAdjustedPreviewUrl]);
 
     const handleWbClick = useCallback(
       (e: any) => {

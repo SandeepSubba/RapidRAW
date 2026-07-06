@@ -64,6 +64,7 @@ interface WgpuRenderState {
   isReady: boolean;
   hasRenderedFirstFrame: boolean;
   isCropping: boolean;
+  cropToolActive: boolean;
   uncroppedAdjustedPreviewUrl: string | null;
   showOriginal: boolean;
   bgPrimary: [number, number, number, number];
@@ -90,6 +91,7 @@ export default function Editor({ onBackToLibrary, onContextMenu, transformWrappe
   const adjustmentsHistoryIndex = useEditorStore((s) => s.historyIndex);
   const finalPreviewUrl = useEditorStore((s) => s.finalPreviewUrl);
   const uncroppedAdjustedPreviewUrl = useEditorStore((s) => s.uncroppedAdjustedPreviewUrl);
+  const cropToolActive = useEditorStore((s) => s.cropToolActive);
   const transformedOriginalUrl = useEditorStore((s) => s.transformedOriginalUrl);
   const interactivePatch = useEditorStore((s) => s.interactivePatch);
   const showOriginal = useEditorStore((s) => s.showOriginal);
@@ -1123,6 +1125,7 @@ export default function Editor({ onBackToLibrary, onContextMenu, transformWrappe
     isReady: selectedImage?.isReady ?? false,
     hasRenderedFirstFrame,
     isCropping,
+    cropToolActive,
     uncroppedAdjustedPreviewUrl,
     showOriginal,
     bgPrimary: [24 / 255, 24 / 255, 24 / 255, 1.0],
@@ -1139,6 +1142,7 @@ export default function Editor({ onBackToLibrary, onContextMenu, transformWrappe
       isReady: selectedImage?.isReady ?? false,
       hasRenderedFirstFrame,
       isCropping,
+      cropToolActive,
       uncroppedAdjustedPreviewUrl,
       showOriginal,
       bgPrimary: parseRgb(bgPrimaryStr),
@@ -1149,6 +1153,7 @@ export default function Editor({ onBackToLibrary, onContextMenu, transformWrappe
     selectedImage?.isReady,
     hasRenderedFirstFrame,
     isCropping,
+    cropToolActive,
     uncroppedAdjustedPreviewUrl,
     showOriginal,
     appSettings?.theme,
@@ -1243,7 +1248,11 @@ export default function Editor({ onBackToLibrary, onContextMenu, transformWrappe
       let screenW = baseW * scale * dpr || 1;
       let screenH = baseH * scale * dpr || 1;
 
-      const isCropViewVisible = state.isCropping && state.uncroppedAdjustedPreviewUrl;
+      // Only hide the (cropped) native render behind the uncropped crop-editing
+      // layer when the crop tool is actually active. With the tool inactive the
+      // Crop panel shows the cropped result, consistent with every other module.
+      const isCropViewVisible =
+        state.isCropping && state.cropToolActive && state.uncroppedAdjustedPreviewUrl;
 
       if (isCropViewVisible) {
         screenX = -999999;
