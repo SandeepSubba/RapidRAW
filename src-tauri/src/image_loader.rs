@@ -114,6 +114,13 @@ pub fn load_base_image_from_bytes(
                 Ok(image)
             }
             Ok(Err(e)) => {
+                // A cancelled load is not a decode failure: falling through to the
+                // preview fallback would return Ok with a tiny embedded preview,
+                // which the caller then caches as the image's decoded full-res
+                // original — pinning it to a blurry preview until restart.
+                if e.to_string().contains("Load cancelled") {
+                    return Err(e);
+                }
                 let classified = classify_raw_develop_error(path_for_ext_check, e);
                 log::warn!(
                     "Error developing RAW file '{}': {}",
