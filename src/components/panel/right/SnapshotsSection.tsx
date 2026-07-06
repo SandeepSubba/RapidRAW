@@ -122,11 +122,11 @@ export default function SnapshotsSection() {
           {t('editor.presets.snapshots.empty')}
         </Text>
       ) : (
-        <div className="space-y-1">
+        <div className="space-y-2">
           {snapshots.map((version) => (
             <button
               key={version.id}
-              className="w-full flex items-center justify-between p-2 rounded-md bg-surface hover:bg-card-active cursor-pointer transition-colors group text-left"
+              className="w-full flex items-center justify-between gap-2 p-2 rounded-lg bg-surface hover:bg-surface-hover cursor-pointer transition-colors group text-left"
               onClick={() => handleApply(version)}
               onContextMenu={(e) => handleRowContextMenu(e, version)}
             >
@@ -144,11 +144,20 @@ export default function SnapshotsSection() {
                   onClick={(e) => e.stopPropagation()}
                 />
               ) : (
-                <Text weight={TextWeights.medium} className="truncate text-sm">
+                <Text
+                  color={TextColors.primary}
+                  weight={TextWeights.medium}
+                  className="grow truncate select-none"
+                >
                   {version.name}
                 </Text>
               )}
-              <Text color={TextColors.secondary} className="text-xs shrink-0 ml-2">
+              <Text
+                as="span"
+                variant={TextVariants.small}
+                color={TextColors.secondary}
+                className="ml-auto pr-1 shrink-0"
+              >
                 {new Date(version.createdAt).toLocaleDateString(undefined, {
                   month: 'short',
                   day: 'numeric',
