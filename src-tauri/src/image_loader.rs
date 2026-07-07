@@ -139,13 +139,6 @@ pub fn load_base_image_with_fallback(
                 Ok((image, false))
             }
             Ok(Err(e)) => {
-                // A cancelled load is not a decode failure: falling through to the
-                // preview fallback would return Ok with a tiny embedded preview,
-                // which the caller then caches as the image's decoded full-res
-                // original — pinning it to a blurry preview until restart.
-                if e.to_string().contains("Load cancelled") {
-                    return Err(e);
-                }
                 let classified = classify_raw_develop_error(path_for_ext_check, e);
                 // A cancellation is not a decode failure — it means a newer load
                 // superseded this one (e.g. fast filmstrip navigation). Propagate it
@@ -440,11 +433,12 @@ pub async fn load_image(
         .unwrap()
         .get(&source_path_str);
 
-    let (pristine_arc, exif_data, is_preview_fallback) =
-        if let Some((cached_img, cached_exif)) = cached_data {
-            (cached_img, cached_exif, false)
-        } else {
-            let (pristine_img, exif_data_loaded, is_fallback) =
+    let (pristine_arc, exif_data, is_preview_fallback) = if let Some((cached_img, cached_exif)) =
+        cached_data
+    {
+        (cached_img, cached_exif, false)
+    } else {
+        let (pristine_img, exif_data_loaded, is_fallback) =
                 tokio::task::spawn_blocking(move || {
                     if generation_tracker.load(Ordering::SeqCst) != my_generation {
                         return Err("Load cancelled".to_string());
@@ -499,20 +493,20 @@ pub async fn load_image(
                 .await
                 .map_err(|e| e.to_string())??;
 
-            let arc_img = Arc::new(pristine_img);
+        let arc_img = Arc::new(pristine_img);
 
-            // Don't cache low-res fallback previews: caching one would pin the image to
-            // the tiny embedded preview for the rest of the session (and mask a later
-            // successful decode). A genuine-failure RAW just re-runs this cheap fallback.
-            if !is_fallback {
-                state.decoded_image_cache.lock().unwrap().insert(
-                    source_path_str.clone(),
-                    arc_img.clone(),
-                    exif_data_loaded.clone(),
-                );
-            }
+        // Don't cache low-res fallback previews: caching one would pin the image to
+        // the tiny embedded preview for the rest of the session (and mask a later
+        // successful decode). A genuine-failure RAW just re-runs this cheap fallback.
+        if !is_fallback {
+            state.decoded_image_cache.lock().unwrap().insert(
+                source_path_str.clone(),
+                arc_img.clone(),
+                exif_data_loaded.clone(),
+            );
+        }
 
-            (arc_img, exif_data_loaded, is_fallback)
+        (arc_img, exif_data_loaded, is_fallback)
     };
 
     if state.load_image_generation.load(Ordering::SeqCst) != my_generation {
