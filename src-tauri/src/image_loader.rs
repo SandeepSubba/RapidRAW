@@ -35,6 +35,10 @@ pub struct LoadImageResult {
     pub metadata: ImageMetadata,
     pub exif: HashMap<String, String>,
     pub is_raw: bool,
+    /// True when `width`/`height` come from a low-res embedded preview because the
+    /// RAW couldn't be fully decoded. The frontend must not persist geometry
+    /// (auto-crop) against these dimensions.
+    pub is_preview_fallback: bool,
 }
 
 #[derive(Deserialize)]
@@ -68,6 +72,27 @@ pub fn load_base_image_from_bytes(
     settings: &AppSettings,
     cancel_token: Option<(Arc<AtomicUsize>, usize)>,
 ) -> Result<DynamicImage> {
+    load_base_image_with_fallback(
+        bytes,
+        path_for_ext_check,
+        use_fast_raw_dev,
+        settings,
+        cancel_token,
+    )
+    .map(|(image, _is_fallback)| image)
+}
+
+/// Like `load_base_image_from_bytes`, but also reports whether the returned image
+/// is a low-res embedded-preview fallback (used when the RAW couldn't be decoded).
+/// Callers that persist geometry (e.g. auto-crop) must not do so against a fallback,
+/// since its dimensions are the tiny preview's, not the real image's.
+pub fn load_base_image_with_fallback(
+    bytes: &[u8],
+    path_for_ext_check: &str,
+    use_fast_raw_dev: bool,
+    settings: &AppSettings,
+    cancel_token: Option<(Arc<AtomicUsize>, usize)>,
+) -> Result<(DynamicImage, bool)> {
     let highlight_compression = settings.raw_highlight_compression.unwrap_or(2.5);
     let linear_mode = settings.linear_raw_mode.clone();
     let color_nr_setting = settings.raw_preprocessing_color_nr.unwrap_or(0.5);
@@ -111,7 +136,7 @@ pub fn load_base_image_from_bytes(
                         duration
                     );
                 }
-                Ok(image)
+                Ok((image, false))
             }
             Ok(Err(e)) => {
                 // A cancelled load is not a decode failure: falling through to the
@@ -122,6 +147,14 @@ pub fn load_base_image_from_bytes(
                     return Err(e);
                 }
                 let classified = classify_raw_develop_error(path_for_ext_check, e);
+                // A cancellation is not a decode failure — it means a newer load
+                // superseded this one (e.g. fast filmstrip navigation). Propagate it
+                // so the superseding load renders the full image. Falling back to the
+                // tiny embedded preview here would leave the viewer permanently stuck
+                // on a low-res thumbnail even though the RAW decodes fine.
+                if classified.to_string().contains("Load cancelled") {
+                    return Err(classified);
+                }
                 log::warn!(
                     "Error developing RAW file '{}': {}",
                     path_for_ext_check,
@@ -139,7 +172,7 @@ pub fn load_base_image_from_bytes(
                         preview.width(),
                         preview.height()
                     );
-                    return Ok(apply_srgb_to_linear(preview));
+                    return Ok((apply_srgb_to_linear(preview), true));
                 }
                 Err(classified)
             }
@@ -168,7 +201,7 @@ pub fn load_base_image_from_bytes(
             );
         }
 
-        Ok(image)
+        Ok((image, false))
     }
 }
 
@@ -407,72 +440,79 @@ pub async fn load_image(
         .unwrap()
         .get(&source_path_str);
 
-    let (pristine_arc, exif_data) = if let Some((cached_img, cached_exif)) = cached_data {
-        (cached_img, cached_exif)
-    } else {
-        let (pristine_img, exif_data_loaded) = tokio::task::spawn_blocking(move || {
-            if generation_tracker.load(Ordering::SeqCst) != my_generation {
-                return Err("Load cancelled".to_string());
+    let (pristine_arc, exif_data, is_preview_fallback) =
+        if let Some((cached_img, cached_exif)) = cached_data {
+            (cached_img, cached_exif, false)
+        } else {
+            let (pristine_img, exif_data_loaded, is_fallback) =
+                tokio::task::spawn_blocking(move || {
+                    if generation_tracker.load(Ordering::SeqCst) != my_generation {
+                        return Err("Load cancelled".to_string());
+                    }
+
+                    let result: Result<(DynamicImage, HashMap<String, String>, bool), String> =
+                        (|| match read_file_mapped(Path::new(&path_clone)) {
+                            Ok(mmap) => {
+                                if generation_tracker.load(Ordering::SeqCst) != my_generation {
+                                    return Err("Load cancelled".to_string());
+                                }
+
+                                let (img, is_fallback) = load_base_image_with_fallback(
+                                    &mmap,
+                                    &path_clone,
+                                    false,
+                                    &settings,
+                                    cancel_token.clone(),
+                                )
+                                .map_err(|e| e.to_string())?;
+                                let exif = exif_processing::read_exif_data(&path_clone, &mmap);
+                                Ok((img, exif, is_fallback))
+                            }
+                            Err(e) => {
+                                log::warn!(
+                                    "Failed to memory-map file '{}': {}. Falling back to standard read.",
+                                    path_clone,
+                                    e
+                                );
+                                let bytes = fs::read(&path_clone).map_err(|io_err| {
+                                    format!("Fallback read failed for {}: {}", path_clone, io_err)
+                                })?;
+
+                                if generation_tracker.load(Ordering::SeqCst) != my_generation {
+                                    return Err("Load cancelled".to_string());
+                                }
+
+                                let (img, is_fallback) = load_base_image_with_fallback(
+                                    &bytes,
+                                    &path_clone,
+                                    false,
+                                    &settings,
+                                    cancel_token.clone(),
+                                )
+                                .map_err(|e| e.to_string())?;
+                                let exif = exif_processing::read_exif_data(&path_clone, &bytes);
+                                Ok((img, exif, is_fallback))
+                            }
+                        })();
+                    result
+                })
+                .await
+                .map_err(|e| e.to_string())??;
+
+            let arc_img = Arc::new(pristine_img);
+
+            // Don't cache low-res fallback previews: caching one would pin the image to
+            // the tiny embedded preview for the rest of the session (and mask a later
+            // successful decode). A genuine-failure RAW just re-runs this cheap fallback.
+            if !is_fallback {
+                state.decoded_image_cache.lock().unwrap().insert(
+                    source_path_str.clone(),
+                    arc_img.clone(),
+                    exif_data_loaded.clone(),
+                );
             }
 
-            let result: Result<(DynamicImage, HashMap<String, String>), String> =
-                (|| match read_file_mapped(Path::new(&path_clone)) {
-                    Ok(mmap) => {
-                        if generation_tracker.load(Ordering::SeqCst) != my_generation {
-                            return Err("Load cancelled".to_string());
-                        }
-
-                        let img = load_base_image_from_bytes(
-                            &mmap,
-                            &path_clone,
-                            false,
-                            &settings,
-                            cancel_token.clone(),
-                        )
-                        .map_err(|e| e.to_string())?;
-                        let exif = exif_processing::read_exif_data(&path_clone, &mmap);
-                        Ok((img, exif))
-                    }
-                    Err(e) => {
-                        log::warn!(
-                            "Failed to memory-map file '{}': {}. Falling back to standard read.",
-                            path_clone,
-                            e
-                        );
-                        let bytes = fs::read(&path_clone).map_err(|io_err| {
-                            format!("Fallback read failed for {}: {}", path_clone, io_err)
-                        })?;
-
-                        if generation_tracker.load(Ordering::SeqCst) != my_generation {
-                            return Err("Load cancelled".to_string());
-                        }
-
-                        let img = load_base_image_from_bytes(
-                            &bytes,
-                            &path_clone,
-                            false,
-                            &settings,
-                            cancel_token.clone(),
-                        )
-                        .map_err(|e| e.to_string())?;
-                        let exif = exif_processing::read_exif_data(&path_clone, &bytes);
-                        Ok((img, exif))
-                    }
-                })();
-            result
-        })
-        .await
-        .map_err(|e| e.to_string())??;
-
-        let arc_img = Arc::new(pristine_img);
-
-        state.decoded_image_cache.lock().unwrap().insert(
-            source_path_str.clone(),
-            arc_img.clone(),
-            exif_data_loaded.clone(),
-        );
-
-        (arc_img, exif_data_loaded)
+            (arc_img, exif_data_loaded, is_fallback)
     };
 
     if state.load_image_generation.load(Ordering::SeqCst) != my_generation {
@@ -499,5 +539,6 @@ pub async fn load_image(
         metadata,
         exif: exif_data,
         is_raw,
+        is_preview_fallback,
     })
 }

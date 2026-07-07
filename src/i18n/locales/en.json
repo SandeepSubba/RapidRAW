@@ -1438,6 +1438,8 @@
       "enableXmpSync": "Enable XMP Sync",
       "focusMode": "Focus Mode",
       "focusModeDesc": "Helps you focus by automatically closing other panels when you open a new one.",
+      "wrapImageNavigation": "Wrap Image Navigation",
+      "wrapImageNavigationDesc": "When enabled, pressing the arrow keys past the last image jumps to the first (and vice versa). Disable to stop at the ends.",
       "folderImageCounts": "Folder Image Counts",
       "folderImageCountsDesc": "Show the number of images inside folders when hovering over the folder tree.",
       "font": "Font",

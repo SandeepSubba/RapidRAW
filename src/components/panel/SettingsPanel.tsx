@@ -783,6 +783,18 @@ export default function SettingsPanel({
                       />
                     </SettingItem>
 
+                    <SettingItem
+                      label={t('settings.general.wrapImageNavigation')}
+                      description={t('settings.general.wrapImageNavigationDesc')}
+                    >
+                      <Switch
+                        checked={appSettings?.wrapImageNavigation ?? true}
+                        id="wrap-image-navigation-toggle"
+                        label={t('settings.general.wrapImageNavigation')}
+                        onChange={(checked) => onSettingsChange({ ...appSettings, wrapImageNavigation: checked })}
+                      />
+                    </SettingItem>
+
                     <SettingItem label={t('settings.general.font')} description={t('settings.general.fontDesc')}>
                       <Dropdown
                         onChange={(value: any) => onSettingsChange({ ...appSettings, fontFamily: value })}

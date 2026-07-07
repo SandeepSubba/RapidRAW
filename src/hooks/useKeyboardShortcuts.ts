@@ -115,6 +115,8 @@ export const useKeyboardShortcuts = ({
           e.preventDefault();
           const currentIndex = sortedListRef.current.findIndex((img) => img.path === s.editor.selectedImage!.path);
           if (currentIndex === -1) return;
+          const wrap = s.settings.appSettings?.wrapImageNavigation ?? true;
+          if (currentIndex - 1 < 0 && !wrap) return;
           let nextIndex = currentIndex - 1 < 0 ? sortedListRef.current.length - 1 : currentIndex - 1;
           handleImageSelect(sortedListRef.current[nextIndex].path);
         },
@@ -125,6 +127,8 @@ export const useKeyboardShortcuts = ({
           e.preventDefault();
           const currentIndex = sortedListRef.current.findIndex((img) => img.path === s.editor.selectedImage!.path);
           if (currentIndex === -1) return;
+          const wrap = s.settings.appSettings?.wrapImageNavigation ?? true;
+          if (currentIndex + 1 >= sortedListRef.current.length && !wrap) return;
           let nextIndex = currentIndex + 1 >= sortedListRef.current.length ? 0 : currentIndex + 1;
           handleImageSelect(sortedListRef.current[nextIndex].path);
         },
@@ -525,9 +529,16 @@ export const useKeyboardShortcuts = ({
           if (!activePath || sortedListRef.current.length === 0) return;
           const currentIndex = sortedListRef.current.findIndex((img) => img.path === activePath);
           if (currentIndex === -1) return;
+          const wrap = s.settings.appSettings?.wrapImageNavigation ?? true;
           let nextIndex = isNext ? currentIndex + 1 : currentIndex - 1;
-          if (nextIndex >= sortedListRef.current.length) nextIndex = 0;
-          if (nextIndex < 0) nextIndex = sortedListRef.current.length - 1;
+          if (nextIndex >= sortedListRef.current.length) {
+            if (!wrap) return;
+            nextIndex = 0;
+          }
+          if (nextIndex < 0) {
+            if (!wrap) return;
+            nextIndex = sortedListRef.current.length - 1;
+          }
           const nextImage = sortedListRef.current[nextIndex];
           if (nextImage) {
             s.library.setLibrary({ libraryActivePath: nextImage.path, multiSelectedPaths: [nextImage.path] });

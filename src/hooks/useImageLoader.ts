@@ -85,6 +85,7 @@ export function useImageLoader(cachedEditStateRef: React.RefObject<any>) {
                   height: loadImageResult.height,
                   isRaw: loadImageResult.is_raw,
                   isReady: true,
+                  isPreviewFallback: !!loadImageResult.is_preview_fallback,
                   metadata: loadImageResult.metadata,
                   originalUrl: null,
                   width: loadImageResult.width,
