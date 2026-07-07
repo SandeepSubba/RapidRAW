@@ -82,11 +82,56 @@ pub fn load_base_image_from_bytes(
     .map(|(image, _is_fallback)| image)
 }
 
+/// The raw decode, without applying a stored in-library negative conversion. Used
+/// by the negative-conversion modal itself (which tunes/analyses the raw negative);
+/// everything else should use the non-`_raw` variants so a converted negative renders
+/// as its positive everywhere (editor, thumbnails, export).
+pub fn load_base_image_raw(
+    bytes: &[u8],
+    path_for_ext_check: &str,
+    use_fast_raw_dev: bool,
+    settings: &AppSettings,
+    cancel_token: Option<(Arc<AtomicUsize>, usize)>,
+) -> Result<DynamicImage> {
+    load_base_image_with_fallback_raw(
+        bytes,
+        path_for_ext_check,
+        use_fast_raw_dev,
+        settings,
+        cancel_token,
+    )
+    .map(|(image, _is_fallback)| image)
+}
+
 /// Like `load_base_image_from_bytes`, but also reports whether the returned image
 /// is a low-res embedded-preview fallback (used when the RAW couldn't be decoded).
 /// Callers that persist geometry (e.g. auto-crop) must not do so against a fallback,
 /// since its dimensions are the tiny preview's, not the real image's.
+///
+/// Applies a stored negative conversion (if the sidecar flags one) so the whole app
+/// sees the positive. The single decode chokepoint for that — editor load, thumbnails
+/// and export all route through here.
 pub fn load_base_image_with_fallback(
+    bytes: &[u8],
+    path_for_ext_check: &str,
+    use_fast_raw_dev: bool,
+    settings: &AppSettings,
+    cancel_token: Option<(Arc<AtomicUsize>, usize)>,
+) -> Result<(DynamicImage, bool)> {
+    let (image, is_fallback) = load_base_image_with_fallback_raw(
+        bytes,
+        path_for_ext_check,
+        use_fast_raw_dev,
+        settings,
+        cancel_token,
+    )?;
+    Ok((
+        crate::negative_conversion::maybe_apply_negative(image, path_for_ext_check),
+        is_fallback,
+    ))
+}
+
+fn load_base_image_with_fallback_raw(
     bytes: &[u8],
     path_for_ext_check: &str,
     use_fast_raw_dev: bool,

@@ -252,7 +252,11 @@ fn compute_preview_transformed(
     } else {
         transformed.into_owned()
     };
-    let scale = if tw > 0 { out.width() as f32 / tw as f32 } else { 1.0 };
+    let scale = if tw > 0 {
+        out.width() as f32 / tw as f32
+    } else {
+        1.0
+    };
     Ok((out, scale, offset))
 }
 
@@ -2401,7 +2405,8 @@ pub fn run() {
             lens_correction::autodetect_lens,
             lens_correction::get_lens_distortion_params,
             negative_conversion::preview_negative_conversion,
-            negative_conversion::convert_negatives,
+            negative_conversion::apply_negative_conversion,
+            negative_conversion::get_negative_conversion,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

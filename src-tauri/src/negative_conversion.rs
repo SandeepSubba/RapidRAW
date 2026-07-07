@@ -1,5 +1,5 @@
 use crate::file_management::{parse_virtual_path, read_file_mapped};
-use crate::image_loader::load_base_image_from_bytes;
+use crate::image_loader::load_base_image_raw;
 use base64::{Engine as _, engine::general_purpose};
 use image::codecs::jpeg::JpegEncoder;
 use image::{DynamicImage, Rgb32FImage};
@@ -179,6 +179,73 @@ fn run_pipeline(
     DynamicImage::ImageRgb32F(out_img)
 }
 
+/// Parse an enabled negative conversion out of a sidecar's `adjustments`. Returns
+/// None in the common (non-negative) case.
+fn stored_negative(
+    adjustments: &serde_json::Value,
+) -> Option<(NegativeConversionParams, [ChannelBounds; 3])> {
+    let nc = adjustments.get("negativeConversion")?;
+    if !nc.get("enabled").and_then(|e| e.as_bool()).unwrap_or(false) {
+        return None;
+    }
+    let get = |k: &str, d: f32| {
+        nc.get(k)
+            .and_then(|v| v.as_f64())
+            .map(|v| v as f32)
+            .unwrap_or(d)
+    };
+    let params = NegativeConversionParams {
+        red_weight: get("redWeight", 1.0),
+        green_weight: get("greenWeight", 1.0),
+        blue_weight: get("blueWeight", 1.0),
+        exposure: get("exposure", 0.0),
+        contrast: get("contrast", 1.0),
+    };
+    let arr = nc.get("bounds")?.as_array()?;
+    if arr.len() != 3 {
+        return None;
+    }
+    let mut bounds = [ChannelBounds { min: 0.0, max: 1.0 }; 3];
+    for (i, b) in bounds.iter_mut().enumerate() {
+        let pair = arr[i].as_array()?;
+        b.min = pair.first()?.as_f64()? as f32;
+        b.max = pair.get(1)?.as_f64()? as f32;
+    }
+    Some((params, bounds))
+}
+
+/// If the image's sidecar flags an enabled negative conversion, invert it to a
+/// positive using the stored params + bounds. This is the single hook that makes a
+/// converted negative render as its positive everywhere (editor, thumbnails, export).
+///
+/// ponytail: reads the sidecar on every base decode — negligible next to a raw
+/// decode, and keeps the inversion in one place instead of in every consumer.
+pub fn maybe_apply_negative(image: DynamicImage, real_path: &str) -> DynamicImage {
+    let sidecar = crate::exif_processing::get_primary_sidecar_path(Path::new(real_path));
+    if !sidecar.exists() {
+        return image;
+    }
+    let meta = crate::exif_processing::load_sidecar(&sidecar);
+    match stored_negative(&meta.adjustments) {
+        Some((params, bounds)) => run_pipeline(&image, &params, Some(bounds)),
+        None => image,
+    }
+}
+
+/// Compute per-image inversion bounds from a downscaled reference (same 1080px basis
+/// as the live preview) so a persisted conversion matches what was previewed.
+fn analyze_bounds_for(image: &DynamicImage) -> [ChannelBounds; 3] {
+    let ref_img = downscale_f32_image(image, 1080, 1080);
+    let ref_rgb = ref_img.to_rgb32f();
+    let (w, h) = ref_rgb.dimensions();
+    let log_pixels: Vec<f32> = ref_rgb
+        .as_raw()
+        .par_iter()
+        .map(|&v| -v.clamp(1e-6, 1.0).log10())
+        .collect();
+    analyze_bounds(&log_pixels, w as usize, h as usize)
+}
+
 #[tauri::command]
 pub async fn preview_negative_conversion(
     path: String,
@@ -200,69 +267,20 @@ pub async fn preview_negative_conversion(
         if let Some(cached_img) = cache.get(&cache_key) {
             cached_img.clone()
         } else {
-            let image_to_downscale = {
-                let original_lock = state.original_image.lock().unwrap();
-                if let Some(loaded) = original_lock.as_ref() {
-                    if loaded.path == source_path_str {
-                        loaded.image.clone().as_ref().clone()
-                    } else {
-                        drop(original_lock);
-                        let settings = load_settings(app_handle.clone()).unwrap_or_default();
-
-                        match read_file_mapped(Path::new(&source_path_str)) {
-                            Ok(mmap) => load_base_image_from_bytes(
-                                &mmap,
-                                &source_path_str,
-                                false,
-                                &settings,
-                                None,
-                            )
-                            .map_err(|e| e.to_string())?,
-                            Err(_e) => {
-                                let bytes = fs::read(&source_path_str)
-                                    .map_err(|io_err| io_err.to_string())?;
-                                load_base_image_from_bytes(
-                                    &bytes,
-                                    &source_path_str,
-                                    false,
-                                    &settings,
-                                    None,
-                                )
-                                .map_err(|e| e.to_string())?
-                            }
-                        }
-                    }
-                } else {
-                    drop(original_lock);
-                    let settings = load_settings(app_handle.clone()).unwrap_or_default();
-
-                    match read_file_mapped(Path::new(&source_path_str)) {
-                        Ok(mmap) => load_base_image_from_bytes(
-                            &mmap,
-                            &source_path_str,
-                            false,
-                            &settings,
-                            None,
-                        )
-                        .map_err(|e| e.to_string())?,
-                        Err(_e) => {
-                            let bytes =
-                                fs::read(&source_path_str).map_err(|io_err| io_err.to_string())?;
-                            load_base_image_from_bytes(
-                                &bytes,
-                                &source_path_str,
-                                false,
-                                &settings,
-                                None,
-                            )
-                            .map_err(|e| e.to_string())?
-                        }
-                    }
+            // Always load the RAW negative from disk here — never the editor's
+            // in-memory image, which is already the converted positive — so the
+            // modal previews and re-tunes the actual negative.
+            let settings = load_settings(app_handle.clone()).unwrap_or_default();
+            let full = match read_file_mapped(Path::new(&source_path_str)) {
+                Ok(mmap) => load_base_image_raw(&mmap, &source_path_str, false, &settings, None),
+                Err(_e) => {
+                    let bytes = fs::read(&source_path_str).map_err(|io_err| io_err.to_string())?;
+                    load_base_image_raw(&bytes, &source_path_str, false, &settings, None)
                 }
-            };
+            }
+            .map_err(|e| e.to_string())?;
 
-            let downscaled = downscale_f32_image(&image_to_downscale, 1080, 1080);
-
+            let downscaled = downscale_f32_image(&full, 1080, 1080);
             cache.insert(cache_key, downscaled.clone());
             downscaled
         }
@@ -280,68 +298,129 @@ pub async fn preview_negative_conversion(
     Ok(format!("data:image/jpeg;base64,{}", base64_str))
 }
 
+/// Apply a negative conversion *in-library, non-destructively*: instead of baking a
+/// `_Positive.tiff` sibling, persist the params + auto-analysed bounds into each raw's
+/// sidecar. `maybe_apply_negative` then renders the positive on load everywhere. The
+/// original raw file is never touched, and the conversion stays re-tunable.
 #[tauri::command]
-pub async fn convert_negatives(
+pub async fn apply_negative_conversion(
     paths: Vec<String>,
     params: NegativeConversionParams,
+    state: tauri::State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<Vec<String>, String> {
-    tokio::task::spawn_blocking(move || {
+    let handle = app_handle.clone();
+    let results = tokio::task::spawn_blocking(move || -> Result<Vec<String>, String> {
         let mut results = Vec::new();
 
         for (i, path_str) in paths.iter().enumerate() {
-            let _ = app_handle.emit(
+            let _ = handle.emit(
                 "negative-batch-progress",
-                serde_json::json!({
-                    "current": i + 1,
-                    "total": paths.len(),
-                    "path": path_str
-                }),
+                serde_json::json!({ "current": i + 1, "total": paths.len(), "path": path_str }),
             );
 
             let (source_path, _) = parse_virtual_path(path_str);
             let real_path = source_path.to_string_lossy().to_string();
-
-            let settings = load_settings(app_handle.clone()).unwrap_or_default();
+            let settings = load_settings(handle.clone()).unwrap_or_default();
 
             let img = match read_file_mapped(Path::new(&real_path)) {
-                Ok(mmap) => load_base_image_from_bytes(&mmap, &real_path, false, &settings, None),
+                Ok(mmap) => load_base_image_raw(&mmap, &real_path, false, &settings, None),
                 Err(_) => {
-                    let bytes = fs::read(&real_path).unwrap_or_default();
-                    load_base_image_from_bytes(&bytes, &real_path, false, &settings, None)
+                    let bytes = fs::read(&real_path).map_err(|e| e.to_string())?;
+                    load_base_image_raw(&bytes, &real_path, false, &settings, None)
                 }
             }
             .map_err(|e| e.to_string())?;
 
-            let bounds_ref = downscale_f32_image(&img, 1080, 1080);
-            let ref_rgb = bounds_ref.to_rgb32f();
-            let (ref_w, ref_h) = ref_rgb.dimensions();
-            let log_pixels: Vec<f32> = ref_rgb
-                .as_raw()
-                .par_iter()
-                .map(|&v| -v.clamp(1e-6, 1.0).log10())
-                .collect();
-            let bounds = analyze_bounds(&log_pixels, ref_w as usize, ref_h as usize);
+            let bounds = analyze_bounds_for(&img);
 
-            let processed = run_pipeline(&img, &params, Some(bounds));
+            let sidecar = crate::exif_processing::get_primary_sidecar_path(&source_path);
+            let mut meta = crate::exif_processing::load_sidecar(&sidecar);
+            if !meta.adjustments.is_object() {
+                meta.adjustments = serde_json::json!({});
+            }
+            meta.adjustments["negativeConversion"] = serde_json::json!({
+                "enabled": true,
+                "redWeight": params.red_weight,
+                "greenWeight": params.green_weight,
+                "blueWeight": params.blue_weight,
+                "exposure": params.exposure,
+                "contrast": params.contrast,
+                "bounds": [
+                    [bounds[0].min, bounds[0].max],
+                    [bounds[1].min, bounds[1].max],
+                    [bounds[2].min, bounds[2].max],
+                ],
+            });
 
-            let p = Path::new(&real_path);
-            let parent = p.parent().unwrap_or(Path::new(""));
-            let stem = p.file_stem().unwrap_or_default().to_string_lossy();
-            let filename = format!("{}_Positive.tiff", stem);
-            let out_path = parent.join(&filename);
-
-            processed
-                .to_rgb16()
-                .save(&out_path)
-                .map_err(|e| format!("Failed to save {}: {}", filename, e))?;
-
-            let _ = crate::exif_processing::write_rrexif_sidecar(&real_path, &out_path);
-            results.push(out_path.to_string_lossy().to_string());
+            let json = serde_json::to_string_pretty(&meta).map_err(|e| e.to_string())?;
+            fs::write(&sidecar, json).map_err(|e| e.to_string())?;
+            results.push(path_str.clone());
         }
 
         Ok(results)
     })
     .await
-    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())??;
+
+    // Deliberate action: drop cached decodes/previews so the positive re-renders.
+    if let Ok(mut c) = state.decoded_image_cache.lock() {
+        c.clear();
+    }
+    if let Ok(mut c) = state.geometry_cache.lock() {
+        c.clear();
+    }
+    if let Ok(mut c) = state.cached_preview.lock() {
+        *c = None;
+    }
+    let _ = app_handle.emit("negatives-converted", &results);
+
+    Ok(results)
+}
+
+/// Read the stored negative conversion for a path (for the modal to reopen showing the
+/// current settings). Returns null when the image has no conversion.
+#[tauri::command]
+pub fn get_negative_conversion(path: String) -> Option<serde_json::Value> {
+    let (source_path, _) = parse_virtual_path(&path);
+    let sidecar = crate::exif_processing::get_primary_sidecar_path(&source_path);
+    if !sidecar.exists() {
+        return None;
+    }
+    let meta = crate::exif_processing::load_sidecar(&sidecar);
+    meta.adjustments.get("negativeConversion").cloned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Locks the contract between what apply_negative_conversion writes and what
+    // maybe_apply_negative reads back — a key-name mismatch here would silently
+    // stop negatives from rendering as positives.
+    #[test]
+    fn stored_negative_reads_the_written_shape() {
+        let adjustments = serde_json::json!({
+            "exposure": 0.3, // an unrelated adjustment coexists in the sidecar
+            "negativeConversion": {
+                "enabled": true,
+                "redWeight": 1.2, "greenWeight": 1.0, "blueWeight": 0.9,
+                "exposure": 0.5, "contrast": 1.3,
+                "bounds": [[0.1, 0.8], [0.2, 0.9], [0.15, 0.85]],
+            }
+        });
+        let (params, bounds) = stored_negative(&adjustments).expect("enabled conversion parses");
+        assert!((params.red_weight - 1.2).abs() < 1e-6);
+        assert!((params.blue_weight - 0.9).abs() < 1e-6);
+        assert!((params.contrast - 1.3).abs() < 1e-6);
+        assert!((bounds[0].min - 0.1).abs() < 1e-6);
+        assert!((bounds[2].max - 0.85).abs() < 1e-6);
+
+        // Absent or disabled → no-op on load.
+        assert!(stored_negative(&serde_json::json!({})).is_none());
+        assert!(
+            stored_negative(&serde_json::json!({ "negativeConversion": { "enabled": false } }))
+                .is_none()
+        );
+    }
 }

@@ -140,6 +140,25 @@ export default function NegativeConversionModal({
       setTimeout(() => setShow(true), 10);
       updatePreview(DEFAULT_PARAMS, true);
 
+      // Reopen an already-converted negative showing its current settings, not defaults.
+      if (selectedImagePath) {
+        invoke('get_negative_conversion', { path: selectedImagePath })
+          .then((stored: any) => {
+            if (stored && stored.enabled) {
+              const restored: NegativeParams = {
+                red_weight: stored.redWeight ?? DEFAULT_PARAMS.red_weight,
+                green_weight: stored.greenWeight ?? DEFAULT_PARAMS.green_weight,
+                blue_weight: stored.blueWeight ?? DEFAULT_PARAMS.blue_weight,
+                exposure: stored.exposure ?? DEFAULT_PARAMS.exposure,
+                contrast: stored.contrast ?? DEFAULT_PARAMS.contrast,
+              };
+              setParams(restored);
+              updatePreview(restored);
+            }
+          })
+          .catch(() => {});
+      }
+
       if (selectedImagePath) {
         invoke('generate_preview_for_path', {
           path: selectedImagePath,
@@ -177,14 +196,14 @@ export default function NegativeConversionModal({
     setIsSaving(true);
     setProgress(null);
     try {
-      const savedPaths: string[] = await invoke('convert_negatives', {
+      const savedPaths: string[] = await invoke('apply_negative_conversion', {
         paths: targetPaths,
         params,
       });
       onSave(savedPaths);
       onClose();
     } catch (e) {
-      console.error('Failed to batch save negatives', e);
+      console.error('Failed to apply negative conversion', e);
     } finally {
       setIsSaving(false);
       setProgress(null);
