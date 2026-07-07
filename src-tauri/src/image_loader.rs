@@ -115,6 +115,14 @@ pub fn load_base_image_from_bytes(
             }
             Ok(Err(e)) => {
                 let classified = classify_raw_develop_error(path_for_ext_check, e);
+                // A cancellation is not a decode failure — it means a newer load
+                // superseded this one (e.g. fast filmstrip navigation). Propagate it
+                // so the superseding load renders the full image. Falling back to the
+                // tiny embedded preview here would leave the viewer permanently stuck
+                // on a low-res thumbnail even though the RAW decodes fine.
+                if classified.to_string().contains("Load cancelled") {
+                    return Err(classified);
+                }
                 log::warn!(
                     "Error developing RAW file '{}': {}",
                     path_for_ext_check,
