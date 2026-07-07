@@ -225,7 +225,7 @@ pub fn get_album_images(
 
             let is_virtual_copy = virtual_path.contains("?vc=");
 
-            let (is_edited, tags, rating) = {
+            let (is_edited, is_negative, tags, rating) = {
                 let mut metadata = crate::exif_processing::load_sidecar(&sidecar_path);
 
                 if enable_xmp_sync
@@ -243,13 +243,15 @@ pub fn get_album_images(
                     is_raw,
                     tm_override,
                 );
-                (edited, metadata.tags, metadata.rating)
+                let negative = crate::file_management::adjustments_is_negative(&metadata.adjustments);
+                (edited, negative, metadata.tags, metadata.rating)
             };
 
             Some(ImageFile {
                 path: virtual_path,
                 modified,
                 is_edited,
+                is_negative,
                 tags,
                 exif: None,
                 is_virtual_copy,

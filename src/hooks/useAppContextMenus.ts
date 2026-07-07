@@ -439,7 +439,11 @@ export function useAppContextMenus(props: UseAppContextMenusProps) {
       const cullLabel = t('contextMenus.thumbnail.cullImage', { count: selectionCount });
       const collageLabel = t('contextMenus.thumbnail.collage', { count: selectionCount });
       const stitchLabel = t('contextMenus.editor.stitchPanorama');
-      const conversionLabel = t('contextMenus.thumbnail.convertNegative', { count: selectionCount });
+      const selectedFiles = imageList.filter((img) => finalSelection.includes(img.path));
+      const allNegative = selectedFiles.length > 0 && selectedFiles.every((f) => f.is_negative);
+      const conversionLabel = allNegative
+        ? t('contextMenus.thumbnail.revertNegative', { count: selectionCount })
+        : t('contextMenus.thumbnail.convertNegative', { count: selectionCount });
       const denoiseLabel = t('contextMenus.thumbnail.denoise', { count: selectionCount });
       const mergeLabel = t('contextMenus.editor.mergeHdr');
 
@@ -595,7 +599,7 @@ export function useAppContextMenus(props: UseAppContextMenusProps) {
               icon: Film,
               disabled: selectionCount === 0,
               onClick: () => {
-                handleSetNegativeConversion(finalSelection, true);
+                handleSetNegativeConversion(finalSelection, !allNegative);
               },
             },
             {

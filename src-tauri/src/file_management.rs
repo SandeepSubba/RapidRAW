@@ -152,10 +152,21 @@ pub struct ImageFile {
     path: String,
     modified: u64,
     is_edited: bool,
+    is_negative: bool,
     rating: u8,
     tags: Option<Vec<String>>,
     exif: Option<HashMap<String, String>>,
     is_virtual_copy: bool,
+}
+
+/// True when the sidecar has an enabled in-library negative conversion — lets the
+/// library/filmstrip context menu offer "Revert to Negative" instead of "Convert".
+pub(crate) fn adjustments_is_negative(adjustments: &serde_json::Value) -> bool {
+    adjustments
+        .get("negativeConversion")
+        .and_then(|nc| nc.get("enabled"))
+        .and_then(|e| e.as_bool())
+        .unwrap_or(false)
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -360,7 +371,7 @@ pub fn list_images_in_dir(path: String, app_handle: AppHandle) -> Result<Vec<Ima
 
                 let sidecar_path = path_buf.with_file_name(sidecar_filename);
 
-                let (is_edited, tags, rating) = {
+                let (is_edited, is_negative, tags, rating) = {
                     let mut metadata = crate::exif_processing::load_sidecar(&sidecar_path);
 
                     if enable_xmp_sync
@@ -378,13 +389,15 @@ pub fn list_images_in_dir(path: String, app_handle: AppHandle) -> Result<Vec<Ima
                         is_raw,
                         tm_override,
                     );
-                    (edited, metadata.tags, metadata.rating)
+                    let negative = adjustments_is_negative(&metadata.adjustments);
+                    (edited, negative, metadata.tags, metadata.rating)
                 };
 
                 file_results.push(ImageFile {
                     path: virtual_path,
                     modified,
                     is_edited,
+                    is_negative,
                     tags,
                     exif: None,
                     is_virtual_copy,
@@ -483,7 +496,7 @@ pub fn list_images_recursive(
 
                 let sidecar_path = path_buf.with_file_name(sidecar_filename);
 
-                let (is_edited, tags, rating) = {
+                let (is_edited, is_negative, tags, rating) = {
                     let mut metadata = crate::exif_processing::load_sidecar(&sidecar_path);
 
                     if enable_xmp_sync
@@ -501,13 +514,15 @@ pub fn list_images_recursive(
                         is_raw,
                         tm_override,
                     );
-                    (edited, metadata.tags, metadata.rating)
+                    let negative = adjustments_is_negative(&metadata.adjustments);
+                    (edited, negative, metadata.tags, metadata.rating)
                 };
 
                 file_results.push(ImageFile {
                     path: virtual_path,
                     modified,
                     is_edited,
+                    is_negative,
                     tags,
                     exif: None,
                     is_virtual_copy,

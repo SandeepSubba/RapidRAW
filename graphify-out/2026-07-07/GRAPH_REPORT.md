@@ -1,16 +1,16 @@
 # Graph Report - RapidRAW  (2026-07-07)
 
 ## Corpus Check
-- 211 files · ~495,261 words
+- 210 files · ~494,043 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 2147 nodes · 6020 edges · 152 communities (85 shown, 67 thin omitted)
-- Extraction: 96% EXTRACTED · 4% INFERRED · 0% AMBIGUOUS · INFERRED: 266 edges (avg confidence: 0.8)
+- 2140 nodes · 5996 edges · 151 communities (84 shown, 67 thin omitted)
+- Extraction: 96% EXTRACTED · 4% INFERRED · 0% AMBIGUOUS · INFERRED: 261 edges (avg confidence: 0.8)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `1470309a`
+- Built from commit: `ffe36cde`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -155,17 +155,16 @@
 - [[_COMMUNITY_Community 148|Community 148]]
 - [[_COMMUNITY_Community 149|Community 149]]
 - [[_COMMUNITY_Community 151|Community 151]]
-- [[_COMMUNITY_Community 152|Community 152]]
 
 ## God Nodes (most connected - your core abstractions)
 1. `DynamicImage` - 103 edges
-2. `AppState` - 102 edges
+2. `AppState` - 101 edges
 3. `useEditorStore` - 49 edges
-4. `Text` - 48 edges
-5. `TextVariants` - 48 edges
-6. `useSettingsStore` - 47 edges
-7. `parse_virtual_path()` - 43 edges
-8. `load_settings()` - 41 edges
+4. `Text` - 47 edges
+5. `useSettingsStore` - 47 edges
+6. `TextVariants` - 47 edges
+7. `load_settings()` - 41 edges
+8. `parse_virtual_path()` - 41 edges
 9. `useLibraryStore` - 38 edges
 10. `Adjustments` - 37 edges
 
@@ -182,42 +181,42 @@
   .github/workflows/build.yml → README.md
 
 ## Import Cycles
-- 2-file cycle: `src-tauri/src/app_state.rs -> src-tauri/src/cache_utils.rs -> src-tauri/src/app_state.rs`
 - 2-file cycle: `src-tauri/src/app_state.rs -> src-tauri/src/lens_correction.rs -> src-tauri/src/app_state.rs`
+- 2-file cycle: `src-tauri/src/app_state.rs -> src-tauri/src/cache_utils.rs -> src-tauri/src/app_state.rs`
 - 2-file cycle: `src-tauri/src/gpu_processing.rs -> src-tauri/src/image_processing.rs -> src-tauri/src/gpu_processing.rs`
-- 3-file cycle: `src/components/panel/MainLibrary.tsx -> src/components/panel/library/LibraryGrid.tsx -> src/components/panel/library/LibraryItems.tsx -> src/components/panel/MainLibrary.tsx`
 - 3-file cycle: `src/App.tsx -> src/components/views/LibraryView.tsx -> src/components/panel/MainLibrary.tsx -> src/App.tsx`
+- 3-file cycle: `src/components/panel/MainLibrary.tsx -> src/components/panel/library/LibraryGrid.tsx -> src/components/panel/library/LibraryItems.tsx -> src/components/panel/MainLibrary.tsx`
 
 ## Hyperedges (group relationships)
 - **CI/PR/Release reuse the shared build workflow** — _github_workflows_ci_ci_build, _github_workflows_pr_ci_pr_ci_build, _github_workflows_release_release_workflow, _github_workflows_build_build_workflow [EXTRACTED 1.00]
 - **AI culling scoring pipeline** — docs_image_importer_technical_metrics, docs_image_importer_face_quality, docs_image_importer_ultraface, docs_image_importer_clip_grading, docs_image_importer_quality_grade [EXTRACTED 1.00]
 - **GPU-accelerated processing stack** — readme_gpu_pipeline, readme_wgsl_shader, readme_wgpu, readme_rust [EXTRACTED 1.00]
 
-## Communities (152 total, 67 thin omitted)
+## Communities (151 total, 67 thin omitted)
 
 ### Community 0 - "File & Album Management"
 Cohesion: 0.08
-Nodes (105): Display, Formatter, ImageFile, Mmap, load_settings(), add_to_thumbnail_queue(), add_to_album(), AlbumItem (+97 more)
+Nodes (106): Display, Formatter, ImageFile, Mmap, load_settings(), add_to_thumbnail_queue(), add_to_album(), AlbumItem (+98 more)
 
 ### Community 1 - "EXIF Metadata Processing"
 Cohesion: 0.12
 Nodes (50): Exif, Field, iR64, NaiveDateTime, Rational, RawMetadata, SRational, clean_creation_datetime_str() (+42 more)
 
 ### Community 2 - "Image Canvas & Crop Editor"
-Cohesion: 0.11
-Nodes (22): PanoramaModalProps, LibraryGrid(), ListHeader(), SearchInput(), ViewOptionsDropdown(), Row, CropPreset, OverlayOption (+14 more)
+Cohesion: 0.10
+Nodes (20): DetailsPanelProps, FolderModalProps, ImportSettingsModalProps, PanoramaModalProps, RenameFileModalProps, RenameFolderModalProps, CollapsibleSectionProps, GlobalTooltip() (+12 more)
 
 ### Community 3 - "App Shell & Image Managers"
-Cohesion: 0.12
-Nodes (33): App(), ImageLoaderManager(), Props, ImageProcessingManager(), Props, AppModals(), Editor(), FolderTree (+25 more)
+Cohesion: 0.10
+Nodes (32): App(), ImageProcessingManager(), Props, AppModals(), ListItemComponent(), ThumbnailComponent(), MetadataPanel(), Progress (+24 more)
 
 ### Community 4 - "AI Mask Commands"
 Cohesion: 0.09
 Nodes (76): Array4, IxDyn, check_ai_connector_status(), encode_to_base64_png(), generate_ai_depth_mask(), generate_ai_face_region_mask(), generate_ai_foreground_mask(), generate_ai_sky_mask() (+68 more)
 
 ### Community 5 - "Library Grid & Panels"
-Cohesion: 0.06
-Nodes (51): BottomBar(), BottomBarProps, StarRatingProps, FilmStripProps, FilmstripThumbnail, ImageLayer, ItemData, ColumnWidths (+43 more)
+Cohesion: 0.07
+Nodes (52): BottomBar(), BottomBarProps, StarRatingProps, ItemData, LibraryGrid(), ListHeader(), SearchInput(), ViewOptionsDropdown() (+44 more)
 
 ### Community 6 - "Panorama Stitching"
 Cohesion: 0.07
@@ -237,7 +236,7 @@ Nodes (50): AiPatchDefinition, apply_grow_and_feather(), BrushLine, BrushMaskPar
 
 ### Community 10 - "Adjustments & Image Core"
 Cohesion: 0.14
-Nodes (52): GeometryParams, LoadedImage, Response, hydrate_adjustments(), State, downscale_f32_image(), get_all_adjustments_from_json(), apply_adjustments() (+44 more)
+Nodes (51): GeometryParams, LoadedImage, Response, hydrate_adjustments(), State, downscale_f32_image(), apply_adjustments(), cancel_thumbnail_generation() (+43 more)
 
 ### Community 11 - "BM3D Denoising"
 Cohesion: 0.10
@@ -245,7 +244,7 @@ Nodes (45): AtomicI64, apply_denoising(), AtomicAccumulator, batch_denoise_image
 
 ### Community 12 - "GPU Processing Pipeline"
 Cohesion: 0.09
-Nodes (44): BindGroup, BindGroupLayout, Buffer, ComputePipeline, Extent3d, f16, Limits, Origin3d (+36 more)
+Nodes (45): BindGroup, BindGroupLayout, Buffer, ComputePipeline, Extent3d, f16, Limits, Origin3d (+37 more)
 
 ### Community 13 - "Android Integration"
 Cohesion: 0.16
@@ -256,8 +255,8 @@ Cohesion: 0.18
 Nodes (30): Aperture, autodetect_lens(), Calibration, CalibrationElement, Camera, Distortion, extract_dist_params(), extract_tca_params() (+22 more)
 
 ### Community 15 - "Export Panel UI"
-Cohesion: 0.12
-Nodes (23): RenameFileModalProps, MainLibrary(), ExportPanel(), ExportPanelProps, formatBytes(), SectionProps, AppSettings, Progress (+15 more)
+Cohesion: 0.17
+Nodes (16): ExportPanel(), ExportPanelProps, formatBytes(), SectionProps, AppSettings, ExportPreset, ExportSettings, FILE_FORMATS (+8 more)
 
 ### Community 16 - "App Settings (Rust)"
 Cohesion: 0.08
@@ -265,11 +264,11 @@ Nodes (54): all_available_adjustments(), AppSettings, AutoProfile, CopyPasteSett
 
 ### Community 17 - "App State & Caching"
 Cohesion: 0.11
-Nodes (32): AtomicBool, Condvar, JoinHandle, Sender, AnalyticsConfig, AnalyticsJob, AppState, CachedPreview (+24 more)
+Nodes (31): AtomicBool, Condvar, JoinHandle, Sender, AnalyticsConfig, AnalyticsJob, AppState, CachedPreview (+23 more)
 
 ### Community 18 - "Export Processing"
-Cohesion: 0.21
-Nodes (32): apply_export_resize_and_watermark(), apply_watermark(), build_single_mask_adjustments(), calculate_resize_target(), cancel_export(), encode_grayscale_to_png(), encode_image_to_bytes(), estimate_export_sizes() (+24 more)
+Cohesion: 0.20
+Nodes (34): apply_export_resize_and_watermark(), apply_watermark(), build_single_mask_adjustments(), calculate_resize_target(), cancel_export(), encode_grayscale_to_png(), encode_image_to_bytes(), estimate_export_sizes() (+26 more)
 
 ### Community 19 - "Android/Tauri Config"
 Cohesion: 0.06
@@ -288,20 +287,20 @@ Cohesion: 0.08
 Nodes (32): AiProviderSwitch(), AiProviderSwitchProps, CanvasInputModeSwitch(), CanvasInputModeSwitchProps, CloudDashboard(), DataActionItem(), DataActionItemProps, KeybindRow() (+24 more)
 
 ### Community 23 - "Image Processing & Color"
-Cohesion: 0.18
-Nodes (20): AIPanel(), Controls(), CropPanel(), MasksPanel(), PresetsPanel(), SnapshotsSection(), Option, ContextMenu() (+12 more)
+Cohesion: 0.07
+Nodes (50): AIPanel(), ConnectionStatusProps, ContainerRow(), PLACEHOLDER_PATCH, SettingsPanel(), SUB_MASK_CONFIG, SubMaskRow(), Controls() (+42 more)
 
 ### Community 24 - "Preset Configuration UI"
-Cohesion: 0.11
-Nodes (19): LensCorrectionModalProps, MaskOverlay, DraggablePresetItemProps, DroppableFolderItemProps, evaluateCurveY(), FolderProps, FolderState, itemVariants (+11 more)
+Cohesion: 0.13
+Nodes (15): ConfigurePresetModalProps, DraggablePresetItemProps, DroppableFolderItemProps, evaluateCurveY(), FolderProps, FolderState, itemVariants, mixAdjustments() (+7 more)
 
 ### Community 25 - "Adjustment Definitions"
-Cohesion: 0.05
-Nodes (35): BasicAdjustmentsProps, ToneMapperSwitchProps, modeButtons, useRawRgbaCanvas(), WaveformCanvas(), WaveformProps, WaveformData, ADJUSTMENT_SECTIONS (+27 more)
+Cohesion: 0.08
+Nodes (38): ImageLoaderManager(), Props, AppModalsProps, Album, AlbumGroup, AlbumItem, Invokes, TaggingSubMenuProps (+30 more)
 
 ### Community 26 - "Community & Settings Pages"
-Cohesion: 0.09
-Nodes (14): DEFAULT_PARAMS, GeometryParams, LensParams, MyLens, CommunityPageProps, CommunityPreset, containerVariants, itemVariants (+6 more)
+Cohesion: 0.16
+Nodes (10): CommunityPageProps, CommunityPreset, containerVariants, itemVariants, SupportedTypes, DropdownProps, OptionItem, Input (+2 more)
 
 ### Community 27 - "Frontend Log Bridge"
 Cohesion: 0.10
@@ -316,16 +315,16 @@ Cohesion: 0.19
 Nodes (15): calculate_full_job_hash(), calculate_geometry_hash(), calculate_transform_hash(), calculate_visual_hash(), clear_image_caches(), clear_session_caches(), DecodedImageCache, Arc (+7 more)
 
 ### Community 30 - "File/Folder Modals"
-Cohesion: 0.09
-Nodes (13): DetailsPanelProps, ConfigurePresetModalProps, PresetTypeSwitchProps, FolderModalProps, ImportSettingsModalProps, RenameFolderModalProps, ImagePickerProps, SwitchProps (+5 more)
+Cohesion: 0.14
+Nodes (8): PresetTypeSwitchProps, CopyPasteSettingsModalProps, DEFAULT_SETTINGS, PasteModeSwitchProps, SwitchProps, ADJUSTMENT_GROUPS, CopyPasteSettings, PasteMode
 
 ### Community 31 - "App Modals"
-Cohesion: 0.09
-Nodes (16): AppModalsProps, ConfirmModal(), ConfirmModalProps, CopyPasteSettingsModalProps, DEFAULT_SETTINGS, PasteModeSwitchProps, CullAction, DenoiseModalProps (+8 more)
+Cohesion: 0.11
+Nodes (12): ConfirmModal(), ConfirmModalProps, CullAction, DenoiseModalProps, HdrModalProps, DEFAULT_PARAMS, GeometryParams, TransformModalProps (+4 more)
 
 ### Community 32 - "Community 32"
-Cohesion: 0.19
-Nodes (20): analyze_bounds(), analyze_bounds_for(), apply_negative_conversion(), ChannelBounds, get_negative_conversion(), maybe_apply_negative(), NegativeConversionParams, preview_negative_conversion() (+12 more)
+Cohesion: 0.17
+Nodes (18): analyze_bounds(), analyze_bounds_for(), ChannelBounds, maybe_apply_negative(), NegativeConversionParams, AppHandle, Default, Option (+10 more)
 
 ### Community 33 - "TypeScript Config"
 Cohesion: 0.11
@@ -333,7 +332,7 @@ Nodes (18): compilerOptions, allowSyntheticDefaultImports, esModuleInterop, forc
 
 ### Community 34 - "Image Geometry Transforms"
 Cohesion: 0.19
-Nodes (21): I, apply_all_transformations(), &'a DynamicImage, &'a std::sync::Arc<DynamicImage>, apply_coarse_rotation(), apply_cpu_default_raw_processing(), apply_crop(), apply_flip() (+13 more)
+Nodes (20): I, apply_all_transformations(), hydrate_sub_masks(), Cow, HashMap, String, Value, Vec (+12 more)
 
 ### Community 35 - "Culling ML Model"
 Cohesion: 0.18
@@ -348,12 +347,12 @@ Cohesion: 0.20
 Nodes (25): classify_raw_develop_error(), composite_patches_on_image(), is_image_cached(), load_and_composite(), load_base_image_from_bytes(), load_base_image_raw(), load_base_image_with_fallback(), load_base_image_with_fallback_raw() (+17 more)
 
 ### Community 39 - "Editor Toolbar & EXIF Icons"
-Cohesion: 0.33
-Nodes (6): hydrate_sub_masks(), Cow, HashMap, String, Value, Vec
+Cohesion: 0.22
+Nodes (6): modeButtons, useRawRgbaCanvas(), WaveformCanvas(), WaveformProps, WaveformData, DisplayMode
 
 ### Community 40 - "Community 40"
-Cohesion: 0.11
-Nodes (11): EffectsPanelProps, DEFAULT_PARAMS, GeometryParams, TransformModalProps, TransformParams, SettingsPanel(), LUTControl(), LUTControlProps (+3 more)
+Cohesion: 0.15
+Nodes (9): EffectsPanelProps, SettingsPanel(), LUTControl(), LUTControlProps, SliderChangeEvent, SliderProps, useOsPlatform(), CreativeAdjustment (+1 more)
 
 ### Community 41 - "XMP Preset Converter"
 Cohesion: 0.29
@@ -368,8 +367,8 @@ Cohesion: 0.10
 Nodes (19): 10. Import settings & running the import, 1. Source selection, 2. Scanning, 3. Grouping similar shots, 4. AI scoring, 5. The 0–5 quality grade, 5b. Learning from your culling (personalized selection), 6. Auto-select best (+11 more)
 
 ### Community 44 - "Community 44"
-Cohesion: 0.25
-Nodes (12): Album, AlbumGroup, Invokes, UseAppContextMenusProps, AppNavigationProps, debouncedSave, debouncedSetHistory, COPYABLE_ADJUSTMENT_KEYS (+4 more)
+Cohesion: 0.20
+Nodes (5): DEFAULT_PARAMS, GeometryParams, LensCorrectionModalProps, LensParams, MyLens
 
 ### Community 45 - "Folder Tree Scanning"
 Cohesion: 0.41
@@ -400,12 +399,12 @@ Cohesion: 0.20
 Nodes (9): 1. Capture One–style adjustment shortcuts  (`feat:` commit), 2. Metadata export-naming tokens + single-image file naming  (`feat:` commit), 3. Backend hardening + refactors  (`fix:` / `refactor:` commits), Branches, Build / run, Custom changes in this fork, Fork notes (SandeepSubba/RapidRAW), Git remotes (+1 more)
 
 ### Community 53 - "Crop & Typography"
-Cohesion: 0.06
-Nodes (51): ChannelConfig, EditorProps, CursorPreview, DrawnLine, ImageCanvas, ImageCanvasProps, OptimizedBrushLine, CompositionOverlaysProps (+43 more)
+Cohesion: 0.07
+Nodes (40): BasicAdjustmentsProps, ToneMapperSwitchProps, ChannelConfig, Editor(), EditorProps, EditorToolbarProps, CursorPreview, DrawnLine (+32 more)
 
 ### Community 54 - "Details Panel & Slider"
-Cohesion: 0.13
-Nodes (7): ALBUM_ICONS, AlbumTreeNode(), FolderTreeProps, getAlbumImageCount(), TreeNodeProps, VisibleProps, FolderTreeSort
+Cohesion: 0.12
+Nodes (8): ALBUM_ICONS, AlbumTreeNode(), FolderTree, FolderTreeProps, getAlbumImageCount(), TreeNodeProps, VisibleProps, FolderTreeSort
 
 ### Community 55 - "Copy/Paste Settings"
 Cohesion: 0.22
@@ -416,12 +415,12 @@ Cohesion: 0.22
 Nodes (8): Additional Notes, AI Disclaimer:, Changes Made, Checklist, Description, Screenshots/Videos, Testing, Type of Change
 
 ### Community 57 - "Waveform & Histogram View"
-Cohesion: 0.09
-Nodes (14): IconLens(), Drag, GuidedKeystoneOverlay(), Line, RenderSize, CAMERA_ICONS, CameraSetting, CameraSettings (+6 more)
+Cohesion: 0.07
+Nodes (17): IconLens(), Drag, GuidedKeystoneOverlay(), Line, RenderSize, FilmStripProps, FilmstripThumbnail, ImageLayer (+9 more)
 
 ### Community 59 - "Community 59"
 Cohesion: 0.21
-Nodes (12): EditorToolbar, EditorToolbarProps, IconAperture(), IconCalendar(), IconClock(), IconFocalLength(), IconIso(), iconProps (+4 more)
+Nodes (12): EditorToolbar, IconAperture(), IconCalendar(), IconClock(), IconFocalLength(), IconIso(), iconProps, IconShutter() (+4 more)
 
 ### Community 61 - "Community 61"
 Cohesion: 0.50
@@ -448,8 +447,8 @@ Cohesion: 0.38
 Nodes (5): Plugin, Project, Config, String, RustPlugin
 
 ### Community 67 - "Community 67"
-Cohesion: 0.24
-Nodes (14): AllAdjustments, ColorCalibrationSettings, ColorGradeSettings, convert_points_to_aligned(), get_global_adjustments_from_json(), get_mask_adjustments_from_json(), GlobalAdjustments, HslColor (+6 more)
+Cohesion: 0.23
+Nodes (19): AllAdjustments, ColorCalibrationSettings, ColorGradeSettings, convert_points_to_aligned(), get_all_adjustments_from_json(), get_geometry_params_from_json(), get_global_adjustments_from_json(), get_mask_adjustments_from_json() (+11 more)
 
 ### Community 68 - "Community 68"
 Cohesion: 0.50
@@ -476,40 +475,36 @@ Cohesion: 0.33
 Nodes (5): description, identifier, permissions, $schema, windows
 
 ### Community 80 - "Community 80"
-Cohesion: 0.17
-Nodes (24): Mat3, NaMatrix3, AdjustmentScales, apply_cpu_agx_tonemap(), build_transform_matrices(), calculate_agx_matrices(), calculate_agx_matrices_glam(), compute_lens_auto_crop_scale() (+16 more)
+Cohesion: 0.14
+Nodes (28): Mat3, NaMatrix3, AdjustmentScales, apply_cpu_agx_tonemap(), apply_cpu_default_raw_processing(), apply_linear_to_srgb(), apply_srgb_to_linear(), build_transform_matrices() (+20 more)
 
 ### Community 147 - "Community 147"
 Cohesion: 0.29
 Nodes (7): apply_gentle_detail_enhance(), remove_raw_artifacts_and_enhance(), rgb_to_yc_only(), ImageBuffer, Rgb, Vec, yc_to_rgb()
 
-### Community 148 - "Community 148"
-Cohesion: 0.50
-Nodes (5): resolve_tonemapper_override(), resolve_tonemapper_override_from_handle(), AppHandle, AppSettings, Option
-
 ### Community 149 - "Community 149"
-Cohesion: 0.29
-Nodes (10): RawImage, develop_internal(), develop_raw_image(), is_linear_raw_format(), Arc, AtomicUsize, Option, Result (+2 more)
+Cohesion: 0.26
+Nodes (11): RawImage, apply_orientation(), develop_internal(), develop_raw_image(), is_linear_raw_format(), Arc, AtomicUsize, Option (+3 more)
 
 ## Knowledge Gaps
-- **435 isolated node(s):** `tseslint`, `react`, `i18next`, `tsFiles`, `jsRecommendedForTs` (+430 more)
+- **431 isolated node(s):** `tseslint`, `react`, `i18next`, `tsFiles`, `jsRecommendedForTs` (+426 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **67 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `Orientation` connect `Library Grid & Panels` to `Image Canvas & Crop Editor`, `App Shell & Image Managers`, `Image Geometry Transforms`, `Community 80`, `Crop & Typography`, `Community 149`, `Image Processing & Color`?**
-  _High betweenness centrality (0.290) - this node is a cross-community bridge._
-- **Why does `AppState` connect `App State & Caching` to `File & Album Management`, `Community 32`, `Image Geometry Transforms`, `AI Mask Commands`, `Histogram & Auto Analysis`, `Panorama Stitching`, `Editor Toolbar & EXIF Icons`, `Image Culling Analysis`, `Mask Generation`, `Adjustments & Image Core`, `BM3D Denoising`, `GPU Processing Pipeline`, `Android Integration`, `Lens Correction (Lensfun)`, `App Settings (Rust)`, `Export Processing`, `AI Tagging (CLIP)`, `Cache Utilities`?**
-  _High betweenness centrality (0.155) - this node is a cross-community bridge._
-- **Why does `DynamicImage` connect `Image Geometry Transforms` to `File & Album Management`, `AI Mask Commands`, `Panorama Stitching`, `Image Culling Analysis`, `Mask Generation`, `Adjustments & Image Core`, `BM3D Denoising`, `GPU Processing Pipeline`, `Android Integration`, `App Settings (Rust)`, `App State & Caching`, `Export Processing`, `Community 147`, `AI Tagging (CLIP)`, `Community 149`, `Frontend Log Bridge`, `Cache Utilities`, `Community 32`, `Histogram & Auto Analysis`, `Editor Toolbar & EXIF Icons`, `Community 80`?**
-  _High betweenness centrality (0.141) - this node is a cross-community bridge._
+- **Why does `Orientation` connect `Image Processing & Color` to `App Shell & Image Managers`, `Library Grid & Panels`, `Community 80`, `Crop & Typography`, `Community 149`?**
+  _High betweenness centrality (0.270) - this node is a cross-community bridge._
+- **Why does `AppState` connect `App State & Caching` to `File & Album Management`, `Community 32`, `Image Geometry Transforms`, `AI Mask Commands`, `Histogram & Auto Analysis`, `Panorama Stitching`, `Image Culling Analysis`, `Mask Generation`, `Adjustments & Image Core`, `BM3D Denoising`, `GPU Processing Pipeline`, `Android Integration`, `Lens Correction (Lensfun)`, `App Settings (Rust)`, `Export Processing`, `AI Tagging (CLIP)`, `Cache Utilities`?**
+  _High betweenness centrality (0.166) - this node is a cross-community bridge._
+- **Why does `DynamicImage` connect `Image Geometry Transforms` to `File & Album Management`, `AI Mask Commands`, `Panorama Stitching`, `Image Culling Analysis`, `Mask Generation`, `Adjustments & Image Core`, `BM3D Denoising`, `GPU Processing Pipeline`, `Android Integration`, `App Settings (Rust)`, `App State & Caching`, `Export Processing`, `Community 147`, `AI Tagging (CLIP)`, `Community 149`, `Frontend Log Bridge`, `Cache Utilities`, `Community 32`, `Histogram & Auto Analysis`, `Community 80`?**
+  _High betweenness centrality (0.130) - this node is a cross-community bridge._
 - **What connects `tseslint`, `react`, `i18next` to the rest of the system?**
-  _446 weakly-connected nodes found - possible documentation gaps or missing edges._
+  _442 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `File & Album Management` be split into smaller, more focused modules?**
-  _Cohesion score 0.07934080869860687 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.07939949958298582 - nodes in this community are weakly interconnected._
 - **Should `EXIF Metadata Processing` be split into smaller, more focused modules?**
   _Cohesion score 0.1207843137254902 - nodes in this community are weakly interconnected._
 - **Should `Image Canvas & Crop Editor` be split into smaller, more focused modules?**
-  _Cohesion score 0.11051693404634581 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.1039136302294197 - nodes in this community are weakly interconnected._
