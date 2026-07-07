@@ -1434,6 +1434,13 @@ export default function Editor({ onBackToLibrary, onContextMenu, transformWrappe
       return;
     }
 
+    // Never auto-compute/persist a crop against a low-res embedded-preview fallback:
+    // its width/height are the tiny preview's, so the crop would be a few pixels and
+    // would corrupt the sidecar once the full image later decodes.
+    if (selectedImage.isPreviewFallback) {
+      return;
+    }
+
     const { aspectRatio, orientationSteps = 0, crop: currentAdjCrop, rotation = 0 } = adjustments;
     const effectiveRotation = liveRotation !== null && liveRotation !== undefined ? liveRotation : rotation;
 

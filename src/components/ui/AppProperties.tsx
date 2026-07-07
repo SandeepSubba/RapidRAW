@@ -309,6 +309,10 @@ export interface SelectedImage {
   height: number;
   isRaw: boolean;
   isReady: boolean;
+  // True when the backend could only load a low-res embedded preview (RAW decode
+  // failed). width/height then describe the tiny preview, so auto-crop must not
+  // persist geometry against them.
+  isPreviewFallback?: boolean;
   metadata?: any;
   original_base64?: string;
   originalUrl: string | null;
