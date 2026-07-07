@@ -155,14 +155,14 @@
     "semantic_hash": "06b2f1026b00cf74bfc0007f2c8f2e66"
   },
   "src-tauri/src/file_management.rs": {
-    "mtime": 1783426876.3111014,
-    "ast_hash": "0aed94ed40f9e5ab1d057bd78a9a8237",
+    "mtime": 1783434599.3783042,
+    "ast_hash": "13921cef9a5bce0789f4fdff9c18c1ac",
     "semantic_hash": ""
   },
   "src-tauri/src/file_management/albums.rs": {
-    "mtime": 1782832623.2767258,
-    "ast_hash": "ca0e8acfd3ecb60961a8a1654bf32da7",
-    "semantic_hash": "ca0e8acfd3ecb60961a8a1654bf32da7"
+    "mtime": 1783434585.6406748,
+    "ast_hash": "c4d04a5f90692d1e7401e875d3887dcf",
+    "semantic_hash": ""
   },
   "src-tauri/src/file_management/folder_tree.rs": {
     "mtime": 1782832623.2768452,
@@ -545,8 +545,8 @@
     "semantic_hash": "133283c3c13872cd5ca1c01c680c94ad"
   },
   "src/components/ui/AppProperties.tsx": {
-    "mtime": 1783422826.2081223,
-    "ast_hash": "9a6896943098fec2802acb05e8847eb7",
+    "mtime": 1783434331.8318427,
+    "ast_hash": "09ceb84bd75dd797ab3ad76a5215cce3",
     "semantic_hash": ""
   },
   "src/components/ui/Button.tsx": {
@@ -690,8 +690,8 @@
     "semantic_hash": ""
   },
   "src/hooks/useAppContextMenus.ts": {
-    "mtime": 1783429918.82763,
-    "ast_hash": "2869824eeb9e45040448778b5593772d",
+    "mtime": 1783434367.697095,
+    "ast_hash": "16e1d258457051cbd70d1f60c4b79937",
     "semantic_hash": ""
   },
   "src/hooks/useAppInitialization.ts": {
@@ -800,8 +800,8 @@
     "semantic_hash": "5df754cc7ecb372f428f60237e6cfa36"
   },
   "src/i18n/locales/en.json": {
-    "mtime": 1783430836.152673,
-    "ast_hash": "8a2bf6b8acaa46ef9374cc518ba20ec4",
+    "mtime": 1783434381.072131,
+    "ast_hash": "e5bb84a725443d9ef47b660ef67e522f",
     "semantic_hash": ""
   },
   "src/i18n/locales/es.json": {

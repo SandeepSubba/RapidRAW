@@ -1736,7 +1736,22 @@ pub fn save_metadata_and_update_thumbnail(
         );
     }
 
+    // `negativeConversion` is owned by the negative-conversion command (it carries
+    // backend-computed bounds). A normal adjustments save must never strip or
+    // overwrite it, so restore the sidecar's own value regardless of what the frontend
+    // sent — otherwise navigating away from a converted negative silently un-converts it.
+    let preserved_negative = metadata.adjustments.get("negativeConversion").cloned();
     metadata.adjustments = final_adjustments;
+    if let Some(obj) = metadata.adjustments.as_object_mut() {
+        match preserved_negative {
+            Some(nc) => {
+                obj.insert("negativeConversion".to_string(), nc);
+            }
+            None => {
+                obj.remove("negativeConversion");
+            }
+        }
+    }
 
     let json_string = serde_json::to_string_pretty(&metadata).map_err(|e| e.to_string())?;
     std::fs::write(&sidecar_path, json_string).map_err(|e| e.to_string())?;

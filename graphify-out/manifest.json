@@ -155,8 +155,8 @@
     "semantic_hash": "06b2f1026b00cf74bfc0007f2c8f2e66"
   },
   "src-tauri/src/file_management.rs": {
-    "mtime": 1783434599.3783042,
-    "ast_hash": "13921cef9a5bce0789f4fdff9c18c1ac",
+    "mtime": 1783436598.5348904,
+    "ast_hash": "0115335e7d4ab80b04c1da7de6febe34",
     "semantic_hash": ""
   },
   "src-tauri/src/file_management/albums.rs": {
@@ -690,8 +690,8 @@
     "semantic_hash": ""
   },
   "src/hooks/useAppContextMenus.ts": {
-    "mtime": 1783434367.697095,
-    "ast_hash": "16e1d258457051cbd70d1f60c4b79937",
+    "mtime": 1783436638.5074902,
+    "ast_hash": "589460752232757be8862878ac5a5250",
     "semantic_hash": ""
   },
   "src/hooks/useAppInitialization.ts": {

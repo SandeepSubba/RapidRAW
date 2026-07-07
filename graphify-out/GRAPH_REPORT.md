@@ -1,7 +1,7 @@
 # Graph Report - RapidRAW  (2026-07-07)
 
 ## Corpus Check
-- 210 files · ~494,137 words
+- 210 files · ~494,230 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `67d1c9a8`
+- Built from commit: `c634f24f`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -182,8 +182,8 @@
 - 2-file cycle: `src-tauri/src/app_state.rs -> src-tauri/src/cache_utils.rs -> src-tauri/src/app_state.rs`
 - 2-file cycle: `src-tauri/src/app_state.rs -> src-tauri/src/lens_correction.rs -> src-tauri/src/app_state.rs`
 - 2-file cycle: `src-tauri/src/gpu_processing.rs -> src-tauri/src/image_processing.rs -> src-tauri/src/gpu_processing.rs`
-- 3-file cycle: `src/components/panel/MainLibrary.tsx -> src/components/panel/library/LibraryGrid.tsx -> src/components/panel/library/LibraryItems.tsx -> src/components/panel/MainLibrary.tsx`
 - 3-file cycle: `src/App.tsx -> src/components/views/LibraryView.tsx -> src/components/panel/MainLibrary.tsx -> src/App.tsx`
+- 3-file cycle: `src/components/panel/MainLibrary.tsx -> src/components/panel/library/LibraryGrid.tsx -> src/components/panel/library/LibraryItems.tsx -> src/components/panel/MainLibrary.tsx`
 
 ## Hyperedges (group relationships)
 - **CI/PR/Release reuse the shared build workflow** — _github_workflows_ci_ci_build, _github_workflows_pr_ci_pr_ci_build, _github_workflows_release_release_workflow, _github_workflows_build_build_workflow [EXTRACTED 1.00]

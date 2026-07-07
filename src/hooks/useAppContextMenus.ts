@@ -88,12 +88,17 @@ export function useAppContextMenus(props: UseAppContextMenusProps) {
       try {
         await invoke('set_negative_conversion', { paths, enabled });
         props.refreshImageList();
-        const { selectedImage, setEditor, adjustments } = useEditorStore.getState();
+        const { selectedImage, setEditor, resetHistory } = useEditorStore.getState();
         if (selectedImage && paths.includes(selectedImage.path)) {
+          const path = selectedImage.path;
           setEditor({ hasRenderedFirstFrame: false });
-          invoke(Invokes.LoadImage, { path: selectedImage.path })
-            .then(() => setEditor({ adjustments: { ...adjustments } }))
-            .catch(() => {});
+          try {
+            await invoke(Invokes.LoadImage, { path });
+            const metadata: any = await invoke(Invokes.LoadMetadata, { path });
+            resetHistory(normalizeLoadedAdjustments(metadata.adjustments));
+          } catch {
+            // ignore; the grid refresh above still reflects the change
+          }
         }
       } catch (e) {
         toast.error(`Negative conversion failed: ${e}`);
