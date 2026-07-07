@@ -220,6 +220,7 @@ export interface AppSettings {
   defaultNonRawTonemapper?: string;
   copyPasteSettings?: CopyPasteSettings;
   enableFocusMode?: boolean;
+  wrapImageNavigation?: boolean;
   openTreeSections?: string[];
   folderIcons?: Record<string, string>;
   exifOverlay?: ExifOverlay;
