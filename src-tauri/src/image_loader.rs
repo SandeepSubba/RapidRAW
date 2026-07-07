@@ -61,7 +61,32 @@ pub fn load_and_composite(
     composite_patches_on_image(&base_image, adjustments)
 }
 
+/// Decode a base image and apply a stored in-library negative conversion when the
+/// sidecar flags one, so a converted negative renders as its positive across the app
+/// (editor, thumbnails, export). The single decode chokepoint for that.
 pub fn load_base_image_from_bytes(
+    bytes: &[u8],
+    path_for_ext_check: &str,
+    use_fast_raw_dev: bool,
+    settings: &AppSettings,
+    cancel_token: Option<(Arc<AtomicUsize>, usize)>,
+) -> Result<DynamicImage> {
+    let image = load_base_image_raw(
+        bytes,
+        path_for_ext_check,
+        use_fast_raw_dev,
+        settings,
+        cancel_token,
+    )?;
+    Ok(crate::negative_conversion::maybe_apply_negative(
+        image,
+        path_for_ext_check,
+    ))
+}
+
+/// The raw decode, without applying a stored negative conversion. Used by the
+/// negative-conversion command, which must analyse the raw negative itself.
+pub fn load_base_image_raw(
     bytes: &[u8],
     path_for_ext_check: &str,
     use_fast_raw_dev: bool,
