@@ -34,6 +34,13 @@ pub fn calculate_geometry_hash(adjustments: &serde_json::Value) -> u64 {
 
     adjustments["orientationSteps"].as_u64().hash(&mut hasher);
 
+    // A negative conversion changes the decoded base image itself (like a decode-level
+    // transform), so it must key the base/thumbnail geometry cache — otherwise a
+    // just-converted negative keeps serving its cached raw (orange) base.
+    if let Some(nc) = adjustments.get("negativeConversion") {
+        nc.to_string().hash(&mut hasher);
+    }
+
     for key in GEOMETRY_KEYS {
         if let Some(val) = adjustments.get(key) {
             key.hash(&mut hasher);

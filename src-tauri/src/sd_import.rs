@@ -26,8 +26,9 @@ static IMPORT_ANALYSIS: Mutex<Option<Vec<ImageAnalysisData>>> = Mutex::new(None)
 static IMPORT_FAILED: Mutex<Vec<String>> = Mutex::new(Vec::new());
 // Per-photo interpretable cue features from the last scoring run, keyed by path. Used to
 // fold your keep/skip decisions into the "learn from my picks" model (record_cull_picks).
-static IMPORT_FEATURES: Mutex<Option<std::collections::HashMap<String, [f64; crate::cull_model::N_FEATURES]>>> =
-    Mutex::new(None);
+static IMPORT_FEATURES: Mutex<
+    Option<std::collections::HashMap<String, [f64; crate::cull_model::N_FEATURES]>>,
+> = Mutex::new(None);
 // Capture timestamps (epoch seconds) per scanned path, for time-based (burst) grouping.
 static IMPORT_TIMES: Mutex<Option<std::collections::HashMap<String, i64>>> = Mutex::new(None);
 
@@ -145,7 +146,9 @@ pub fn scan_source_images(path: String) -> Result<Vec<String>, String> {
 /// (`get_creation_date_from_path`): EXIF DateTimeOriginal first, then RAW metadata, falling
 /// back to the file's creation time. Read in parallel; never fails (missing dates just sort old).
 #[tauri::command]
-pub fn get_capture_times(paths: Vec<String>) -> Result<std::collections::HashMap<String, i64>, String> {
+pub fn get_capture_times(
+    paths: Vec<String>,
+) -> Result<std::collections::HashMap<String, i64>, String> {
     use rayon::prelude::*;
     let times = paths
         .par_iter()
@@ -172,7 +175,10 @@ pub async fn cull_images_for_import(
 /// This keeps "Group similar" fast — scoring is a separate, opt-in step. Emits
 /// `sd-import-cull-*` progress. Returns how many analyzed successfully.
 #[tauri::command]
-pub async fn analyze_for_import(paths: Vec<String>, app_handle: AppHandle) -> Result<usize, String> {
+pub async fn analyze_for_import(
+    paths: Vec<String>,
+    app_handle: AppHandle,
+) -> Result<usize, String> {
     use rayon::prelude::*;
     // Capture timestamps up front (parallel, best-effort) so time-based grouping is instant.
     let times: std::collections::HashMap<String, i64> = paths
@@ -203,7 +209,13 @@ pub fn group_for_import(
     let guard = IMPORT_ANALYSIS.lock().unwrap();
     let failed = IMPORT_FAILED.lock().unwrap().clone();
     match guard.as_ref() {
-        Some(analyses) => Ok(group_cached(analyses, failed, &settings, &mode, time_gap_seconds)),
+        Some(analyses) => Ok(group_cached(
+            analyses,
+            failed,
+            &settings,
+            &mode,
+            time_gap_seconds,
+        )),
         None => Ok(CullingSuggestions::default()),
     }
 }
@@ -274,8 +286,13 @@ pub async fn score_for_import(
         .par_iter()
         .filter_map(|p| {
             let n = done.fetch_add(1, Ordering::Relaxed) + 1;
-            let _ = app_handle.emit("sd-import-score-progress", serde_json::json!({ "current": n, "total": total, "stage": "Scoring photos…" }));
-            crate::culling::score_image(p, &settings).ok().map(|s| (p.clone(), s))
+            let _ = app_handle.emit(
+                "sd-import-score-progress",
+                serde_json::json!({ "current": n, "total": total, "stage": "Scoring photos…" }),
+            );
+            crate::culling::score_image(p, &settings)
+                .ok()
+                .map(|s| (p.clone(), s))
         })
         .collect();
 
@@ -283,12 +300,24 @@ pub async fn score_for_import(
     // looking-at-camera check on each cropped face so a single blinker demotes the frame
     // (serial; the CLIP + face sessions are single-threaded). Best-effort: skip silently if
     // either model can't be loaded (offline / not downloaded).
-    let clip = crate::ai_processing::get_or_init_clip_models(&app_handle, &state.ai_state, &state.ai_init_lock).await;
-    let face = crate::ai_processing::get_or_init_face_model(&app_handle, &state.ai_state, &state.ai_init_lock).await;
+    let clip = crate::ai_processing::get_or_init_clip_models(
+        &app_handle,
+        &state.ai_state,
+        &state.ai_init_lock,
+    )
+    .await;
+    let face = crate::ai_processing::get_or_init_face_model(
+        &app_handle,
+        &state.ai_state,
+        &state.ai_init_lock,
+    )
+    .await;
     // People shots → per-face cues. Non-people shots (landscape/product/food/still life) →
     // subject-region sharpness + a CLIP aesthetic/composition cue: [overall, best_region, aesthetic].
-    let mut people: std::collections::HashMap<String, crate::tagging::FaceCues> = std::collections::HashMap::new();
-    let mut nonpeople: std::collections::HashMap<String, [f32; 3]> = std::collections::HashMap::new();
+    let mut people: std::collections::HashMap<String, crate::tagging::FaceCues> =
+        std::collections::HashMap::new();
+    let mut nonpeople: std::collections::HashMap<String, [f32; 3]> =
+        std::collections::HashMap::new();
     match (clip, face) {
         (Ok(clip), Ok(face)) => {
             let face_paths: Vec<&String> = paths.iter().filter(|p| grouped.contains(*p)).collect();
@@ -305,7 +334,9 @@ pub async fn score_for_import(
                             // of the centre-focus assumption.
                             let overall = crate::culling::normalized_sharpness_of(&img);
                             let best = crate::culling::best_region_sharpness(&img);
-                            let aesthetic = crate::tagging::clip_aesthetic(&img, &clip.model, &clip.tokenizer).unwrap_or(0.5);
+                            let aesthetic =
+                                crate::tagging::clip_aesthetic(&img, &clip.model, &clip.tokenizer)
+                                    .unwrap_or(0.5);
                             nonpeople.insert((*p).clone(), [overall, best, aesthetic]);
                         }
                         Err(_) => {}
@@ -347,10 +378,15 @@ pub async fn score_for_import(
                         ];
                         features_map.insert(d.result_path(), f);
                         model.score(&f, personalize)
-                    } else if let Some(&[overall, best, aesthetic]) = nonpeople.get(&d.result_path()) {
+                    } else if let Some(&[overall, best, aesthetic]) =
+                        nonpeople.get(&d.result_path())
+                    {
                         // Non-people: subject-region focus + composition, de-emphasising the
                         // centre-focus assumption that doesn't fit off-centre subjects.
-                        (0.30 * overall as f64 + 0.30 * best as f64 + 0.20 * ex + 0.20 * aesthetic as f64)
+                        (0.30 * overall as f64
+                            + 0.30 * best as f64
+                            + 0.20 * ex
+                            + 0.20 * aesthetic as f64)
                             .clamp(0.0, 1.0)
                     } else {
                         q
@@ -372,7 +408,11 @@ pub async fn score_for_import(
 /// number of samples learned so far. No-op unless both a kept and a skipped grouped photo
 /// (with cached cue features) are supplied.
 #[tauri::command]
-pub fn record_cull_picks(app_handle: AppHandle, kept: Vec<String>, skipped: Vec<String>) -> Result<u64, String> {
+pub fn record_cull_picks(
+    app_handle: AppHandle,
+    kept: Vec<String>,
+    skipped: Vec<String>,
+) -> Result<u64, String> {
     let guard = IMPORT_FEATURES.lock().unwrap();
     let map = match guard.as_ref() {
         Some(m) => m,
@@ -449,7 +489,10 @@ pub fn eject_drive(mount_point: String) -> Result<(), String> {
              throw 'The card is still mounted; it may still be in use.'"
         );
         // Pass as UTF-16LE base64 so we don't fight cmd/PowerShell quoting rules.
-        let wide: Vec<u8> = script.encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
+        let wide: Vec<u8> = script
+            .encode_utf16()
+            .flat_map(|u| u.to_le_bytes())
+            .collect();
         let encoded = general_purpose::STANDARD.encode(&wide);
 
         let out = std::process::Command::new("powershell")
@@ -492,7 +535,11 @@ pub fn find_existing_in_destination(
     // Match by filename STEM (base name without extension) so a shot already imported
     // as RAW also flags its JPEG counterpart on the card (and vice-versa).
     let mut existing: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for entry in WalkDir::new(dest).follow_links(false).into_iter().filter_map(Result::ok) {
+    for entry in WalkDir::new(dest)
+        .follow_links(false)
+        .into_iter()
+        .filter_map(Result::ok)
+    {
         if entry.file_type().is_file() && is_supported_image_file(entry.path()) {
             if let Some(stem) = entry.path().file_stem().and_then(|s| s.to_str()) {
                 existing.insert(stem.to_lowercase());
@@ -537,13 +584,21 @@ fn read_fuji_embedded_jpeg(path: &str) -> Option<Vec<u8>> {
 pub fn get_import_preview(path: String) -> Result<String, String> {
     if is_raw_file(&path) {
         if let Some(jpeg) = read_fuji_embedded_jpeg(&path) {
-            return Ok(format!("data:image/jpeg;base64,{}", general_purpose::STANDARD.encode(&jpeg)));
+            return Ok(format!(
+                "data:image/jpeg;base64,{}",
+                general_purpose::STANDARD.encode(&jpeg)
+            ));
         }
         // Other raw formats: let rawler pull the embedded preview, then re-encode to JPEG.
-        if let Ok(img) = rawler::analyze::extract_preview_pixels(&path, &RawDecodeParams::default()) {
+        if let Ok(img) = rawler::analyze::extract_preview_pixels(&path, &RawDecodeParams::default())
+        {
             let mut buf = std::io::Cursor::new(Vec::new());
-            img.write_to(&mut buf, image::ImageFormat::Jpeg).map_err(|e| e.to_string())?;
-            return Ok(format!("data:image/jpeg;base64,{}", general_purpose::STANDARD.encode(buf.get_ref())));
+            img.write_to(&mut buf, image::ImageFormat::Jpeg)
+                .map_err(|e| e.to_string())?;
+            return Ok(format!(
+                "data:image/jpeg;base64,{}",
+                general_purpose::STANDARD.encode(buf.get_ref())
+            ));
         }
         return Err("Could not extract a preview from this raw file".into());
     }
@@ -556,5 +611,9 @@ pub fn get_import_preview(path: String) -> Result<String, String> {
         Some("bmp") => "image/bmp",
         _ => "image/jpeg",
     };
-    Ok(format!("data:{};base64,{}", mime, general_purpose::STANDARD.encode(&bytes)))
+    Ok(format!(
+        "data:{};base64,{}",
+        mime,
+        general_purpose::STANDARD.encode(&bytes)
+    ))
 }

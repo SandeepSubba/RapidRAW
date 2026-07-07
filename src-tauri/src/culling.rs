@@ -31,12 +31,15 @@ fn load_for_analysis(
         if let Some(img) = try_fast_embedded_preview(path) {
             return Ok(img);
         }
-        if let Ok(preview) = rawler::analyze::extract_preview_pixels(path, &RawDecodeParams::default()) {
+        if let Ok(preview) =
+            rawler::analyze::extract_preview_pixels(path, &RawDecodeParams::default())
+        {
             return Ok(preview);
         }
     }
     let file_bytes = std::fs::read(path).map_err(|e| e.to_string())?;
-    image_loader::load_base_image_from_bytes(&file_bytes, path, true, settings, None).map_err(|e| e.to_string())
+    image_loader::load_base_image_from_bytes(&file_bytes, path, true, settings, None)
+        .map_err(|e| e.to_string())
 }
 
 /// Cheap RAW preview: the camera's embedded full-size JPEG (RAF fast path) or rawler's
@@ -56,11 +59,19 @@ fn largest_tiff_jpeg_preview(buf: &[u8]) -> Option<DynamicImage> {
     };
     let rd16 = |o: usize| -> Option<u64> {
         let b: [u8; 2] = buf.get(o..o + 2)?.try_into().ok()?;
-        Some(if le { u16::from_le_bytes(b) } else { u16::from_be_bytes(b) } as u64)
+        Some(if le {
+            u16::from_le_bytes(b)
+        } else {
+            u16::from_be_bytes(b)
+        } as u64)
     };
     let rd32 = |o: usize| -> Option<u64> {
         let b: [u8; 4] = buf.get(o..o + 4)?.try_into().ok()?;
-        Some(if le { u32::from_le_bytes(b) } else { u32::from_be_bytes(b) } as u64)
+        Some(if le {
+            u32::from_le_bytes(b)
+        } else {
+            u32::from_be_bytes(b)
+        } as u64)
     };
 
     // (offset, len) of the biggest JPEG stream seen so far
@@ -72,7 +83,9 @@ fn largest_tiff_jpeg_preview(buf: &[u8]) -> Option<DynamicImage> {
         if !seen.insert(ifd) || seen.len() > 64 {
             continue;
         }
-        let Some(n) = rd16(ifd as usize) else { continue };
+        let Some(n) = rd16(ifd as usize) else {
+            continue;
+        };
         let mut subfile: u64 = u64::MAX; // absent
         let mut compression: u64 = 0;
         let mut strip: Option<(u64, u64)> = None; // 273/279, single strip
@@ -158,10 +171,9 @@ pub fn fast_raw_preview(path: &str) -> Option<DynamicImage> {
             .get_uint(0)
     });
     Some(match orientation {
-        Some(o) if o > 1 => crate::image_processing::apply_orientation(
-            img,
-            rawler::Orientation::from_u16(o as u16),
-        ),
+        Some(o) if o > 1 => {
+            crate::image_processing::apply_orientation(img, rawler::Orientation::from_u16(o as u16))
+        }
         _ => img,
     })
 }
@@ -330,7 +342,12 @@ fn quality_metrics(thumbnail: &image::DynamicImage) -> (f64, f64, f64, f64) {
         + (normalized_center_focus * WEIGHT_CENTER_FOCUS)
         + (exposure_metric * WEIGHT_EXPOSURE);
 
-    (quality_score, sharpness_metric, center_focus_metric, exposure_metric)
+    (
+        quality_score,
+        sharpness_metric,
+        center_focus_metric,
+        exposure_metric,
+    )
 }
 
 /// Decode + perceptual hash, optionally computing quality metrics. When `compute_score`
@@ -480,7 +497,8 @@ pub async fn analyze_paths(
                     stage: "Analyzing images...".to_string(),
                 },
             );
-            analyze_image(path, &hasher, &app_settings, compute_score).map_err(|e| (path.to_string(), e))
+            analyze_image(path, &hasher, &app_settings, compute_score)
+                .map_err(|e| (path.to_string(), e))
         })
         .collect();
 
@@ -530,7 +548,9 @@ pub fn group_analyses(
                     if processed_indices[j] {
                         continue;
                     }
-                    let dist = successful_analyses[current_idx].hash.dist(&successful_analyses[j].hash);
+                    let dist = successful_analyses[current_idx]
+                        .hash
+                        .dist(&successful_analyses[j].hash);
                     if dist <= settings.similarity_threshold {
                         processed_indices[j] = true;
                         current_group_indices.push(j);
@@ -656,7 +676,11 @@ pub async fn run_culling(
     let total = analyses.len() + failed.len();
     let _ = app_handle.emit(
         &format!("{channel}-progress"),
-        CullingProgress { current: total, total, stage: "Grouping similar images...".to_string() },
+        CullingProgress {
+            current: total,
+            total,
+            stage: "Grouping similar images...".to_string(),
+        },
     );
     let suggestions = group_analyses(&analyses, failed, &settings);
     let _ = app_handle.emit(&format!("{channel}-complete"), &suggestions);

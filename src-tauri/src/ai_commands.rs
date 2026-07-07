@@ -12,8 +12,9 @@ use serde_json::Value;
 use crate::ai_connector;
 use crate::ai_processing::{
     self, AiDepthMaskParameters, AiForegroundMaskParameters, AiSkyMaskParameters,
-    AiSubjectMaskParameters, CachedDepthMap, generate_image_embeddings, get_or_init_ai_models,
-    run_depth_anything_model, run_sam_decoder, run_sky_seg_model, run_u2netp_model, generate_face_region_mask, get_or_init_face_model,
+    AiSubjectMaskParameters, CachedDepthMap, generate_face_region_mask, generate_image_embeddings,
+    get_or_init_ai_models, get_or_init_face_model, run_depth_anything_model, run_sam_decoder,
+    run_sky_seg_model, run_u2netp_model,
 };
 use crate::app_settings::load_settings;
 use crate::app_state::AppState;

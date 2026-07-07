@@ -2085,7 +2085,12 @@ fn get_global_adjustments_from_json(
         tonemapper_mode: tonemapper_override
             .unwrap_or_else(|| if tone_mapper == "agx" { 1 } else { 0 }),
         skin_texture: get_val("details", "skinTexture", SCALES.skin_texture, Some(50.0)),
-        skin_smoothing_scale: get_val("details", "skinSmoothingScale", SCALES.skin_smoothing_scale, None),
+        skin_smoothing_scale: get_val(
+            "details",
+            "skinSmoothingScale",
+            SCALES.skin_smoothing_scale,
+            None,
+        ),
         _pad_lut4: 0.0,
         _pad_lut5: 0.0,
 
@@ -2563,4 +2568,3 @@ fn apply_gentle_detail_enhance(
             }
         });
 }
-

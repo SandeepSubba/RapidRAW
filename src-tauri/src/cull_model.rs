@@ -44,7 +44,11 @@ impl Default for CullModel {
 
 impl CullModel {
     fn file_path(app_handle: &tauri::AppHandle) -> Option<PathBuf> {
-        app_handle.path().app_data_dir().ok().map(|d| d.join(MODEL_FILENAME))
+        app_handle
+            .path()
+            .app_data_dir()
+            .ok()
+            .map(|d| d.join(MODEL_FILENAME))
     }
 
     pub fn load(app_handle: &tauri::AppHandle) -> CullModel {
@@ -121,7 +125,11 @@ impl CullModel {
 
     /// Score a photo's feature vector in [0,1] (higher = better) under the current weights.
     pub fn score(&self, features: &[f64; N_FEATURES], personalize: bool) -> f64 {
-        let w = if personalize { self.effective_weights() } else { DEFAULT_W };
+        let w = if personalize {
+            self.effective_weights()
+        } else {
+            DEFAULT_W
+        };
         let s: f64 = (0..N_FEATURES).map(|j| w[j] * features[j]).sum();
         s.clamp(0.0, 1.0)
     }

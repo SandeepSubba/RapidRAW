@@ -1114,6 +1114,61 @@ pub fn increment_thumbnail_progress(state: &AppState, app_handle: &AppHandle) {
     }
 }
 
+/// Regenerate grid/filmstrip thumbnails for the given paths and push each to the
+/// frontend via `thumbnail-generated`. Used by commands that change the decoded
+/// base out-of-band (e.g. negative conversion), where the sidecar edit alone
+/// wouldn't prompt the grid to refresh.
+pub fn regenerate_thumbnails_for_paths(paths: &[String], app_handle: &AppHandle) {
+    let state = app_handle.state::<AppState>();
+
+    // Evict any pre-change cached base so the new one is decoded.
+    if let Ok(mut cache) = state.thumbnail_geometry_cache.lock() {
+        for p in paths {
+            cache.remove(p);
+        }
+    }
+
+    let settings = load_settings(app_handle.clone()).unwrap_or_default();
+    add_to_thumbnail_queue(&state, paths.len(), app_handle);
+
+    let thumb_cache_dir = match resolve_thumbnail_cache_dir(app_handle) {
+        Ok(dir) => dir,
+        Err(e) => {
+            log::warn!("Unable to initialize thumbnail cache directory: {}", e);
+            for path in paths {
+                emit_thumbnail_cache_setup_error(app_handle, path, &e);
+            }
+            for _ in 0..paths.len() {
+                increment_thumbnail_progress(&state, app_handle);
+            }
+            return;
+        }
+    };
+
+    let gpu_context = crate::gpu_processing::get_or_init_gpu_context(&state, app_handle).ok();
+
+    paths.par_iter().for_each(|path_str| {
+        let result = generate_single_thumbnail_and_cache(
+            path_str,
+            &thumb_cache_dir,
+            gpu_context.as_ref(),
+            None,
+            true,
+            app_handle,
+            &settings,
+        );
+
+        if let Some((thumbnail_data, rating, is_edited)) = result {
+            let _ = app_handle.emit(
+                "thumbnail-generated",
+                serde_json::json!({ "path": path_str, "data": thumbnail_data, "rating": rating, "is_edited": is_edited }),
+            );
+        }
+
+        increment_thumbnail_progress(&state, app_handle);
+    });
+}
+
 pub fn resolve_lens_params_in_adjustments(
     adjustments: &mut Value,
     exif_data: &Option<HashMap<String, String>>,
@@ -3016,7 +3071,12 @@ fn sanitize_filename_component(value: &str) -> String {
         })
         .collect();
     let collapsed = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
-    collapsed.trim_matches('.').trim().chars().take(100).collect()
+    collapsed
+        .trim_matches('.')
+        .trim()
+        .chars()
+        .take(100)
+        .collect()
 }
 
 pub fn generate_filename_from_template(

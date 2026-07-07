@@ -77,7 +77,11 @@ fn clip_prompt_probs(
     let mut ids_data = Vec::new();
     let mut mask_data = Vec::new();
     for encoding in encodings {
-        let mut ids = encoding.get_ids().iter().map(|&i| i as i64).collect::<Vec<_>>();
+        let mut ids = encoding
+            .get_ids()
+            .iter()
+            .map(|&i| i as i64)
+            .collect::<Vec<_>>();
         let mut mask = encoding
             .get_attention_mask()
             .iter()
@@ -129,11 +133,11 @@ pub fn clip_aesthetic(
 /// These feed both the default people score and the "learn from my picks" model.
 #[derive(Clone, Copy, Debug)]
 pub struct FaceCues {
-    pub face_sharp: f32,  // mean per-face sharpness (focus on the subjects)
-    pub look_mean: f32,   // mean P(looking at camera)
-    pub look_worst: f32,  // worst single face's P(looking at camera)
-    pub expr_mean: f32,   // mean P(smiling) — expression
-    pub eyes_worst: f32,  // worst single face's P(eyes open)
+    pub face_sharp: f32, // mean per-face sharpness (focus on the subjects)
+    pub look_mean: f32,  // mean P(looking at camera)
+    pub look_worst: f32, // worst single face's P(looking at camera)
+    pub expr_mean: f32,  // mean P(smiling) — expression
+    pub eyes_worst: f32, // worst single face's P(eyes open)
 }
 
 /// Detects every face and grades each *cropped face* with one CLIP softmax, returning

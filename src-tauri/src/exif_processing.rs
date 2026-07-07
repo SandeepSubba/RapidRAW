@@ -440,8 +440,7 @@ pub fn extract_metadata(file_bytes: &[u8]) -> Option<HashMap<String, String>> {
                         exif::Value::Undefined(ref v, _) => decode_user_comment(v),
                         // Non-standard ASCII writers store the text directly (no header).
                         exif::Value::Ascii(ref v) => {
-                            let s: String =
-                                v.iter().flatten().map(|&b| b as char).collect();
+                            let s: String = v.iter().flatten().map(|&b| b as char).collect();
                             let t = s.trim_matches(|c: char| c == '\u{0}' || c.is_whitespace());
                             if t.is_empty() {
                                 None

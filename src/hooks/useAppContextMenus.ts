@@ -77,6 +77,31 @@ export function useAppContextMenus(props: UseAppContextMenusProps) {
     useEditorActions();
   const { handleRate, handleSetColorLabel, handleTagsChanged } = useLibraryActions();
 
+  // Turn the in-library negative conversion on/off (no modal — all tuning happens
+  // in the Develop module). Refreshes the grid, and if the open image was changed,
+  // re-decodes its base and nudges a re-render (handleImageSelect's same-path guard
+  // would otherwise skip a reload).
+  const handleSetNegativeConversion = useCallback(
+    async (paths: string[], enabled: boolean) => {
+      if (paths.length === 0) return;
+      paths.forEach((p) => globalImageCache.delete(p));
+      try {
+        await invoke('set_negative_conversion', { paths, enabled });
+        props.refreshImageList();
+        const { selectedImage, setEditor, adjustments } = useEditorStore.getState();
+        if (selectedImage && paths.includes(selectedImage.path)) {
+          setEditor({ hasRenderedFirstFrame: false });
+          invoke(Invokes.LoadImage, { path: selectedImage.path })
+            .then(() => setEditor({ adjustments: { ...adjustments } }))
+            .catch(() => {});
+        }
+      } catch (e) {
+        toast.error(`Negative conversion failed: ${e}`);
+      }
+    },
+    [props],
+  );
+
   const albumIcons = useMemo(
     () => [
       { label: t('contextMenus.albumIcons.default'), value: undefined, icon: Folder },
@@ -221,11 +246,14 @@ export function useAppContextMenus(props: UseAppContextMenusProps) {
               },
             },
             {
-              label: t('contextMenus.editor.convertNegative'),
+              label: useEditorStore.getState().adjustments?.negativeConversion?.enabled
+                ? t('contextMenus.editor.revertNegative')
+                : t('contextMenus.editor.convertNegative'),
               icon: Film,
               onClick: () => {
                 if (selectedImage) {
-                  setUI({ negativeModalState: { isOpen: true, targetPaths: [selectedImage.path] } });
+                  const enabled = !useEditorStore.getState().adjustments?.negativeConversion?.enabled;
+                  handleSetNegativeConversion([selectedImage.path], enabled);
                 }
               },
             },
@@ -567,7 +595,7 @@ export function useAppContextMenus(props: UseAppContextMenusProps) {
               icon: Film,
               disabled: selectionCount === 0,
               onClick: () => {
-                setUI({ negativeModalState: { isOpen: true, targetPaths: finalSelection } });
+                handleSetNegativeConversion(finalSelection, true);
               },
             },
             {

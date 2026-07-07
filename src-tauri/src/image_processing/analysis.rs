@@ -899,10 +899,13 @@ async fn detect_face_median_luma(
     state: &AppState,
     image: &DynamicImage,
 ) -> Option<f64> {
-    let face_session =
-        crate::ai_processing::get_or_init_face_model(app_handle, &state.ai_state, &state.ai_init_lock)
-            .await
-            .ok()?;
+    let face_session = crate::ai_processing::get_or_init_face_model(
+        app_handle,
+        &state.ai_state,
+        &state.ai_init_lock,
+    )
+    .await
+    .ok()?;
     let faces = crate::ai_processing::run_face_detection(image, &face_session).ok()?;
     let face = faces.first()?;
     let (w, h) = (image.width() as f32, image.height() as f32);

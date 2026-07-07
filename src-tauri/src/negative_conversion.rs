@@ -1,15 +1,10 @@
 use crate::file_management::{parse_virtual_path, read_file_mapped};
 use crate::image_loader::load_base_image_raw;
-use base64::{Engine as _, engine::general_purpose};
-use image::codecs::jpeg::JpegEncoder;
 use image::{DynamicImage, Rgb32FImage};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
-use std::collections::hash_map::DefaultHasher;
 use std::fs;
-use std::hash::{Hash, Hasher};
-use std::io::Cursor;
 use std::path::Path;
 use tauri::AppHandle;
 
@@ -246,66 +241,16 @@ fn analyze_bounds_for(image: &DynamicImage) -> [ChannelBounds; 3] {
     analyze_bounds(&log_pixels, w as usize, h as usize)
 }
 
+/// Turn an in-library negative conversion on or off for the given raws,
+/// non-destructively. `enabled = true` inverts the negative to a *neutral* positive
+/// (density inversion + per-channel auto-bounds) and stores it in each raw's sidecar;
+/// `enabled = false` removes it. There's no modal and no baked TIFF — all further
+/// tuning (exposure, white balance, contrast, curves…) happens in the normal Develop
+/// module on top, and `maybe_apply_negative` renders the positive on load everywhere.
 #[tauri::command]
-pub async fn preview_negative_conversion(
-    path: String,
-    params: NegativeConversionParams,
-    state: tauri::State<'_, AppState>,
-    app_handle: AppHandle,
-) -> Result<String, String> {
-    let (source_path, _) = parse_virtual_path(&path);
-    let source_path_str = source_path.to_string_lossy().to_string();
-
-    let mut hasher = DefaultHasher::new();
-    source_path_str.hash(&mut hasher);
-    "negative_preview_base".hash(&mut hasher);
-    let cache_key = hasher.finish();
-
-    let base_image_for_processing = {
-        let mut cache = state.geometry_cache.lock().unwrap();
-
-        if let Some(cached_img) = cache.get(&cache_key) {
-            cached_img.clone()
-        } else {
-            // Always load the RAW negative from disk here — never the editor's
-            // in-memory image, which is already the converted positive — so the
-            // modal previews and re-tunes the actual negative.
-            let settings = load_settings(app_handle.clone()).unwrap_or_default();
-            let full = match read_file_mapped(Path::new(&source_path_str)) {
-                Ok(mmap) => load_base_image_raw(&mmap, &source_path_str, false, &settings, None),
-                Err(_e) => {
-                    let bytes = fs::read(&source_path_str).map_err(|io_err| io_err.to_string())?;
-                    load_base_image_raw(&bytes, &source_path_str, false, &settings, None)
-                }
-            }
-            .map_err(|e| e.to_string())?;
-
-            let downscaled = downscale_f32_image(&full, 1080, 1080);
-            cache.insert(cache_key, downscaled.clone());
-            downscaled
-        }
-    };
-
-    let processed = run_pipeline(&base_image_for_processing, &params, None);
-
-    let mut buf = Cursor::new(Vec::new());
-    processed
-        .to_rgb8()
-        .write_with_encoder(JpegEncoder::new_with_quality(&mut buf, 80))
-        .map_err(|e| e.to_string())?;
-
-    let base64_str = general_purpose::STANDARD.encode(buf.get_ref());
-    Ok(format!("data:image/jpeg;base64,{}", base64_str))
-}
-
-/// Apply a negative conversion *in-library, non-destructively*: instead of baking a
-/// `_Positive.tiff` sibling, persist the params + auto-analysed bounds into each raw's
-/// sidecar. `maybe_apply_negative` then renders the positive on load everywhere. The
-/// original raw file is never touched, and the conversion stays re-tunable.
-#[tauri::command]
-pub async fn apply_negative_conversion(
+pub async fn set_negative_conversion(
     paths: Vec<String>,
-    params: NegativeConversionParams,
+    enabled: bool,
     state: tauri::State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<Vec<String>, String> {
@@ -320,38 +265,38 @@ pub async fn apply_negative_conversion(
             );
 
             let (source_path, _) = parse_virtual_path(path_str);
-            let real_path = source_path.to_string_lossy().to_string();
-            let settings = load_settings(handle.clone()).unwrap_or_default();
-
-            let img = match read_file_mapped(Path::new(&real_path)) {
-                Ok(mmap) => load_base_image_raw(&mmap, &real_path, false, &settings, None),
-                Err(_) => {
-                    let bytes = fs::read(&real_path).map_err(|e| e.to_string())?;
-                    load_base_image_raw(&bytes, &real_path, false, &settings, None)
-                }
-            }
-            .map_err(|e| e.to_string())?;
-
-            let bounds = analyze_bounds_for(&img);
-
             let sidecar = crate::exif_processing::get_primary_sidecar_path(&source_path);
             let mut meta = crate::exif_processing::load_sidecar(&sidecar);
             if !meta.adjustments.is_object() {
                 meta.adjustments = serde_json::json!({});
             }
-            meta.adjustments["negativeConversion"] = serde_json::json!({
-                "enabled": true,
-                "redWeight": params.red_weight,
-                "greenWeight": params.green_weight,
-                "blueWeight": params.blue_weight,
-                "exposure": params.exposure,
-                "contrast": params.contrast,
-                "bounds": [
-                    [bounds[0].min, bounds[0].max],
-                    [bounds[1].min, bounds[1].max],
-                    [bounds[2].min, bounds[2].max],
-                ],
-            });
+
+            if enabled {
+                // Analyse the raw negative once for a neutral positive starting point;
+                // color/tone is left to the Develop module.
+                let real_path = source_path.to_string_lossy().to_string();
+                let settings = load_settings(handle.clone()).unwrap_or_default();
+                let img = match read_file_mapped(Path::new(&real_path)) {
+                    Ok(mmap) => load_base_image_raw(&mmap, &real_path, false, &settings, None),
+                    Err(_) => {
+                        let bytes = fs::read(&real_path).map_err(|e| e.to_string())?;
+                        load_base_image_raw(&bytes, &real_path, false, &settings, None)
+                    }
+                }
+                .map_err(|e| e.to_string())?;
+
+                let bounds = analyze_bounds_for(&img);
+                meta.adjustments["negativeConversion"] = serde_json::json!({
+                    "enabled": true,
+                    "bounds": [
+                        [bounds[0].min, bounds[0].max],
+                        [bounds[1].min, bounds[1].max],
+                        [bounds[2].min, bounds[2].max],
+                    ],
+                });
+            } else if let Some(obj) = meta.adjustments.as_object_mut() {
+                obj.remove("negativeConversion");
+            }
 
             let json = serde_json::to_string_pretty(&meta).map_err(|e| e.to_string())?;
             fs::write(&sidecar, json).map_err(|e| e.to_string())?;
@@ -363,7 +308,7 @@ pub async fn apply_negative_conversion(
     .await
     .map_err(|e| e.to_string())??;
 
-    // Deliberate action: drop cached decodes/previews so the positive re-renders.
+    // The base image changed; drop cached decodes/previews so the new render is used.
     if let Ok(mut c) = state.decoded_image_cache.lock() {
         c.clear();
     }
@@ -373,22 +318,23 @@ pub async fn apply_negative_conversion(
     if let Ok(mut c) = state.cached_preview.lock() {
         *c = None;
     }
+    if let Ok(mut c) = state.full_warped_cache.lock() {
+        *c = None;
+    }
+    if let Ok(mut c) = state.full_transformed_cache.lock() {
+        *c = None;
+    }
+
+    // Thumbnails don't refresh from a sidecar edit on their own — regenerate off-thread.
+    let regen_paths = results.clone();
+    let regen_handle = app_handle.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::file_management::regenerate_thumbnails_for_paths(&regen_paths, &regen_handle);
+    });
+
     let _ = app_handle.emit("negatives-converted", &results);
 
     Ok(results)
-}
-
-/// Read the stored negative conversion for a path (for the modal to reopen showing the
-/// current settings). Returns null when the image has no conversion.
-#[tauri::command]
-pub fn get_negative_conversion(path: String) -> Option<serde_json::Value> {
-    let (source_path, _) = parse_virtual_path(&path);
-    let sidecar = crate::exif_processing::get_primary_sidecar_path(&source_path);
-    if !sidecar.exists() {
-        return None;
-    }
-    let meta = crate::exif_processing::load_sidecar(&sidecar);
-    meta.adjustments.get("negativeConversion").cloned()
 }
 
 #[cfg(test)]

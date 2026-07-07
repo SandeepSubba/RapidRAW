@@ -536,9 +536,7 @@ pub fn generate_face_region_mask(
         let landmarks = if cx1 > cx0 + 16 && cy1 > cy0 + 16 {
             let crop = image.crop_imm(cx0, cy0, cx1 - cx0, cy1 - cy0);
             match run_face_detection(&crop, face_session)?.first() {
-                Some(rf) => rf
-                    .landmarks
-                    .map(|(x, y)| (x + cx0 as f32, y + cy0 as f32)),
+                Some(rf) => rf.landmarks.map(|(x, y)| (x + cx0 as f32, y + cy0 as f32)),
                 None => f.landmarks,
             }
         } else {
@@ -681,19 +679,34 @@ pub fn run_face_detection(
             let x2 = (cx + bw * 0.5) * sx;
             let y2 = (cy + bh * 0.5) * sy;
             if x2 > x1 && y2 > y1 {
-                cands.push(FaceBox { x1, y1, x2, y2, score, landmarks });
+                cands.push(FaceBox {
+                    x1,
+                    y1,
+                    x2,
+                    y2,
+                    score,
+                    landmarks,
+                });
             }
         }
     }
 
-    cands.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    cands.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     let mut keep: Vec<FaceBox> = Vec::new();
     for c in cands {
         if !keep.iter().any(|k| face_iou(k, &c) > NMS_IOU) {
             keep.push(c);
         }
     }
-    keep.sort_by(|a, b| face_area(b).partial_cmp(&face_area(a)).unwrap_or(std::cmp::Ordering::Equal));
+    keep.sort_by(|a, b| {
+        face_area(b)
+            .partial_cmp(&face_area(a))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     Ok(keep)
 }
 
@@ -1474,9 +1487,10 @@ pub fn run_sam_decoder(
         let img_mask_f32 =
             ImageBuffer::<Luma<f32>, Vec<f32>>::from_raw(w as u32, h as u32, mask_f32_vec)
                 .ok_or_else(|| anyhow::anyhow!("Failed to build mask buffer from SAM output"))?;
-        let img_gaus_f32 =
-            ImageBuffer::<Luma<f32>, Vec<f32>>::from_raw(w as u32, h as u32, gaus_dt)
-                .ok_or_else(|| anyhow::anyhow!("Failed to build gaussian buffer from SAM output"))?;
+        let img_gaus_f32 = ImageBuffer::<Luma<f32>, Vec<f32>>::from_raw(
+            w as u32, h as u32, gaus_dt,
+        )
+        .ok_or_else(|| anyhow::anyhow!("Failed to build gaussian buffer from SAM output"))?;
 
         let resized_mask = imageops::resize(&img_mask_f32, 256, 256, FilterType::Triangle);
         let resized_gaus = imageops::resize(&img_gaus_f32, 256, 256, FilterType::Triangle);
