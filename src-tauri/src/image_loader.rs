@@ -82,10 +82,7 @@ pub fn load_base_image_from_bytes(
     .map(|(image, _is_fallback)| image)
 }
 
-/// The raw decode, without applying a stored in-library negative conversion. Used
-/// by the negative-conversion modal itself (which tunes/analyses the raw negative);
-/// everything else should use the non-`_raw` variants so a converted negative renders
-/// as its positive everywhere (editor, thumbnails, export).
+/// The raw decode, without applying a stored negative conversion.
 pub fn load_base_image_raw(
     bytes: &[u8],
     path_for_ext_check: &str,
@@ -108,9 +105,7 @@ pub fn load_base_image_raw(
 /// Callers that persist geometry (e.g. auto-crop) must not do so against a fallback,
 /// since its dimensions are the tiny preview's, not the real image's.
 ///
-/// Applies a stored negative conversion (if the sidecar flags one) so the whole app
-/// sees the positive. The single decode chokepoint for that — editor load, thumbnails
-/// and export all route through here.
+/// Applies a stored negative conversion if the sidecar flags one.
 pub fn load_base_image_with_fallback(
     bytes: &[u8],
     path_for_ext_check: &str,
