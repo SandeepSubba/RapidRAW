@@ -5,16 +5,24 @@ import { Check, FileEdit, History, Plus, RefreshCw, Trash2 } from 'lucide-react'
 import { useEditorStore } from '../../../store/useEditorStore';
 import { useEditorActions } from '../../../hooks/useEditorActions';
 import { useContextMenu } from '../../../context/ContextMenuContext';
-import { OPTION_SEPARATOR } from '../../ui/AppProperties';
+import { OPTION_SEPARATOR, Preset } from '../../ui/AppProperties';
 import { Adjustments, AdjustmentSnapshot, INITIAL_ADJUSTMENTS } from '../../../utils/adjustments';
+import PresetItemDisplay from './PresetItemDisplay';
 import Text from '../../ui/Text';
 import { TextColors, TextVariants, TextWeights } from '../../../types/typography';
 
-// In-editor checkpoints of the full edit state, stored inside the sidecar. They
-// complement library-level Virtual Copies: snapshots switch looks in place while
-// you work, without creating new library entries. Applying, renaming and deleting all go through
-// setAdjustments and are therefore undoable and auto-saved like any other edit.
-export default function SnapshotsSection() {
+// Preview id for a snapshot thumbnail. Embeds createdAt so an overwrite (which bumps
+// createdAt) produces a fresh id, and the pipeline revokes the stale one.
+export const snapshotPreviewId = (s: AdjustmentSnapshot) => `snapshot-${s.id}-${s.createdAt}`;
+
+interface SnapshotsSectionProps {
+  previews: Record<string, string | null>;
+  isGeneratingPreviews: boolean;
+}
+
+// In-editor checkpoints of the full edit state, stored in the sidecar. Rendered as
+// preset-style cards (reusing PresetItemDisplay) so they read as part of the panel.
+export default function SnapshotsSection({ previews, isGeneratingPreviews }: SnapshotsSectionProps) {
   const adjustments = useEditorStore((s) => s.adjustments);
   const selectedImage = useEditorStore((s) => s.selectedImage);
   const { setAdjustments } = useEditorActions();
@@ -72,6 +80,11 @@ export default function SnapshotsSection() {
     }));
   };
 
+  const startRename = (version: AdjustmentSnapshot) => {
+    setRenamingId(version.id);
+    setTempName(version.name);
+  };
+
   const commitRename = () => {
     const name = tempName.trim();
     if (name && renamingId) {
@@ -92,15 +105,15 @@ export default function SnapshotsSection() {
       {
         label: t('editor.presets.snapshots.rename'),
         icon: FileEdit,
-        onClick: () => {
-          setRenamingId(version.id);
-          setTempName(version.name);
-        },
+        onClick: () => startRename(version),
       },
       { type: OPTION_SEPARATOR },
       { label: t('editor.presets.snapshots.delete'), icon: Trash2, onClick: () => handleDelete(version) },
     ]);
   };
+
+  const dateLabel = (createdAt: number) =>
+    new Date(createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 
   return (
     <div className="mb-4 pb-4 border-b border-surface">
@@ -123,48 +136,60 @@ export default function SnapshotsSection() {
         </Text>
       ) : (
         <div className="space-y-2">
-          {snapshots.map((version) => (
-            <button
-              key={version.id}
-              className="w-full flex items-center justify-between gap-2 p-2 rounded-lg bg-surface hover:bg-surface-hover cursor-pointer transition-colors group text-left"
-              onClick={() => handleApply(version)}
-              onContextMenu={(e) => handleRowContextMenu(e, version)}
-            >
-              {renamingId === version.id ? (
-                <input
-                  autoFocus
-                  className="bg-transparent border-b border-text-secondary outline-none text-sm w-full mr-2"
-                  value={tempName}
-                  onChange={(e) => setTempName(e.target.value)}
-                  onBlur={commitRename}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') commitRename();
-                    if (e.key === 'Escape') setRenamingId(null);
-                  }}
-                  onClick={(e) => e.stopPropagation()}
-                />
-              ) : (
-                <Text
-                  color={TextColors.primary}
-                  weight={TextWeights.medium}
-                  className="grow truncate select-none"
-                >
-                  {version.name}
-                </Text>
-              )}
-              <Text
-                as="span"
-                variant={TextVariants.small}
-                color={TextColors.secondary}
-                className="ml-auto pr-1 shrink-0"
+          {snapshots.map((version) => {
+            const isRenaming = renamingId === version.id;
+            return (
+              <div
+                key={version.id}
+                className="relative group cursor-pointer"
+                style={{ borderRadius: '10px' }}
+                onClick={() => !isRenaming && handleApply(version)}
+                onContextMenu={(e) => handleRowContextMenu(e, version)}
               >
-                {new Date(version.createdAt).toLocaleDateString(undefined, {
-                  month: 'short',
-                  day: 'numeric',
-                })}
-              </Text>
-            </button>
-          ))}
+                <PresetItemDisplay
+                  preset={{ id: version.id, name: version.name, adjustments: version.state } as Preset}
+                  previewUrl={previews[snapshotPreviewId(version)] || ''}
+                  isGeneratingPreviews={isGeneratingPreviews}
+                  subtitle={
+                    <>
+                      <History size={12} className="text-text-secondary" />
+                      <Text variant={TextVariants.small} color={TextColors.secondary} weight={TextWeights.normal}>
+                        {dateLabel(version.createdAt)}
+                      </Text>
+                    </>
+                  }
+                  nameSlot={
+                    isRenaming ? (
+                      <input
+                        autoFocus
+                        className="bg-transparent border-b border-text-secondary outline-none text-sm w-full"
+                        value={tempName}
+                        onChange={(e) => setTempName(e.target.value)}
+                        onBlur={commitRename}
+                        onClick={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') commitRename();
+                          if (e.key === 'Escape') setRenamingId(null);
+                        }}
+                      />
+                    ) : undefined
+                  }
+                />
+                {!isRenaming && (
+                  <button
+                    className="absolute top-2 right-2 p-1 rounded-md bg-bg-tertiary text-text-secondary opacity-0 group-hover:opacity-100 hover:text-primary transition-opacity"
+                    data-tooltip={t('editor.presets.snapshots.rename')}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      startRename(version);
+                    }}
+                  >
+                    <FileEdit size={14} />
+                  </button>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
