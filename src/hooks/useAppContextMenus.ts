@@ -77,16 +77,19 @@ export function useAppContextMenus(props: UseAppContextMenusProps) {
     useEditorActions();
   const { handleRate, handleSetColorLabel, handleTagsChanged } = useLibraryActions();
 
-  // Turn the in-library negative conversion on/off (no modal — all tuning happens
-  // in the Develop module). Refreshes the grid, and if the open image was changed,
-  // re-decodes its base and nudges a re-render (handleImageSelect's same-path guard
-  // would otherwise skip a reload).
   const handleSetNegativeConversion = useCallback(
     async (paths: string[], enabled: boolean) => {
       if (paths.length === 0) return;
       paths.forEach((p) => globalImageCache.delete(p));
       try {
         await invoke('set_negative_conversion', { paths, enabled });
+        // Reflect the new state on the affected items right away so the menu toggles
+        // Convert/Revert correctly without waiting on the async folder refresh.
+        useLibraryStore.getState().setLibrary((state) => ({
+          imageList: state.imageList.map((img) =>
+            paths.includes(img.path) ? { ...img, is_negative: enabled } : img,
+          ),
+        }));
         props.refreshImageList();
         const { selectedImage, setEditor, resetHistory } = useEditorStore.getState();
         if (selectedImage && paths.includes(selectedImage.path)) {

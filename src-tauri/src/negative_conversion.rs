@@ -174,8 +174,6 @@ fn run_pipeline(
     DynamicImage::ImageRgb32F(out_img)
 }
 
-/// Parse an enabled negative conversion out of a sidecar's `adjustments`. Returns
-/// None in the common (non-negative) case.
 fn stored_negative(
     adjustments: &serde_json::Value,
 ) -> Option<(NegativeConversionParams, [ChannelBounds; 3])> {
@@ -209,12 +207,7 @@ fn stored_negative(
     Some((params, bounds))
 }
 
-/// If the image's sidecar flags an enabled negative conversion, invert it to a
-/// positive using the stored params + bounds. This is the single hook that makes a
-/// converted negative render as its positive everywhere (editor, thumbnails, export).
-///
-/// ponytail: reads the sidecar on every base decode — negligible next to a raw
-/// decode, and keeps the inversion in one place instead of in every consumer.
+/// Invert a flagged negative to a positive on load; a no-op for normal images.
 pub fn maybe_apply_negative(image: DynamicImage, real_path: &str) -> DynamicImage {
     let sidecar = crate::exif_processing::get_primary_sidecar_path(Path::new(real_path));
     if !sidecar.exists() {
@@ -227,8 +220,6 @@ pub fn maybe_apply_negative(image: DynamicImage, real_path: &str) -> DynamicImag
     }
 }
 
-/// Compute per-image inversion bounds from a downscaled reference (same 1080px basis
-/// as the live preview) so a persisted conversion matches what was previewed.
 fn analyze_bounds_for(image: &DynamicImage) -> [ChannelBounds; 3] {
     let ref_img = downscale_f32_image(image, 1080, 1080);
     let ref_rgb = ref_img.to_rgb32f();
@@ -241,12 +232,8 @@ fn analyze_bounds_for(image: &DynamicImage) -> [ChannelBounds; 3] {
     analyze_bounds(&log_pixels, w as usize, h as usize)
 }
 
-/// Turn an in-library negative conversion on or off for the given raws,
-/// non-destructively. `enabled = true` inverts the negative to a *neutral* positive
-/// (density inversion + per-channel auto-bounds) and stores it in each raw's sidecar;
-/// `enabled = false` removes it. There's no modal and no baked TIFF — all further
-/// tuning (exposure, white balance, contrast, curves…) happens in the normal Develop
-/// module on top, and `maybe_apply_negative` renders the positive on load everywhere.
+/// Turn the in-library negative conversion on (`enabled = true`, stores auto-bounds in
+/// the sidecar) or off (`enabled = false`, removes it) for the given raws.
 #[tauri::command]
 pub async fn set_negative_conversion(
     paths: Vec<String>,
@@ -272,8 +259,6 @@ pub async fn set_negative_conversion(
             }
 
             if enabled {
-                // Analyse the raw negative once for a neutral positive starting point;
-                // color/tone is left to the Develop module.
                 let real_path = source_path.to_string_lossy().to_string();
                 let settings = load_settings(handle.clone()).unwrap_or_default();
                 let img = match read_file_mapped(Path::new(&real_path)) {
@@ -341,9 +326,6 @@ pub async fn set_negative_conversion(
 mod tests {
     use super::*;
 
-    // Locks the contract between what apply_negative_conversion writes and what
-    // maybe_apply_negative reads back — a key-name mismatch here would silently
-    // stop negatives from rendering as positives.
     #[test]
     fn stored_negative_reads_the_written_shape() {
         let adjustments = serde_json::json!({

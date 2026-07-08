@@ -61,9 +61,7 @@ pub fn load_and_composite(
     composite_patches_on_image(&base_image, adjustments)
 }
 
-/// Decode a base image and apply a stored in-library negative conversion when the
-/// sidecar flags one, so a converted negative renders as its positive across the app
-/// (editor, thumbnails, export). The single decode chokepoint for that.
+/// Decode a base image and apply a stored negative conversion if the sidecar flags one.
 pub fn load_base_image_from_bytes(
     bytes: &[u8],
     path_for_ext_check: &str,
@@ -84,8 +82,7 @@ pub fn load_base_image_from_bytes(
     ))
 }
 
-/// The raw decode, without applying a stored negative conversion. Used by the
-/// negative-conversion command, which must analyse the raw negative itself.
+/// The raw decode, without applying a stored negative conversion.
 pub fn load_base_image_raw(
     bytes: &[u8],
     path_for_ext_check: &str,
