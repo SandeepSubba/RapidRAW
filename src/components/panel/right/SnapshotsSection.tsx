@@ -11,8 +11,7 @@ import PresetItemDisplay from './PresetItemDisplay';
 import Text from '../../ui/Text';
 import { TextColors, TextVariants, TextWeights } from '../../../types/typography';
 
-// Preview id for a snapshot thumbnail. Embeds createdAt so an overwrite (which bumps
-// createdAt) produces a fresh id, and the pipeline revokes the stale one.
+// Keyed by createdAt so overwriting a snapshot invalidates its cached thumbnail.
 export const snapshotPreviewId = (s: AdjustmentSnapshot) => `snapshot-${s.id}-${s.createdAt}`;
 
 interface SnapshotsSectionProps {
@@ -20,8 +19,6 @@ interface SnapshotsSectionProps {
   isGeneratingPreviews: boolean;
 }
 
-// In-editor checkpoints of the full edit state, stored in the sidecar. Rendered as
-// preset-style cards (reusing PresetItemDisplay) so they read as part of the panel.
 export default function SnapshotsSection({ previews, isGeneratingPreviews }: SnapshotsSectionProps) {
   const adjustments = useEditorStore((s) => s.adjustments);
   const selectedImage = useEditorStore((s) => s.selectedImage);
@@ -41,44 +38,30 @@ export default function SnapshotsSection({ previews, isGeneratingPreviews }: Sna
     return structuredClone(state);
   };
 
-  const handleSave = () => {
-    setAdjustments((prev: Adjustments) => ({
-      ...prev,
-      snapshots: [
-        ...(prev.snapshots || []),
-        {
-          id: uuidv4(),
-          name: t('editor.presets.snapshots.defaultName', { count: (prev.snapshots?.length || 0) + 1 }),
-          createdAt: Date.now(),
-          state: snapshotState(prev),
-        },
-      ],
-    }));
-  };
+  const updateSnapshots = (fn: (list: AdjustmentSnapshot[], adj: Adjustments) => AdjustmentSnapshot[]) =>
+    setAdjustments((prev: Adjustments) => ({ ...prev, snapshots: fn(prev.snapshots || [], prev) }));
 
-  const handleApply = (version: AdjustmentSnapshot) => {
-    setAdjustments((prev: Adjustments) => ({
-      ...INITIAL_ADJUSTMENTS,
-      ...version.state,
-      snapshots: prev.snapshots,
-    }));
-  };
+  const handleSave = () =>
+    updateSnapshots((list, adj) => [
+      ...list,
+      {
+        id: uuidv4(),
+        name: t('editor.presets.snapshots.defaultName', { count: list.length + 1 }),
+        createdAt: Date.now(),
+        state: snapshotState(adj),
+      },
+    ]);
 
-  const handleOverwrite = (version: AdjustmentSnapshot) => {
-    setAdjustments((prev: Adjustments) => ({
-      ...prev,
-      snapshots: (prev.snapshots || []).map((v) =>
-        v.id === version.id ? { ...v, state: snapshotState(prev), createdAt: Date.now() } : v,
-      ),
-    }));
-  };
+  const handleApply = (version: AdjustmentSnapshot) =>
+    setAdjustments((prev: Adjustments) => ({ ...INITIAL_ADJUSTMENTS, ...version.state, snapshots: prev.snapshots }));
 
-  const handleDelete = (version: AdjustmentSnapshot) => {
-    setAdjustments((prev: Adjustments) => ({
-      ...prev,
-      snapshots: (prev.snapshots || []).filter((v) => v.id !== version.id),
-    }));
-  };
+  const handleOverwrite = (version: AdjustmentSnapshot) =>
+    updateSnapshots((list, adj) =>
+      list.map((v) => (v.id === version.id ? { ...v, state: snapshotState(adj), createdAt: Date.now() } : v)),
+    );
+
+  const handleDelete = (version: AdjustmentSnapshot) =>
+    updateSnapshots((list) => list.filter((v) => v.id !== version.id));
 
   const startRename = (version: AdjustmentSnapshot) => {
     setRenamingId(version.id);
@@ -88,10 +71,7 @@ export default function SnapshotsSection({ previews, isGeneratingPreviews }: Sna
   const commitRename = () => {
     const name = tempName.trim();
     if (name && renamingId) {
-      setAdjustments((prev: Adjustments) => ({
-        ...prev,
-        snapshots: (prev.snapshots || []).map((v) => (v.id === renamingId ? { ...v, name } : v)),
-      }));
+      updateSnapshots((list) => list.map((v) => (v.id === renamingId ? { ...v, name } : v)));
     }
     setRenamingId(null);
   };

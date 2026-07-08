@@ -16,10 +16,8 @@ export interface PresetItemDisplayProps {
   intensity?: number;
   onIntensityChange?: (val: number) => void;
   onDragStateChange?: (isDragging: boolean) => void;
-  // When set (snapshots), this replaces the preset type row and hides the
-  // preset-only feature badges, so snapshots reuse the card without its preset chrome.
+  // Snapshot mode: replaces the type row and hides preset-only feature badges.
   subtitle?: ReactNode;
-  // When set, replaces the name with this node (used to edit the name in place).
   nameSlot?: ReactNode;
 }
 
