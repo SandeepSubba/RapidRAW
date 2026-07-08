@@ -418,8 +418,7 @@ export default function PresetsPanel({ onNavigateToCommunity }: PresetsPanelProp
         item.folder.children.forEach((p: Preset) => allPresetIds.add(p.id));
       }
     });
-    // Keep live snapshot previews too; the id embeds createdAt, so an overwritten
-    // snapshot's stale preview falls out of the set here and gets revoked.
+    // Keep live snapshot previews; a stale (overwritten) one falls out and gets revoked.
     snapshots.forEach((s: AdjustmentSnapshot) => allPresetIds.add(snapshotPreviewId(s)));
 
     const currentPreviews = previewsRef.current;
@@ -655,18 +654,14 @@ export default function PresetsPanel({ onNavigateToCommunity }: PresetsPanelProp
     }
   }, [selectedImage?.isReady, presets, enqueuePreviews]);
 
-  // Snapshots reuse the preset preview pipeline: each is fed in as a preset-shaped
-  // item ({ id, adjustments: state }) so it gets the same rendered thumbnail.
+  // Feed snapshots through the preset preview pipeline as { id, adjustments } items.
   const generateSnapshotPreviews = useCallback(() => {
     if (!selectedImage?.isReady) {
       return;
     }
-    const toGenerate = snapshots
-      .map((s: AdjustmentSnapshot) => ({ id: snapshotPreviewId(s), name: s.name, adjustments: s.state }))
-      .filter((p: any) => !previewsRef.current[p.id]);
-    if (toGenerate.length > 0) {
-      enqueuePreviews(toGenerate as any);
-    }
+    enqueuePreviews(
+      snapshots.map((s: AdjustmentSnapshot) => ({ id: snapshotPreviewId(s), name: s.name, adjustments: s.state })) as any,
+    );
   }, [selectedImage?.isReady, snapshots, enqueuePreviews]);
 
   useEffect(() => {
