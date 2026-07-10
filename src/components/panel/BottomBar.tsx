@@ -6,10 +6,12 @@ import { useShallow } from 'zustand/react/shallow';
 import { useTranslation } from 'react-i18next';
 
 import Filmstrip from './Filmstrip';
-import { GLOBAL_KEYS, ImageFile, SelectedImage, ThumbnailAspectRatio } from '../ui/AppProperties';
+import { GLOBAL_KEYS, ImageFile, Panel, SelectedImage, ThumbnailAspectRatio } from '../ui/AppProperties';
 import Text from '../ui/Text';
 import { useEditorStore } from '../../store/useEditorStore';
 import { useLibraryStore } from '../../store/useLibraryStore';
+import { useTetherStore } from '../../store/useTetherStore';
+import { useUIStore } from '../../store/useUIStore';
 import { COLOR_LABELS } from '../../utils/adjustments';
 
 interface BottomBarProps {
@@ -53,6 +55,28 @@ interface StarRatingProps {
   onRate(rate: number): void;
   rating: number;
 }
+
+// Visible while a tether session is running; click jumps to the Tether panel.
+const TetherChip = () => {
+  const { t } = useTranslation();
+  const isActive = useTetherStore((s) => s.isActive);
+  const shotCount = useTetherStore((s) => s.shotCount);
+  const setRightPanel = useUIStore((s) => s.setRightPanel);
+
+  if (!isActive) {
+    return null;
+  }
+  return (
+    <button
+      className="flex items-center gap-1.5 px-2 h-6 rounded-full bg-surface text-text-secondary hover:text-text-primary transition-colors"
+      onClick={() => setRightPanel(Panel.Tether)}
+      data-tooltip={t('editor.tether.title')}
+    >
+      <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+      <span className="text-xs">{shotCount}</span>
+    </button>
+  );
+};
 
 const StarRating = ({ rating, onRate, disabled }: StarRatingProps) => {
   const { t } = useTranslation();
@@ -290,6 +314,7 @@ export default function BottomBar({
       >
         <div className="flex items-center gap-4">
           <StarRating rating={rating} onRate={onRate} disabled={isRatingDisabled} />
+          <TetherChip />
           <div className="h-5 w-px bg-surface"></div>
           <div className="flex items-center gap-2">
             <button

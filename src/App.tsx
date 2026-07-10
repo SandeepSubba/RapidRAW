@@ -23,6 +23,7 @@ import { useUIStore } from './store/useUIStore';
 import { useLibraryStore } from './store/useLibraryStore';
 import { useEditorStore } from './store/useEditorStore';
 import { useProcessStore } from './store/useProcessStore';
+import { useTetherStore } from './store/useTetherStore';
 import { useShallow } from 'zustand/react/shallow';
 
 import { useThumbnails } from './hooks/useThumbnails';
@@ -509,6 +510,26 @@ function App() {
       unlisten.then((f) => f());
     };
   }, [setEditor]);
+
+  useEffect(() => {
+    // Tethered shots: update session status, refresh the library, and (debounced,
+    // so continuous bursts only load the final frame) select the newest shot.
+    let selectTimeout: ReturnType<typeof setTimeout> | undefined;
+    const unlisten = listen('tether-shot', (event: any) => {
+      const { path, fileName, shotCount } = event.payload;
+      const { autoSelect, setTether } = useTetherStore.getState();
+      setTether({ shotCount, lastShotName: fileName });
+      handleLibraryRefresh();
+      if (autoSelect) {
+        clearTimeout(selectTimeout);
+        selectTimeout = setTimeout(() => handleImageSelect(path), 600);
+      }
+    });
+    return () => {
+      clearTimeout(selectTimeout);
+      unlisten.then((f) => f());
+    };
+  }, [handleLibraryRefresh, handleImageSelect]);
 
   const createResizeHandler = (stateKey: string, startSize: number) => (e: ReactPointerEvent<HTMLDivElement>) => {
     if (e.pointerType === 'mouse' && e.button !== 0) return;

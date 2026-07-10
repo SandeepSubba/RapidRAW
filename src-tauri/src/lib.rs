@@ -34,6 +34,7 @@ mod raw_processing;
 mod sd_import;
 mod tagging;
 mod tagging_utils;
+mod tethering;
 mod window_customizer;
 
 use std::collections::{HashMap, hash_map::DefaultHasher};
@@ -2293,6 +2294,7 @@ pub fn run() {
             decoded_image_cache: Mutex::new(DecodedImageCache::new(5)),
             thumbnail_manager: ThumbnailManager::new(),
         })
+        .manage(tethering::TetherState::default())
         .invoke_handler(tauri::generate_handler![
             apply_adjustments,
             generate_preview_for_path,
@@ -2405,6 +2407,8 @@ pub fn run() {
             lens_correction::autodetect_lens,
             lens_correction::get_lens_distortion_params,
             negative_conversion::set_negative_conversion,
+            tethering::start_tether_session,
+            tethering::stop_tether_session,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

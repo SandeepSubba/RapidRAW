@@ -720,8 +720,23 @@
         "info": "Info",
         "inpaint": "Inpaint",
         "masks": "Masks",
-        "presets": "Presets"
+        "presets": "Presets",
+        "tether": "Tether"
       }
+    },
+    "tether": {
+      "title": "Tether",
+      "live": "Live",
+      "description": "Watch a folder for incoming shots from your camera's tether utility (X Acquire, EOS Utility, NX Tether...) and import them as they land.",
+      "chooseFolder": "Choose session folder",
+      "presetOnImport": "Preset on import",
+      "noPreset": "None",
+      "start": "Start session",
+      "stop": "Stop session",
+      "autoSelect": "Auto-select newest shot",
+      "shotCount_one": "{{count}} shot",
+      "shotCount_other": "{{count}} shots",
+      "lastShot": "Last: {{name}}"
     },
     "toolbar": {
       "tooltips": {

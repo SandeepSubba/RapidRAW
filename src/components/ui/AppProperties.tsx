@@ -110,7 +110,9 @@ export enum Invokes {
   SetRatingForPaths = 'set_rating_for_paths',
   ShowInFinder = 'show_in_finder',
   StartBackgroundIndexing = 'start_background_indexing',
+  StartTetherSession = 'start_tether_session',
   StitchPanorama = 'stitch_panorama',
+  StopTetherSession = 'stop_tether_session',
   MergeHdr = 'merge_hdr',
   TestAIConnectorConnection = 'test_ai_connector_connection',
   UpdateWgpuTransform = 'update_wgpu_transform',
@@ -139,6 +141,7 @@ export enum Panel {
   Masks = 'masks',
   Metadata = 'metadata',
   Presets = 'presets',
+  Tether = 'tether',
 }
 
 export enum RawStatus {
