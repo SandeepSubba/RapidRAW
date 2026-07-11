@@ -1,8 +1,11 @@
 # Fork notes (SandeepSubba/RapidRAW)
 
 This fork tracks the upstream project [`CyberTimon/RapidRAW`](https://github.com/CyberTimon/RapidRAW)
-and adds a small set of custom changes on top. This file documents what we
-changed and how to re-apply it cleanly when upstream releases a new version.
+and adds a set of custom changes on top. This file documents the remote layout,
+the maintenance/rebase workflow, and a couple of the earliest changes in detail.
+
+> **For the full, current catalog of what this fork adds, see
+> [`docs/FEATURES.md`](docs/FEATURES.md).** This file focuses on maintenance.
 
 ## Git remotes
 
@@ -18,11 +21,12 @@ fork    -> https://github.com/SandeepSubba/RapidRAW.git  (this fork)
 
 | Branch | Contents | Purpose |
 | ------ | -------- | ------- |
-| `custom-shortcuts` | backend hardening + refactors **+ the adjustment shortcuts** + this doc | The full fork — **run and rebase this one.** |
-| `code-analysis-fixes` | backend hardening + refactors only | Clean subset to open as a PR to upstream. Does **not** include the personal shortcut feature. |
+| `integration/all-features` | Every fork feature integrated together (see [`docs/FEATURES.md`](docs/FEATURES.md)) | The full fork — **run, build, and rebase this one.** |
+| feature branches (e.g. `feat/crop-opt-in-toggle`, `sd-card-importer`, `fix-exif-usercomment`) | One feature each | Each feature also lives on its own branch and is merged into `integration/all-features`. Handy for isolating or PR-ing a single change upstream. |
 
-The two share the same 3 fix/refactor commits, so opening the PR from
-`code-analysis-fixes` keeps the personal shortcuts out of the contribution.
+Each feature is developed on its own branch and then integrated into
+`integration/all-features`, so the integration branch is what you build and
+release from, while individual branches stay available for upstream PRs.
 
 ## Custom changes in this fork
 
@@ -72,7 +76,7 @@ candidates to be merged upstream; if they are, drop them from the fork.
 git fetch origin
 
 # 2. Replay our custom commits on top of the new upstream main
-git checkout custom-shortcuts
+git checkout integration/all-features
 git rebase origin/main
 
 # 3. If a conflict appears (rare, since our changes are additive), fix the
@@ -85,7 +89,7 @@ npm install
 npm start
 
 # 5. Update the fork
-git push --force-with-lease fork custom-shortcuts
+git push --force-with-lease fork integration/all-features
 ```
 
 Because the feature lives in one additive commit, the usual outcome of step 2

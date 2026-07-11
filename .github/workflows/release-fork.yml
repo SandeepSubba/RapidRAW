@@ -1,0 +1,127 @@
+name: 'Release (fork): Desktop installers'
+
+# Fork-specific release pipeline. Kept separate from upstream's release.yml so it
+# survives rebases on upstream and never fires on upstream's `vX.Y.Z` tags.
+#
+# Trigger by pushing a tag like `fork-v1.5.8`, or run manually from the Actions tab
+# (provide a tag). It builds unsigned installers for the main desktop targets and
+# publishes them to a GitHub Release:
+#   - Windows x64   -> .exe (NSIS)
+#   - macOS arm64   -> .dmg (Apple Silicon)
+#   - macOS x64     -> .dmg (Intel)
+#   - Linux x64     -> .deb + .AppImage
+
+on:
+  push:
+    tags:
+      - 'fork-v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to create/use (e.g. fork-v1.5.8)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: 'windows-latest'
+            target: ''
+            args: '--bundles nsis'
+            label: 'Windows x64'
+          - platform: 'macos-14'
+            target: ''
+            args: '--bundles app,dmg'
+            label: 'macOS (Apple Silicon)'
+          # Intel macOS is cross-compiled on an Apple Silicon runner. The dedicated
+          # Intel runner (macos-13) is scarce/being retired and can hang in queue,
+          # so we target x86_64 from macos-14 instead — no Intel runner needed.
+          - platform: 'macos-14'
+            target: 'x86_64-apple-darwin'
+            args: '--target x86_64-apple-darwin --bundles app,dmg'
+            label: 'macOS (Intel)'
+          - platform: 'ubuntu-22.04'
+            target: ''
+            args: '--bundles deb,appimage'
+            label: 'Linux x64'
+
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          rustflags: ''
+
+      - name: Add Rust target
+        if: matrix.target != ''
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: ${{ matrix.platform }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: Install frontend dependencies
+        run: npm install
+
+      - name: Resolve release tag
+        id: tag
+        shell: bash
+        run: echo "value=${{ github.event.inputs.tag || github.ref_name }}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and publish with tauri-action
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Linux AppImage: don't strip, keeps the bundle working across distros.
+          NO_STRIP: ${{ runner.os == 'Linux' }}
+        with:
+          tagName: ${{ steps.tag.outputs.value }}
+          releaseName: 'RapidRAW ${{ steps.tag.outputs.value }}'
+          releaseBody: |
+            Unsigned desktop installers built from `${{ github.sha }}`.
+
+            - Windows: `.exe` (NSIS)
+            - macOS: `.dmg` (Apple Silicon and Intel)
+            - Linux: `.deb` and `.AppImage`
+
+            > macOS/Windows builds are unsigned — you may see a Gatekeeper / SmartScreen
+            > warning on first launch (right-click → Open on macOS; "More info → Run anyway"
+            > on Windows).
+          releaseDraft: false
+          prerelease: false
+          retryAttempts: 3
+          args: ${{ matrix.args }}
