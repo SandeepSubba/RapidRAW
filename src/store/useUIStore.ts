@@ -9,7 +9,6 @@ const RIGHT_PANEL_ORDER = [
   Panel.Ai,
   Panel.Presets,
   Panel.Export,
-  Panel.Tether,
 ];
 
 export interface CollapsibleSectionsState {

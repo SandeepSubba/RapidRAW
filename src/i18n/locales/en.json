@@ -720,15 +720,14 @@
         "info": "Info",
         "inpaint": "Inpaint",
         "masks": "Masks",
-        "presets": "Presets",
-        "tether": "Tether"
+        "presets": "Presets"
       }
     },
     "tether": {
       "title": "Tether",
       "live": "Live",
-      "description": "Watch a folder for incoming shots from your camera's tether utility (X Acquire, EOS Utility, NX Tether...) and import them as they land.",
-      "chooseFolder": "Choose session folder",
+      "description": "Shots your camera's tether utility (X Acquire, EOS Utility, NX Tether...) drops into this library folder are imported as they land.",
+      "needFolder": "Open a folder in the library first — albums can't be tethered into.",
       "presetOnImport": "Preset on import",
       "noPreset": "None",
       "start": "Start session",

@@ -7,7 +7,6 @@ import {
   Paintbrush,
   SwatchBook,
   FileInput,
-  Camera,
   type LucideIcon,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -37,7 +36,6 @@ const panelGroups: Array<Array<PanelOptions>> = [
   [
     { id: Panel.Presets, icon: SwatchBook, title: 'editor.switcher.tooltips.presets' },
     { id: Panel.Export, icon: FileInput, title: 'editor.switcher.tooltips.export' },
-    { id: Panel.Tether, icon: Camera, title: 'editor.switcher.tooltips.tether' },
   ],
 ];
 

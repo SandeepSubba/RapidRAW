@@ -511,6 +511,12 @@ function App() {
     };
   }, [setEditor]);
 
+  // Latest handlers behind a ref so the tether listener below can mount once:
+  // with the handlers as effect deps, the refresh it triggers would remint them,
+  // tear the effect down, and clear the pending auto-select timer every shot.
+  const tetherHandlersRef = useRef({ handleLibraryRefresh, handleImageSelect });
+  tetherHandlersRef.current = { handleLibraryRefresh, handleImageSelect };
+
   useEffect(() => {
     // Tethered shots: update session status, refresh the library, and (debounced,
     // so continuous bursts only load the final frame) select the newest shot.
@@ -519,17 +525,17 @@ function App() {
       const { path, fileName, shotCount } = event.payload;
       const { autoSelect, setTether } = useTetherStore.getState();
       setTether({ shotCount, lastShotName: fileName });
-      handleLibraryRefresh();
+      tetherHandlersRef.current.handleLibraryRefresh();
       if (autoSelect) {
         clearTimeout(selectTimeout);
-        selectTimeout = setTimeout(() => handleImageSelect(path), 600);
+        selectTimeout = setTimeout(() => tetherHandlersRef.current.handleImageSelect(path), 600);
       }
     });
     return () => {
       clearTimeout(selectTimeout);
       unlisten.then((f) => f());
     };
-  }, [handleLibraryRefresh, handleImageSelect]);
+  }, []);
 
   const createResizeHandler = (stateKey: string, startSize: number) => (e: ReactPointerEvent<HTMLDivElement>) => {
     if (e.pointerType === 'mouse' && e.button !== 0) return;

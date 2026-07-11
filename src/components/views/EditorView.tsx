@@ -14,7 +14,6 @@ import MasksPanel from '../panel/right/MasksPanel';
 import AIPanel from '../panel/right/AIPanel';
 import PresetsPanel from '../panel/right/PresetsPanel';
 import ExportPanel from '../panel/right/ExportPanel';
-import TetherPanel from '../panel/right/TetherPanel';
 
 import { useEditorStore } from '../../store/useEditorStore';
 import { useUIStore } from '../../store/useUIStore';
@@ -238,7 +237,6 @@ export default function EditorView({
             />
           )}
           {renderedRightPanel === Panel.Ai && <AIPanel />}
-          {renderedRightPanel === Panel.Tether && <TetherPanel />}
         </motion.div>
       )}
     </AnimatePresence>

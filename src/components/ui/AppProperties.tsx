@@ -141,7 +141,6 @@ export enum Panel {
   Masks = 'masks',
   Metadata = 'metadata',
   Presets = 'presets',
-  Tether = 'tether',
 }
 
 export enum RawStatus {

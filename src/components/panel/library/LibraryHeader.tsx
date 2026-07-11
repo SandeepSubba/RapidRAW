@@ -30,7 +30,7 @@ import Button from '../../ui/Button';
 import { useSettingsStore } from '../../../store/useSettingsStore';
 import { ADVANCED_QUERY_REGEX } from '../../../hooks/useSortedLibrary';
 
-function DropdownMenu({ buttonContent, buttonTitle, children, contentClassName = 'w-56' }: any) {
+export function DropdownMenu({ buttonContent, buttonTitle, children, contentClassName = 'w-56' }: any) {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<any>(null);
 

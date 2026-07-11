@@ -6,12 +6,11 @@ import { useShallow } from 'zustand/react/shallow';
 import { useTranslation } from 'react-i18next';
 
 import Filmstrip from './Filmstrip';
-import { GLOBAL_KEYS, ImageFile, Panel, SelectedImage, ThumbnailAspectRatio } from '../ui/AppProperties';
+import { GLOBAL_KEYS, ImageFile, SelectedImage, ThumbnailAspectRatio } from '../ui/AppProperties';
 import Text from '../ui/Text';
 import { useEditorStore } from '../../store/useEditorStore';
 import { useLibraryStore } from '../../store/useLibraryStore';
 import { useTetherStore } from '../../store/useTetherStore';
-import { useUIStore } from '../../store/useUIStore';
 import { COLOR_LABELS } from '../../utils/adjustments';
 
 interface BottomBarProps {
@@ -56,25 +55,23 @@ interface StarRatingProps {
   rating: number;
 }
 
-// Visible while a tether session is running; click jumps to the Tether panel.
+// Session status while shooting tethered; the controls live in the library header.
 const TetherChip = () => {
   const { t } = useTranslation();
   const isActive = useTetherStore((s) => s.isActive);
   const shotCount = useTetherStore((s) => s.shotCount);
-  const setRightPanel = useUIStore((s) => s.setRightPanel);
 
   if (!isActive) {
     return null;
   }
   return (
-    <button
-      className="flex items-center gap-1.5 px-2 h-6 rounded-full bg-surface text-text-secondary hover:text-text-primary transition-colors"
-      onClick={() => setRightPanel(Panel.Tether)}
+    <div
+      className="flex items-center gap-1.5 px-2 h-6 rounded-full bg-surface text-text-secondary"
       data-tooltip={t('editor.tether.title')}
     >
       <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
       <span className="text-xs">{shotCount}</span>
-    </button>
+    </div>
   );
 };
 

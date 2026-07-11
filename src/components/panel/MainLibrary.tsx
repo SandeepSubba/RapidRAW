@@ -38,6 +38,7 @@ import { useUIStore } from '../../store/useUIStore';
 
 import LibraryGrid from './library/LibraryGrid';
 import { SearchInput, ViewOptionsDropdown } from './library/LibraryHeader';
+import TetherMenu from './library/TetherMenu';
 
 interface MainLibraryProps {
   activePath: string | null;
@@ -489,6 +490,7 @@ export default function MainLibrary(props: MainLibraryProps) {
           />
           {!props.isAndroid && (
             <>
+              <TetherMenu />
               <Button
                 className="h-12 w-12 bg-surface text-text-primary shadow-none p-0 flex items-center justify-center"
                 onClick={() => useUIStore.getState().setUI({ isImportViewActive: true })}
