@@ -1,3 +1,54 @@
+#[cfg(feature = "tether-usb")]
+pub mod usb;
+
+// Same command surface without libgphoto2: list returns empty (UI hides the
+// camera section), actions error. Keeps generate_handler! unconditional.
+#[cfg(not(feature = "tether-usb"))]
+pub mod usb {
+    use serde::Serialize;
+
+    #[derive(Default)]
+    pub struct UsbCameraState;
+
+    #[derive(Serialize, Clone)]
+    #[serde(rename_all = "camelCase")]
+    pub struct CameraInfo {
+        pub model: String,
+        pub port: String,
+    }
+
+    const OFF: &str = "USB tethering is not included in this build";
+
+    #[tauri::command]
+    pub fn tether_list_cameras() -> Result<Vec<CameraInfo>, String> {
+        Ok(Vec::new())
+    }
+
+    #[tauri::command]
+    pub fn tether_connect_camera(
+        _model: String,
+        _port: String,
+        _download_dir: String,
+    ) -> Result<serde_json::Value, String> {
+        Err(OFF.into())
+    }
+
+    #[tauri::command]
+    pub fn tether_disconnect_camera() -> Result<(), String> {
+        Ok(())
+    }
+
+    #[tauri::command]
+    pub fn tether_trigger_capture() -> Result<(), String> {
+        Err(OFF.into())
+    }
+
+    #[tauri::command]
+    pub fn tether_set_config(_key: String, _value: String) -> Result<(), String> {
+        Err(OFF.into())
+    }
+}
+
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::mpsc::{channel, RecvTimeoutError};
