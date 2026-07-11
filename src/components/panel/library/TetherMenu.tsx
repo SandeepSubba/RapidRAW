@@ -73,8 +73,8 @@ export default function TetherMenu() {
       contentClassName="w-72"
       buttonContent={
         <span className="relative flex items-center justify-center">
-          {/* w-7: the camera glyph fills its viewbox more than the sibling icons, so w-8 reads oversized */}
-          <Camera className="w-7 h-7" />
+          {/* 22px: the camera glyph fills its viewbox edge-to-edge, so at the siblings' w-8 it reads oversized */}
+          <Camera className="w-[22px] h-[22px]" />
           {isActive && (
             <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-green-500 animate-pulse" />
           )}
