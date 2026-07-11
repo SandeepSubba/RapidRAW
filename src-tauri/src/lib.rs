@@ -2295,6 +2295,7 @@ pub fn run() {
             thumbnail_manager: ThumbnailManager::new(),
         })
         .manage(tethering::TetherState::default())
+        .manage(tethering::usb::UsbCameraState::default())
         .invoke_handler(tauri::generate_handler![
             apply_adjustments,
             generate_preview_for_path,
@@ -2409,6 +2410,11 @@ pub fn run() {
             negative_conversion::set_negative_conversion,
             tethering::start_tether_session,
             tethering::stop_tether_session,
+            tethering::usb::tether_list_cameras,
+            tethering::usb::tether_connect_camera,
+            tethering::usb::tether_disconnect_camera,
+            tethering::usb::tether_trigger_capture,
+            tethering::usb::tether_set_config,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

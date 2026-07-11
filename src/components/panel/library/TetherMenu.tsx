@@ -1,7 +1,7 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useTranslation } from 'react-i18next';
-import { Camera, Play, Square } from 'lucide-react';
+import { Aperture, Camera, Play, Square, Unplug } from 'lucide-react';
 import Button from '../../ui/Button';
 import Dropdown from '../../ui/Dropdown';
 import Switch from '../../ui/Switch';
@@ -12,10 +12,114 @@ import { usePresets, UserPreset } from '../../../hooks/usePresets';
 import { INITIAL_ADJUSTMENTS } from '../../../utils/adjustments';
 import { useEditorStore } from '../../../store/useEditorStore';
 import { useLibraryStore } from '../../../store/useLibraryStore';
-import { useTetherStore } from '../../../store/useTetherStore';
+import { TetherCamera, useTetherStore } from '../../../store/useTetherStore';
 import { DropdownMenu } from './LibraryHeader';
 
 const NO_PRESET = '__none__';
+
+// Direct-USB camera controls (needs the tether-usb build; the Detect button
+// simply finds nothing on builds without it). Shots — app-triggered or via
+// the body's shutter — download into the session folder, so the watcher
+// ingests them like any other tethered shot.
+function CameraSection() {
+  const { t } = useTranslation();
+  const camera = useTetherStore((s) => s.camera);
+  const folder = useTetherStore((s) => s.folder);
+  const setTether = useTetherStore((s) => s.setTether);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const run = async (label: string, action: () => Promise<void>) => {
+    setBusy(label);
+    try {
+      await action();
+    } catch (err) {
+      console.error(`Tether camera ${label} failed:`, err);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleDetect = () =>
+    run('detect', async () => {
+      const found = await invoke<Array<{ model: string; port: string }>>(Invokes.TetherListCameras);
+      if (!found.length) {
+        setBusy('none');
+        setTimeout(() => setBusy(null), 2500);
+        return;
+      }
+      const connected = await invoke<TetherCamera>(Invokes.TetherConnectCamera, {
+        model: found[0].model,
+        port: found[0].port,
+        downloadDir: folder,
+      });
+      setTether({ camera: connected });
+    });
+
+  const handleCapture = () => run('capture', () => invoke(Invokes.TetherTriggerCapture));
+
+  const handleDisconnect = () =>
+    run('disconnect', async () => {
+      await invoke(Invokes.TetherDisconnectCamera);
+      setTether({ camera: null });
+    });
+
+  const handleConfig = (key: string, value: string) =>
+    run(key, async () => {
+      await invoke(Invokes.TetherSetConfig, { key, value });
+      setTether((s) => ({
+        camera: s.camera && {
+          ...s.camera,
+          configs: s.camera.configs.map((c) => (c.key === key ? { ...c, current: value } : c)),
+        },
+      }));
+    });
+
+  if (!camera) {
+    return (
+      <Button className="bg-surface" disabled={busy === 'detect'} onClick={handleDetect}>
+        <Camera size={16} />
+        {busy === 'detect'
+          ? t('editor.tether.camera.connecting')
+          : busy === 'none'
+            ? t('editor.tether.camera.noneFound')
+            : t('editor.tether.camera.detect')}
+      </Button>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-2 p-3 rounded-lg bg-bg-tertiary">
+      <div className="flex items-center justify-between">
+        <Text variant={TextVariants.small} className="truncate">
+          {camera.model}
+        </Text>
+        <button
+          className="p-1 rounded-md text-text-secondary hover:text-text-primary transition-colors"
+          onClick={handleDisconnect}
+          data-tooltip={t('editor.tether.camera.disconnect')}
+        >
+          <Unplug size={14} />
+        </button>
+      </div>
+      {camera.configs.map((config) => (
+        <div key={config.key} className="flex items-center gap-2">
+          <Text variant={TextVariants.small} color={TextColors.secondary} className="w-16 shrink-0">
+            {config.label}
+          </Text>
+          <Dropdown
+            options={config.choices.map((c) => ({ label: c, value: c }))}
+            value={config.current}
+            onChange={(value: string) => handleConfig(config.key, value)}
+          />
+        </div>
+      ))}
+      <Button className="bg-accent" disabled={busy === 'capture'} onClick={handleCapture}>
+        <Aperture size={16} />
+        {busy === 'capture' ? t('editor.tether.camera.capturing') : t('editor.tether.camera.capture')}
+      </Button>
+    </div>
+  );
+}
 
 // Library-header tether control: the currently open library folder is the
 // session folder — shots dropped into it by a vendor tether utility
@@ -60,11 +164,12 @@ export default function TetherMenu() {
 
   const handleStop = async () => {
     try {
+      await invoke(Invokes.TetherDisconnectCamera);
       await invoke(Invokes.StopTetherSession);
     } catch (err) {
       console.error('Failed to stop tether session:', err);
     }
-    setTether({ isActive: false });
+    setTether({ isActive: false, camera: null });
   };
 
   return (
@@ -140,6 +245,7 @@ export default function TetherMenu() {
                 </Text>
               )}
             </div>
+            <CameraSection />
             <Switch
               checked={autoSelect}
               label={t('editor.tether.autoSelect')}

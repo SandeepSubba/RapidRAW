@@ -531,9 +531,13 @@ function App() {
         selectTimeout = setTimeout(() => tetherHandlersRef.current.handleImageSelect(path), 600);
       }
     });
+    const unlistenLost = listen('tether-camera-lost', () => {
+      useTetherStore.getState().setTether({ camera: null });
+    });
     return () => {
       clearTimeout(selectTimeout);
       unlisten.then((f) => f());
+      unlistenLost.then((f) => f());
     };
   }, []);
 

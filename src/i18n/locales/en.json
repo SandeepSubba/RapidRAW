@@ -735,7 +735,15 @@
       "autoSelect": "Auto-select newest shot",
       "shotCount_one": "{{count}} shot",
       "shotCount_other": "{{count}} shots",
-      "lastShot": "Last: {{name}}"
+      "lastShot": "Last: {{name}}",
+      "camera": {
+        "detect": "Detect camera (USB)",
+        "connecting": "Connecting...",
+        "noneFound": "No camera found",
+        "capture": "Capture",
+        "capturing": "Capturing...",
+        "disconnect": "Disconnect camera"
+      }
     },
     "toolbar": {
       "tooltips": {
