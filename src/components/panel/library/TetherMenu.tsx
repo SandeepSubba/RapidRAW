@@ -67,16 +67,27 @@ export function CameraSection() {
       setTether({ camera: null });
     });
 
-  const handleConfig = (key: string, value: string) =>
-    run(key, async () => {
-      await invoke(Invokes.TetherSetConfig, { key, value });
-      setTether((s) => ({
-        camera: s.camera && {
-          ...s.camera,
-          configs: s.camera.configs.map((c) => (c.key === key ? { ...c, current: value } : c)),
+  const setConfigCurrent = (key: string, value: string) =>
+    setTether((s) => ({
+      camera: s.camera && {
+        ...s.camera,
+        configs: s.camera.configs.map((c) => (c.key === key ? { ...c, current: value } : c)),
+      },
+    }));
+
+  const handleConfig = (key: string, value: string) => {
+    const previous = camera?.configs.find((c) => c.key === key)?.current;
+    setConfigCurrent(key, value); // optimistic; revert if the body refuses
+    return run(key, () =>
+      invoke(Invokes.TetherSetConfig, { key, value }).then(
+        () => undefined,
+        (err) => {
+          if (previous !== undefined) setConfigCurrent(key, previous);
+          throw err;
         },
-      }));
-    });
+      ),
+    );
+  };
 
   if (!camera) {
     return (
