@@ -57,6 +57,7 @@ const CONFIG_CANDIDATES: &[(&str, &[&str])] = &[
     ("ISO", &["iso", "isospeed"]),
     ("Aperture", &["aperture", "f-number", "fnumber"]),
     ("Shutter", &["shutterspeed", "shutterspeed2"]),
+    ("Format", &["imageformat", "imagequality"]), // RAW / JPEG / RAW+JPEG
 ];
 
 #[tauri::command]
