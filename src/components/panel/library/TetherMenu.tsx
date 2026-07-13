@@ -81,7 +81,7 @@ export function CameraSection() {
   if (!camera) {
     return (
       <div className="flex flex-col gap-1.5">
-        <Button className="bg-surface" disabled={busy === 'detect'} onClick={handleDetect}>
+        <Button className="bg-surface text-text-primary" disabled={busy === 'detect'} onClick={handleDetect}>
           <Camera size={16} />
           {busy === 'detect'
             ? t('editor.tether.camera.connecting')
@@ -267,7 +267,7 @@ export default function TetherMenu() {
               label={t('editor.tether.autoSelect')}
               onChange={(val: boolean) => setTether({ autoSelect: val })}
             />
-            <Button className="bg-surface" onClick={handleStop}>
+            <Button className="bg-surface text-text-primary" onClick={handleStop}>
               <Square size={16} />
               {t('editor.tether.stop')}
             </Button>
