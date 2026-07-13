@@ -259,8 +259,16 @@ fn read_configs(camera: &gphoto2::Camera) -> Vec<CameraConfig> {
         }
     }
 
-    // Slowest → fastest, whatever order the body reports; bulb/time first.
+    // Bodies enumerate every 1/3-stop plus electronic-shutter extremes —
+    // far too long a list. Keep the classic full-stop dial values (plus
+    // bulb/time and whatever is currently set), slowest → fastest.
+    // ponytail: third-stops still settable on the body; re-add if missed.
     if let Some(shutter) = configs.iter_mut().find(|c| c.label == "Shutter") {
+        let current = shutter.current.clone();
+        shutter.choices.retain(|choice| {
+            *choice == current
+                || parse_shutter_secs(choice).is_none_or(is_standard_shutter)
+        });
         shutter.choices.sort_by(|a, b| {
             let secs = |s: &str| parse_shutter_secs(s).unwrap_or(f64::INFINITY);
             secs(b).total_cmp(&secs(a))
@@ -268,6 +276,15 @@ fn read_configs(camera: &gphoto2::Camera) -> Vec<CameraConfig> {
     }
 
     configs
+}
+
+fn is_standard_shutter(secs: f64) -> bool {
+    const DIAL: [f64; 19] = [
+        30.0, 15.0, 8.0, 4.0, 2.0, 1.0, 0.5, 0.25, 0.125, 1.0 / 15.0, 1.0 / 30.0,
+        1.0 / 60.0, 1.0 / 125.0, 1.0 / 250.0, 1.0 / 500.0, 1.0 / 1000.0,
+        1.0 / 2000.0, 1.0 / 4000.0, 1.0 / 8000.0,
+    ];
+    DIAL.iter().any(|d| (secs - d).abs() / d < 0.05)
 }
 
 fn parse_shutter_secs(choice: &str) -> Option<f64> {
@@ -338,6 +355,16 @@ mod tests {
         assert_eq!(parse_shutter_secs("0.5"), Some(0.5));
         assert_eq!(parse_shutter_secs("30"), Some(30.0));
         assert_eq!(parse_shutter_secs("bulb"), None);
+    }
+
+    #[test]
+    fn standard_shutter_filter() {
+        use super::is_standard_shutter;
+        assert!(is_standard_shutter(1.0 / 125.0));
+        assert!(is_standard_shutter(30.0));
+        assert!(!is_standard_shutter(1.0 / 160.0)); // third-stop
+        assert!(!is_standard_shutter(1.0 / 32000.0)); // electronic-only
+        assert!(!is_standard_shutter(900.0)); // long-exposure mode
     }
 }
 
