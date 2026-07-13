@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useState } from 'react';
 import { RotateCcw, Copy, ClipboardPaste, Aperture, ChartArea } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import clsx from 'clsx';
@@ -19,12 +19,16 @@ import { TextVariants } from '../../../types/typography';
 import { useShallow } from 'zustand/react/shallow';
 import { useEditorStore } from '../../../store/useEditorStore';
 import { useSettingsStore } from '../../../store/useSettingsStore';
+import { useTetherStore } from '../../../store/useTetherStore';
+import { CameraSection } from '../library/TetherMenu';
 import { useUIStore } from '../../../store/useUIStore';
 import { useEditorActions } from '../../../hooks/useEditorActions';
 import { useWaveformControls } from '../../../hooks/useWaveformControls';
 
 export default function Controls() {
   const { t } = useTranslation();
+  const isTetherActive = useTetherStore((s) => s.isActive);
+  const [isTetherOpen, setIsTetherOpen] = useState(true);
   const { showContextMenu } = useContextMenu();
   const { isResizingWaveform, onToggleWaveform, setActiveWaveformChannel, handleWaveformResize } =
     useWaveformControls();
@@ -272,6 +276,18 @@ export default function Controls() {
       </AnimatePresence>
 
       <div className="grow overflow-y-auto p-4 flex flex-col gap-2">
+        {isTetherActive && (
+          <div className="shrink-0">
+            <CollapsibleSection
+              isContentVisible={true}
+              isOpen={isTetherOpen}
+              onToggle={() => setIsTetherOpen((open) => !open)}
+              title={t('editor.tether.title')}
+            >
+              <CameraSection />
+            </CollapsibleSection>
+          </div>
+        )}
         {Object.keys(ADJUSTMENT_SECTIONS).map((sectionName: string) => {
           const SectionComponent: any = {
             basic: BasicAdjustments,
