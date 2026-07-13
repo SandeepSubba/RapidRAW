@@ -150,6 +150,14 @@ fn camera_thread(
     app_handle: tauri::AppHandle,
 ) {
     let open = || -> Result<(gphoto2::Context, gphoto2::Camera), String> {
+        // macOS's PTP daemons hold an exclusive claim on any PTP camera. They
+        // respawn instantly when killed, but can't reclaim once we hold the
+        // interface — so killing them right before opening wins the race.
+        #[cfg(target_os = "macos")]
+        let _ = std::process::Command::new("/usr/bin/pkill")
+            .args(["-9", "-f", "ptpcamerad|mscamerad-xpc"])
+            .status();
+
         let ctx = gphoto2::Context::new().map_err(|e| e.to_string())?;
         let camera = ctx
             .get_camera(&gphoto2::list::CameraDescriptor {
@@ -183,7 +191,17 @@ fn camera_thread(
         match rx.recv_timeout(Duration::from_millis(50)) {
             Ok(CameraCommand::Disconnect) | Err(RecvTimeoutError::Disconnected) => break,
             Ok(CameraCommand::Trigger(reply)) => {
-                let _ = reply.send(trigger_and_download(&camera, &dest));
+                // Fire-and-forget; the shot arrives as a NewFile event below,
+                // same download path as a physical shutter press.
+                let result = if model.starts_with("Fuji") {
+                    fuji_shoot(&camera)
+                } else {
+                    camera.trigger_capture().wait().map_err(|e| e.to_string())
+                };
+                if let Err(e) = &result {
+                    log::warn!("[tether-usb] trigger failed: {}", e);
+                }
+                let _ = reply.send(result);
             }
             Ok(CameraCommand::SetConfig { key, value, reply }) => {
                 let _ = reply.send(set_config(&camera, &key, &value));
@@ -230,6 +248,62 @@ fn read_configs(camera: &gphoto2::Camera) -> Vec<CameraConfig> {
         .collect()
 }
 
+// Fuji bodies ignore plain PTP InitiateCapture. Their remote release is
+// two-step (libgphoto2 camlibs/ptp2: fuji_action table): arm 0xD208 with
+// "Shoot" (0x0304, full press), then send InitiateCapture to execute the
+// armed action — here via the raw 'opcode' widget, which stays on the bulk
+// endpoint like the config writes that already work.
+fn fuji_shoot(camera: &gphoto2::Camera) -> Result<(), String> {
+    let mut last_err = String::new();
+    for attempt in 1..=3 {
+        match fuji_shoot_once(camera) {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                log::warn!("[tether-usb] fuji shoot attempt {}: {}", attempt, e);
+                last_err = e;
+                std::thread::sleep(Duration::from_millis(150));
+            }
+        }
+    }
+    // Recent Fuji firmware refuses USB remote release even to stock gphoto2
+    // (verified against this exact sequence; see gphoto/libgphoto2#1241).
+    if last_err.contains("in progress") || last_err.contains("Busy") {
+        return Err(
+            "This Fuji body refuses USB remote release (known libgphoto2 limitation). \
+             Use the camera's shutter button — shots still import instantly."
+                .to_string(),
+        );
+    }
+    Err(last_err)
+}
+
+// Faithful port of libgphoto2's camera_fuji_capture handshake: the body
+// answers DeviceBusy to InitiateCapture unless PriorityMode=USB is written
+// fresh in-session and the AF phase (S1) ran before the shoot phase (S2).
+fn fuji_shoot_once(camera: &gphoto2::Camera) -> Result<(), String> {
+    // Best-effort, like the driver's LOG_ON_PTP_E: some bodies reject the
+    // write while already granting control.
+    if let Err(e) = set_config(camera, "prioritymode", "USB") {
+        log::info!("[tether-usb] priority handshake declined ({}), continuing", e);
+    }
+
+    set_config(camera, "cameraaction", "AF").map_err(|e| format!("arm AF: {}", e))?;
+    initiate_capture(camera).map_err(|e| format!("execute AF: {}", e))?;
+    std::thread::sleep(Duration::from_millis(500)); // AF settle (instant in MF)
+
+    set_config(camera, "cameraaction", "Shoot").map_err(|e| format!("arm Shoot: {}", e))?;
+    initiate_capture(camera).map_err(|e| format!("execute Shoot: {}", e))
+}
+
+fn initiate_capture(camera: &gphoto2::Camera) -> Result<(), String> {
+    let widget = camera
+        .config_key::<gphoto2::widget::TextWidget>("opcode")
+        .wait()
+        .map_err(|e| e.to_string())?;
+    widget.set_value("0x100e,0x0,0x0").map_err(|e| e.to_string())?;
+    camera.set_config(&widget).wait().map_err(|e| e.to_string())
+}
+
 fn set_config(camera: &gphoto2::Camera, key: &str, value: &str) -> Result<(), String> {
     let widget = camera
         .config_key::<gphoto2::widget::RadioWidget>(key)
@@ -237,11 +311,6 @@ fn set_config(camera: &gphoto2::Camera, key: &str, value: &str) -> Result<(), St
         .map_err(|e| e.to_string())?;
     widget.set_choice(value).map_err(|e| e.to_string())?;
     camera.set_config(&widget).wait().map_err(|e| e.to_string())
-}
-
-fn trigger_and_download(camera: &gphoto2::Camera, dest: &PathBuf) -> Result<(), String> {
-    let path = camera.capture_image().wait().map_err(|e| e.to_string())?;
-    download_file(camera, &path, dest)
 }
 
 fn download_file(

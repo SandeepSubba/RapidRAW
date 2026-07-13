@@ -20,20 +20,24 @@ const NO_PRESET = '__none__';
 // Direct-USB camera controls (needs the tether-usb build; the Detect button
 // simply finds nothing on builds without it). Shots — app-triggered or via
 // the body's shutter — download into the session folder, so the watcher
-// ingests them like any other tethered shot.
-function CameraSection() {
+// ingests them like any other tethered shot. Rendered in the tether popover
+// and, during an active session, as a section in the editor Controls panel.
+export function CameraSection() {
   const { t } = useTranslation();
   const camera = useTetherStore((s) => s.camera);
   const folder = useTetherStore((s) => s.folder);
   const setTether = useTetherStore((s) => s.setTether);
   const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const run = async (label: string, action: () => Promise<void>) => {
     setBusy(label);
+    setError(null);
     try {
       await action();
     } catch (err) {
       console.error(`Tether camera ${label} failed:`, err);
+      setError(String(err));
     } finally {
       setBusy(null);
     }
@@ -76,14 +80,21 @@ function CameraSection() {
 
   if (!camera) {
     return (
-      <Button className="bg-surface" disabled={busy === 'detect'} onClick={handleDetect}>
-        <Camera size={16} />
-        {busy === 'detect'
-          ? t('editor.tether.camera.connecting')
-          : busy === 'none'
-            ? t('editor.tether.camera.noneFound')
-            : t('editor.tether.camera.detect')}
-      </Button>
+      <div className="flex flex-col gap-1.5">
+        <Button className="bg-surface" disabled={busy === 'detect'} onClick={handleDetect}>
+          <Camera size={16} />
+          {busy === 'detect'
+            ? t('editor.tether.camera.connecting')
+            : busy === 'none'
+              ? t('editor.tether.camera.noneFound')
+              : t('editor.tether.camera.detect')}
+        </Button>
+        {error && (
+          <Text variant={TextVariants.small} color={TextColors.secondary} className="break-words">
+            {error}
+          </Text>
+        )}
+      </div>
     );
   }
 
@@ -117,6 +128,11 @@ function CameraSection() {
         <Aperture size={16} />
         {busy === 'capture' ? t('editor.tether.camera.capturing') : t('editor.tether.camera.capture')}
       </Button>
+      {error && (
+        <Text variant={TextVariants.small} color={TextColors.secondary} className="break-words">
+          {error}
+        </Text>
+      )}
     </div>
   );
 }
