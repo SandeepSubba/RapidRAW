@@ -259,7 +259,26 @@ fn read_configs(camera: &gphoto2::Camera) -> Vec<CameraConfig> {
         }
     }
 
+    // Slowest → fastest, whatever order the body reports; bulb/time first.
+    if let Some(shutter) = configs.iter_mut().find(|c| c.label == "Shutter") {
+        shutter.choices.sort_by(|a, b| {
+            let secs = |s: &str| parse_shutter_secs(s).unwrap_or(f64::INFINITY);
+            secs(b).total_cmp(&secs(a))
+        });
+    }
+
     configs
+}
+
+fn parse_shutter_secs(choice: &str) -> Option<f64> {
+    let s = choice.trim().trim_end_matches(['s', '"']);
+    match s.split_once('/') {
+        Some((num, den)) => {
+            let (n, d) = (num.trim().parse::<f64>().ok()?, den.trim().parse::<f64>().ok()?);
+            (d != 0.0).then(|| n / d)
+        }
+        None => s.parse().ok(),
+    }
 }
 
 /// Widest aperture from the lens name the body reports — every major mount
@@ -310,6 +329,15 @@ mod tests {
         assert_eq!(parse_f_number("F4"), Some(4.0));
         assert_eq!(parse_f_number("22"), Some(22.0));
         assert_eq!(parse_f_number("auto"), None);
+    }
+
+    #[test]
+    fn shutter_seconds() {
+        use super::parse_shutter_secs;
+        assert_eq!(parse_shutter_secs("1/8000"), Some(1.0 / 8000.0));
+        assert_eq!(parse_shutter_secs("0.5"), Some(0.5));
+        assert_eq!(parse_shutter_secs("30"), Some(30.0));
+        assert_eq!(parse_shutter_secs("bulb"), None);
     }
 }
 
