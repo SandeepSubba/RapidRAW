@@ -230,7 +230,7 @@ fn camera_thread(
 }
 
 fn read_configs(camera: &gphoto2::Camera) -> Vec<CameraConfig> {
-    CONFIG_CANDIDATES
+    let mut configs: Vec<CameraConfig> = CONFIG_CANDIDATES
         .iter()
         .filter_map(|(label, keys)| {
             keys.iter().find_map(|key| {
@@ -246,7 +246,71 @@ fn read_configs(camera: &gphoto2::Camera) -> Vec<CameraConfig> {
                 })
             })
         })
-        .collect()
+        .collect();
+
+    // Bodies advertise the full mechanical f-stop scale regardless of the
+    // mounted lens; clamp to the widest stop parsed from the lens name.
+    // ponytail: stale after a mid-session lens swap until reconnect.
+    if let Some(max_aperture) = lens_max_aperture(camera) {
+        if let Some(aperture) = configs.iter_mut().find(|c| c.label == "Aperture") {
+            aperture.choices.retain(|choice| {
+                parse_f_number(choice).is_none_or(|f| f >= max_aperture - 0.01)
+            });
+        }
+    }
+
+    configs
+}
+
+/// Widest aperture from the lens name the body reports — every major mount
+/// embeds it ("XF16-55mmF2.8 R LM WR", "EF24-70mm f/2.8L II USM"). Focal
+/// lengths also match the pattern ("XF16..." → F16), so keep only plausible
+/// maximum apertures and prefer the first.
+fn lens_max_aperture(camera: &gphoto2::Camera) -> Option<f32> {
+    let widget = camera
+        .config_key::<gphoto2::widget::TextWidget>("lensname")
+        .wait()
+        .ok()?;
+    let name = widget.value();
+    let max = max_aperture_from_name(&name)?;
+    log::info!("[tether-usb] lens '{}' → apertures clamped to ≥ f/{}", name, max);
+    Some(max)
+}
+
+fn max_aperture_from_name(name: &str) -> Option<f32> {
+    let re = regex::Regex::new(r"[Ff]/?\s?(\d+(?:\.\d+)?)").ok()?;
+    re.captures_iter(name)
+        .filter_map(|c| c[1].parse::<f32>().ok())
+        .find(|f| (0.7..=8.0).contains(f))
+}
+
+fn parse_f_number(choice: &str) -> Option<f32> {
+    choice.trim().trim_start_matches(['f', 'F']).trim_start_matches('/').trim().parse().ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{max_aperture_from_name, parse_f_number};
+
+    #[test]
+    fn aperture_from_lens_names() {
+        // "XF16" must not be read as F16 — focal lengths are out of the plausible range.
+        assert_eq!(max_aperture_from_name("XF16-55mmF2.8 R LM WR"), Some(2.8));
+        assert_eq!(max_aperture_from_name("XF35mmF1.4 R"), Some(1.4));
+        assert_eq!(max_aperture_from_name("XC15-45mmF3.5-5.6 OIS PZ"), Some(3.5));
+        assert_eq!(max_aperture_from_name("EF24-70mm f/2.8L II USM"), Some(2.8));
+        assert_eq!(max_aperture_from_name("AF-S NIKKOR 50mm f/1.8G"), Some(1.8));
+        assert_eq!(max_aperture_from_name("XF100-400mmF4.5-5.6 R LM OIS WR"), Some(4.5));
+        assert_eq!(max_aperture_from_name("Mystery Lens"), None);
+    }
+
+    #[test]
+    fn f_number_choices() {
+        assert_eq!(parse_f_number("f/2.8"), Some(2.8));
+        assert_eq!(parse_f_number("F4"), Some(4.0));
+        assert_eq!(parse_f_number("22"), Some(22.0));
+        assert_eq!(parse_f_number("auto"), None);
+    }
 }
 
 // Fuji bodies ignore plain PTP InitiateCapture. Their remote release is
