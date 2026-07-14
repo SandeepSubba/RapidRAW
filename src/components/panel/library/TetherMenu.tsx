@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { Aperture, Camera, Play, Square, Unplug } from 'lucide-react';
 import Button from '../../ui/Button';
 import Dropdown from '../../ui/Dropdown';
+import Slider from '../../ui/Slider';
 import Switch from '../../ui/Switch';
 import Text from '../../ui/Text';
 import { TextColors, TextVariants } from '../../../types/typography';
@@ -12,10 +13,47 @@ import { usePresets, UserPreset } from '../../../hooks/usePresets';
 import { INITIAL_ADJUSTMENTS } from '../../../utils/adjustments';
 import { useEditorStore } from '../../../store/useEditorStore';
 import { useLibraryStore } from '../../../store/useLibraryStore';
-import { TetherCamera, useTetherStore } from '../../../store/useTetherStore';
+import { TetherCamera, TetherCameraConfig, useTetherStore } from '../../../store/useTetherStore';
 import { DropdownMenu } from './LibraryHeader';
 
 const NO_PRESET = '__none__';
+
+// Numeric camera property as a slider; writes to the body are debounced so
+// a drag doesn't spam PTP transactions.
+function ConfigSlider({
+  config,
+  onCommit,
+}: {
+  config: TetherCameraConfig;
+  onCommit: (value: string) => void;
+}) {
+  const range = config.range!;
+  const [value, setValue] = useState(() => Number(config.current) || range.min);
+  const commitTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  useEffect(() => {
+    setValue(Number(config.current) || range.min);
+  }, [config.current, range.min]);
+
+  const handleChange = (e: any) => {
+    const next = Number(e.target.value);
+    setValue(next);
+    clearTimeout(commitTimer.current);
+    commitTimer.current = setTimeout(() => onCommit(String(next)), 400);
+  };
+
+  return (
+    <Slider
+      label={config.label}
+      min={range.min}
+      max={range.max}
+      step={range.step}
+      defaultValue={Number(config.current) || range.min}
+      value={value}
+      onChange={handleChange}
+    />
+  );
+}
 
 // Direct-USB camera controls (needs the tether-usb build; the Detect button
 // simply finds nothing on builds without it). Shots — app-triggered or via
@@ -152,14 +190,10 @@ export function CameraSection() {
           <Unplug size={14} />
         </button>
       </div>
-      {camera.configs
-        // Kelvin only applies while White Balance is in a color-temperature mode.
-        .filter(
-          (config) =>
-            config.key !== 'colortemperature' ||
-            /color temp/i.test(camera.configs.find((c) => c.key === 'whitebalance')?.current ?? ''),
-        )
-        .map((config) => (
+      {camera.configs.map((config) =>
+        config.range ? (
+          <ConfigSlider key={config.key} config={config} onCommit={(value) => handleConfig(config.key, value)} />
+        ) : (
           <div key={config.key} className="flex items-center gap-2">
             <Text variant={TextVariants.small} color={TextColors.secondary} className="w-16 shrink-0">
               {config.label}
@@ -170,7 +204,8 @@ export function CameraSection() {
               onChange={(value: string) => handleConfig(config.key, value)}
             />
           </div>
-        ))}
+        ),
+      )}
       <Switch
         checked={liveView}
         disabled={busy === 'liveview' || !camera.liveViewSupported}
