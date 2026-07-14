@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useTranslation } from 'react-i18next';
 import { Aperture, Camera, Play, Square, Unplug } from 'lucide-react';
@@ -61,6 +61,17 @@ export function CameraSection() {
     });
 
   const handleCapture = () => run('capture', () => invoke(Invokes.TetherTriggerCapture));
+
+  // Detect automatically when the controls appear without a camera; the
+  // button stays as a manual retry (e.g. plugged in after opening).
+  const autoDetected = useRef(false);
+  useEffect(() => {
+    if (!camera && !autoDetected.current) {
+      autoDetected.current = true;
+      handleDetect();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleDisconnect = () =>
     run('disconnect', async () => {
