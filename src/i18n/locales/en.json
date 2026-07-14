@@ -743,7 +743,8 @@
         "capture": "Capture",
         "capturing": "Capturing...",
         "disconnect": "Disconnect camera",
-        "liveView": "Live view"
+        "liveView": "Live view",
+        "liveUnavailable": "Live view unavailable"
       }
     },
     "toolbar": {

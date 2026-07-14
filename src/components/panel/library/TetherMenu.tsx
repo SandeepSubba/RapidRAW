@@ -70,10 +70,19 @@ export function CameraSection() {
 
   const handleLiveView = (on: boolean) =>
     run('liveview', async () => {
-      if (!on) setTether({ liveView: false }); // hide immediately on stop
-      await invoke(Invokes.TetherSetLiveView, { on });
-      // Only show the overlay once the probe frame succeeded — no flash.
-      if (on) setTether({ liveView: true });
+      if (!on) {
+        setTether({ liveView: false, liveViewError: null });
+        await invoke(Invokes.TetherSetLiveView, { on: false }).catch(() => {});
+        return;
+      }
+      try {
+        await invoke(Invokes.TetherSetLiveView, { on: true });
+        setTether({ liveView: true, liveViewError: null });
+      } catch (err) {
+        // Open the popup anyway as a camera-controls palette; the feed area
+        // explains why the body refused to stream.
+        setTether({ liveView: true, liveViewError: String(err) });
+      }
     });
 
   const setConfigCurrent = (key: string, value: string) =>
