@@ -48,6 +48,10 @@ enum CameraCommand {
         value: String,
         reply: tokio::sync::oneshot::Sender<Result<(), String>>,
     },
+    SetLiveView {
+        on: bool,
+        reply: tokio::sync::oneshot::Sender<Result<(), String>>,
+    },
     Disconnect,
 }
 
@@ -57,6 +61,7 @@ const CONFIG_CANDIDATES: &[(&str, &[&str])] = &[
     ("ISO", &["iso", "isospeed"]),
     ("Aperture", &["aperture", "f-number", "fnumber"]),
     ("Shutter", &["shutterspeed", "shutterspeed2"]),
+    ("White Balance", &["whitebalance"]),
     ("Format", &["imageformat", "imagequality"]), // RAW / JPEG / RAW+JPEG
 ];
 
@@ -122,6 +127,22 @@ pub async fn tether_trigger_capture(state: tauri::State<'_, UsbCameraState>) -> 
 }
 
 #[tauri::command]
+pub async fn tether_set_live_view(
+    on: bool,
+    state: tauri::State<'_, UsbCameraState>,
+) -> Result<(), String> {
+    let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+    {
+        let guard = state.control.lock().unwrap();
+        let control = guard.as_ref().ok_or("No camera connected")?;
+        control
+            .send(CameraCommand::SetLiveView { on, reply: reply_tx })
+            .map_err(|_| "Camera thread gone")?;
+    }
+    reply_rx.await.map_err(|_| "camera thread died".to_string())?
+}
+
+#[tauri::command]
 pub async fn tether_set_config(
     key: String,
     value: String,
@@ -170,7 +191,7 @@ fn camera_thread(
         Ok((ctx, camera))
     };
 
-    let (_ctx, camera) = match open() {
+    let (ctx, camera) = match open() {
         Ok(pair) => pair,
         Err(e) => {
             let _ = ready_tx.send(Err(format!(
@@ -188,8 +209,11 @@ fn camera_thread(
         configs,
     }));
 
+    let mut live_view = false;
     loop {
-        match rx.recv_timeout(Duration::from_millis(50)) {
+        // Stay responsive while pumping preview frames.
+        let cmd_wait = Duration::from_millis(if live_view { 5 } else { 50 });
+        match rx.recv_timeout(cmd_wait) {
             Ok(CameraCommand::Disconnect) | Err(RecvTimeoutError::Disconnected) => break,
             Ok(CameraCommand::Trigger(reply)) => {
                 // Fire-and-forget; the shot arrives as a NewFile event below,
@@ -207,12 +231,34 @@ fn camera_thread(
             Ok(CameraCommand::SetConfig { key, value, reply }) => {
                 let _ = reply.send(set_config(&camera, &key, &value));
             }
+            Ok(CameraCommand::SetLiveView { on, reply }) => {
+                // Probe one frame before confirming: bodies without preview
+                // support error here and the UI switch reverts.
+                let result = if on { grab_preview_frame(&camera, &ctx).map(|_| ()) } else { Ok(()) };
+                live_view = on && result.is_ok();
+                log::info!("[tether-usb] live view {} ({:?})", on, result.as_ref().err());
+                let _ = reply.send(result);
+            }
             Err(RecvTimeoutError::Timeout) => {}
+        }
+
+        if live_view {
+            match grab_preview_frame(&camera, &ctx) {
+                Ok(frame_b64) => {
+                    let _ = app_handle.emit("tether-preview-frame", frame_b64);
+                }
+                Err(e) => {
+                    log::warn!("[tether-usb] live view stopped: {}", e);
+                    live_view = false;
+                    let _ = app_handle.emit("tether-live-view-stopped", e);
+                }
+            }
         }
 
         // Drain camera events: a shutter press on the body shows up here as a
         // new file, which we pull into the watched session folder.
-        match camera.wait_event(Duration::from_millis(200)).wait() {
+        let event_wait = Duration::from_millis(if live_view { 5 } else { 200 });
+        match camera.wait_event(event_wait).wait() {
             Ok(gphoto2::camera::CameraEvent::NewFile(path)) => {
                 if let Err(e) = download_file(&camera, &path, &dest) {
                     log::warn!("[tether-usb] download failed: {}", e);
@@ -431,6 +477,13 @@ fn set_config(camera: &gphoto2::Camera, key: &str, value: &str) -> Result<(), St
         .map_err(|e| e.to_string())?;
     widget.set_choice(value).map_err(|e| e.to_string())?;
     camera.set_config(&widget).wait().map_err(|e| e.to_string())
+}
+
+fn grab_preview_frame(camera: &gphoto2::Camera, ctx: &gphoto2::Context) -> Result<String, String> {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    let file = camera.capture_preview().wait().map_err(|e| e.to_string())?;
+    let data = file.get_data(ctx).wait().map_err(|e| e.to_string())?;
+    Ok(STANDARD.encode(&data))
 }
 
 fn download_file(

@@ -742,7 +742,8 @@
         "noneFound": "No camera found",
         "capture": "Capture",
         "capturing": "Capturing...",
-        "disconnect": "Disconnect camera"
+        "disconnect": "Disconnect camera",
+        "liveView": "Live view"
       }
     },
     "toolbar": {
