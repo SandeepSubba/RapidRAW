@@ -39,7 +39,14 @@ pub struct CameraConfig {
 pub struct ConnectedCamera {
     pub model: String,
     pub configs: Vec<CameraConfig>,
+    pub live_view_supported: bool,
 }
+
+// Bodies whose driver claims preview support but whose tether firmware
+// refuses every stream-open path (hardware-verified on X-T3 fw5.11 from a
+// virgin boot; X-T2 shares that tether generation). Their live view only
+// speaks Fuji's licensed SDK protocol.
+const LIVE_VIEW_REFUSERS: &[&str] = &["X-T3", "X-T2"];
 
 enum CameraCommand {
     Trigger(tokio::sync::oneshot::Sender<Result<(), String>>),
@@ -203,10 +210,21 @@ fn camera_thread(
     };
 
     let configs = read_configs(&camera);
-    log::info!("[tether-usb] connected: {} ({} configs)", model, configs.len());
+    let live_view_supported = camera
+        .abilities()
+        .camera_operations()
+        .capture_preview()
+        && !LIVE_VIEW_REFUSERS.iter().any(|m| model.contains(m));
+    log::info!(
+        "[tether-usb] connected: {} ({} configs, live view {})",
+        model,
+        configs.len(),
+        live_view_supported
+    );
     let _ = ready_tx.send(Ok(ConnectedCamera {
         model: model.clone(),
         configs,
+        live_view_supported,
     }));
 
     let mut live_view = false;

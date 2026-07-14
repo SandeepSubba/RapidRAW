@@ -10,6 +10,7 @@ export interface TetherCameraConfig {
 export interface TetherCamera {
   model: string;
   configs: Array<TetherCameraConfig>;
+  liveViewSupported: boolean;
 }
 
 interface TetherState {

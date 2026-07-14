@@ -744,7 +744,8 @@
         "capturing": "Capturing...",
         "disconnect": "Disconnect camera",
         "liveView": "Live view",
-        "liveUnavailable": "Live view unavailable"
+        "liveUnavailable": "Live view unavailable",
+        "liveViewUnsupported": "This camera does not support live view over USB tether"
       }
     },
     "toolbar": {

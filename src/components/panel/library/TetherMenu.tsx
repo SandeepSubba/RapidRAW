@@ -166,8 +166,9 @@ export function CameraSection() {
       ))}
       <Switch
         checked={liveView}
-        disabled={busy === 'liveview'}
+        disabled={busy === 'liveview' || !camera.liveViewSupported}
         label={t('editor.tether.camera.liveView')}
+        tooltip={camera.liveViewSupported ? undefined : t('editor.tether.camera.liveViewUnsupported')}
         onChange={handleLiveView}
       />
       <Button className="bg-accent" disabled={busy === 'capture'} onClick={handleCapture}>
