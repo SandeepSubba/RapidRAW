@@ -152,18 +152,25 @@ export function CameraSection() {
           <Unplug size={14} />
         </button>
       </div>
-      {camera.configs.map((config) => (
-        <div key={config.key} className="flex items-center gap-2">
-          <Text variant={TextVariants.small} color={TextColors.secondary} className="w-16 shrink-0">
-            {config.label}
-          </Text>
-          <Dropdown
-            options={config.choices.map((c) => ({ label: c, value: c }))}
-            value={config.current}
-            onChange={(value: string) => handleConfig(config.key, value)}
-          />
-        </div>
-      ))}
+      {camera.configs
+        // Kelvin only applies while White Balance is in a color-temperature mode.
+        .filter(
+          (config) =>
+            config.key !== 'colortemperature' ||
+            /color temp/i.test(camera.configs.find((c) => c.key === 'whitebalance')?.current ?? ''),
+        )
+        .map((config) => (
+          <div key={config.key} className="flex items-center gap-2">
+            <Text variant={TextVariants.small} color={TextColors.secondary} className="w-16 shrink-0">
+              {config.label}
+            </Text>
+            <Dropdown
+              options={config.choices.map((c) => ({ label: c, value: c }))}
+              value={config.current}
+              onChange={(value: string) => handleConfig(config.key, value)}
+            />
+          </div>
+        ))}
       <Switch
         checked={liveView}
         disabled={busy === 'liveview' || !camera.liveViewSupported}

@@ -312,6 +312,46 @@ fn read_configs(camera: &gphoto2::Camera) -> Vec<CameraConfig> {
         })
         .collect();
 
+    // Driver-unmapped enum entries read as "Unknown value 8020" — meaningless
+    // to pick; keep one only when it's the camera's current state.
+    for config in configs.iter_mut() {
+        let current = config.current.clone();
+        config
+            .choices
+            .retain(|choice| !choice.starts_with("Unknown value") || *choice == current);
+    }
+
+    // Kelvin picker for the WB color-temperature modes: an INT widget the
+    // radio probe skips, exposed as a curated dropdown.
+    if let Ok(widget) = camera
+        .config_key::<gphoto2::widget::TextWidget>("colortemperature")
+        .wait()
+    {
+        const KELVIN: [u32; 16] = [
+            2500, 2800, 3000, 3200, 3600, 4000, 4500, 5000, 5500, 6000, 6500, 7000, 7500,
+            8000, 9000, 10000,
+        ];
+        let current = widget.value();
+        let mut choices: Vec<String> = KELVIN.iter().map(|k| k.to_string()).collect();
+        if !choices.contains(&current) {
+            choices.insert(0, current.clone());
+        }
+        let pos = configs
+            .iter()
+            .position(|c| c.label == "White Balance")
+            .map(|i| i + 1)
+            .unwrap_or(configs.len());
+        configs.insert(
+            pos,
+            CameraConfig {
+                key: "colortemperature".to_string(),
+                label: "Color Temp".to_string(),
+                current,
+                choices,
+            },
+        );
+    }
+
     // Bodies advertise the full mechanical f-stop scale regardless of the
     // mounted lens; clamp to the widest stop parsed from the lens name.
     // ponytail: stale after a mid-session lens swap until reconnect.
@@ -489,11 +529,19 @@ fn initiate_capture(camera: &gphoto2::Camera) -> Result<(), String> {
 }
 
 fn set_config(camera: &gphoto2::Camera, key: &str, value: &str) -> Result<(), String> {
-    let widget = camera
+    if let Ok(widget) = camera
         .config_key::<gphoto2::widget::RadioWidget>(key)
         .wait()
+    {
+        widget.set_choice(value).map_err(|e| e.to_string())?;
+        return camera.set_config(&widget).wait().map_err(|e| e.to_string());
+    }
+    // INT-style entries (e.g. colortemperature) surface as text widgets.
+    let widget = camera
+        .config_key::<gphoto2::widget::TextWidget>(key)
+        .wait()
         .map_err(|e| e.to_string())?;
-    widget.set_choice(value).map_err(|e| e.to_string())?;
+    widget.set_value(value).map_err(|e| e.to_string())?;
     camera.set_config(&widget).wait().map_err(|e| e.to_string())
 }
 
