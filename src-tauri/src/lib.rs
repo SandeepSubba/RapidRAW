@@ -2415,6 +2415,7 @@ pub fn run() {
             tethering::usb::tether_disconnect_camera,
             tethering::usb::tether_trigger_capture,
             tethering::usb::tether_set_config,
+            tethering::usb::tether_set_live_view,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

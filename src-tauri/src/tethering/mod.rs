@@ -47,6 +47,11 @@ pub mod usb {
     pub fn tether_set_config(_key: String, _value: String) -> Result<(), String> {
         Err(OFF.into())
     }
+
+    #[tauri::command]
+    pub fn tether_set_live_view(_on: bool) -> Result<(), String> {
+        Err(OFF.into())
+    }
 }
 
 use std::collections::{HashMap, HashSet};

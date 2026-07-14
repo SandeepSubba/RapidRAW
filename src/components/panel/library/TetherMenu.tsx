@@ -26,6 +26,7 @@ export function CameraSection() {
   const { t } = useTranslation();
   const camera = useTetherStore((s) => s.camera);
   const folder = useTetherStore((s) => s.folder);
+  const liveView = useTetherStore((s) => s.liveView);
   const setTether = useTetherStore((s) => s.setTether);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -64,7 +65,18 @@ export function CameraSection() {
   const handleDisconnect = () =>
     run('disconnect', async () => {
       await invoke(Invokes.TetherDisconnectCamera);
-      setTether({ camera: null });
+      setTether({ camera: null, liveView: false });
+    });
+
+  const handleLiveView = (on: boolean) =>
+    run('liveview', async () => {
+      setTether({ liveView: on }); // optimistic; revert if the body refuses
+      try {
+        await invoke(Invokes.TetherSetLiveView, { on });
+      } catch (err) {
+        setTether({ liveView: false });
+        throw err;
+      }
     });
 
   const setConfigCurrent = (key: string, value: string) =>
@@ -135,6 +147,12 @@ export function CameraSection() {
           />
         </div>
       ))}
+      <Switch
+        checked={liveView}
+        disabled={busy === 'liveview'}
+        label={t('editor.tether.camera.liveView')}
+        onChange={handleLiveView}
+      />
       <Button className="bg-accent" disabled={busy === 'capture'} onClick={handleCapture}>
         <Aperture size={16} />
         {busy === 'capture' ? t('editor.tether.camera.capturing') : t('editor.tether.camera.capture')}

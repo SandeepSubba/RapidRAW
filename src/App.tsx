@@ -24,6 +24,7 @@ import { useLibraryStore } from './store/useLibraryStore';
 import { useEditorStore } from './store/useEditorStore';
 import { useProcessStore } from './store/useProcessStore';
 import { useTetherStore } from './store/useTetherStore';
+import LiveViewOverlay from './components/panel/library/LiveViewOverlay';
 import { useShallow } from 'zustand/react/shallow';
 
 import { useThumbnails } from './hooks/useThumbnails';
@@ -532,7 +533,7 @@ function App() {
       }
     });
     const unlistenLost = listen('tether-camera-lost', () => {
-      useTetherStore.getState().setTether({ camera: null });
+      useTetherStore.getState().setTether({ camera: null, liveView: false });
     });
     return () => {
       clearTimeout(selectTimeout);
@@ -858,6 +859,7 @@ const AppWrapper = () => (
   <ClerkProvider publishableKey={CLERK_PUBLISHABLE_KEY} routerPush={(to) => {}} routerReplace={(to) => {}}>
     <ContextMenuProvider>
       <App />
+      <LiveViewOverlay />
       <GlobalTooltip />
     </ContextMenuProvider>
   </ClerkProvider>

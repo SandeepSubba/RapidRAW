@@ -117,6 +117,7 @@ export enum Invokes {
   TetherDisconnectCamera = 'tether_disconnect_camera',
   TetherListCameras = 'tether_list_cameras',
   TetherSetConfig = 'tether_set_config',
+  TetherSetLiveView = 'tether_set_live_view',
   TetherTriggerCapture = 'tether_trigger_capture',
   MergeHdr = 'merge_hdr',
   TestAIConnectorConnection = 'test_ai_connector_connection',
