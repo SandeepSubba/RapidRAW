@@ -21,6 +21,7 @@ interface TetherState {
   lastShotName: string | null;
   camera: TetherCamera | null;
   liveView: boolean;
+  liveViewError: string | null;
 
   setTether: (state: Partial<TetherState> | ((state: TetherState) => Partial<TetherState>)) => void;
 }
@@ -34,6 +35,7 @@ export const useTetherStore = create<TetherState>((set) => ({
   lastShotName: null,
   camera: null,
   liveView: false,
+  liveViewError: null,
 
   setTether: (updater) => set((state) => (typeof updater === 'function' ? updater(state) : updater)),
 }));

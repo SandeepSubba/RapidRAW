@@ -7,12 +7,16 @@ import Text from '../../ui/Text';
 import { TextColors, TextVariants } from '../../../types/typography';
 import { Invokes } from '../../ui/AppProperties';
 import { useTetherStore } from '../../../store/useTetherStore';
+import { CameraSection } from './TetherMenu';
 
-// Floating live-view feed while USB tethering; frames arrive as base64 JPEGs
-// from the camera thread. Rendered app-wide so it survives view switches.
+// Floating live-view popup with the camera controls; frames arrive as base64
+// JPEGs from the camera thread. When the body refuses to stream (some Fuji
+// firmware), it stays useful as a controls palette with the reason shown.
+// Rendered app-wide so it survives view switches.
 export default function LiveViewOverlay() {
   const { t } = useTranslation();
   const liveView = useTetherStore((s) => s.liveView);
+  const liveViewError = useTetherStore((s) => s.liveViewError);
   const model = useTetherStore((s) => s.camera?.model);
   const setTether = useTetherStore((s) => s.setTether);
   const [frame, setFrame] = useState<string | null>(null);
@@ -23,7 +27,10 @@ export default function LiveViewOverlay() {
       return;
     }
     const unlistenFrame = listen('tether-preview-frame', (event: any) => setFrame(event.payload));
-    const unlistenStopped = listen('tether-live-view-stopped', () => setTether({ liveView: false }));
+    const unlistenStopped = listen('tether-live-view-stopped', (event: any) => {
+      setFrame(null);
+      setTether({ liveViewError: String(event.payload) });
+    });
     return () => {
       unlistenFrame.then((f) => f());
       unlistenStopped.then((f) => f());
@@ -36,14 +43,14 @@ export default function LiveViewOverlay() {
 
   const handleClose = () => {
     invoke(Invokes.TetherSetLiveView, { on: false }).catch(() => {});
-    setTether({ liveView: false });
+    setTether({ liveView: false, liveViewError: null });
   };
 
   return (
-    <div className="fixed bottom-6 right-6 z-50 w-[440px] rounded-lg overflow-hidden shadow-2xl bg-bg-secondary border border-surface">
+    <div className="fixed bottom-6 right-6 z-50 w-[520px] rounded-lg overflow-hidden shadow-2xl bg-bg-secondary border border-surface">
       <div className="flex items-center justify-between px-3 py-2">
         <span className="flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+          <span className={`w-2 h-2 rounded-full ${frame ? 'bg-green-500 animate-pulse' : 'bg-text-secondary'}`} />
           <Text variant={TextVariants.small} color={TextColors.secondary} className="truncate">
             {model} — {t('editor.tether.camera.liveView')}
           </Text>
@@ -55,12 +62,19 @@ export default function LiveViewOverlay() {
           <X size={14} />
         </button>
       </div>
-      <div className="bg-black flex items-center justify-center min-h-[248px]">
+      <div className="bg-black flex items-center justify-center min-h-[200px]">
         {frame ? (
           <img src={`data:image/jpeg;base64,${frame}`} alt="Live view" className="w-full" />
+        ) : liveViewError ? (
+          <Text variant={TextVariants.small} color={TextColors.secondary} className="p-6 text-center break-words">
+            {t('editor.tether.camera.liveUnavailable')}: {liveViewError}
+          </Text>
         ) : (
           <Loader2 size={24} className="animate-spin text-text-secondary" />
         )}
+      </div>
+      <div className="p-3">
+        <CameraSection />
       </div>
     </div>
   );
