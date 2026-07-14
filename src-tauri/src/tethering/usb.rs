@@ -25,6 +25,14 @@ pub struct CameraInfo {
     pub port: String,
 }
 
+#[derive(Serialize, Clone, Copy)]
+#[serde(rename_all = "camelCase")]
+pub struct SliderRange {
+    pub min: f64,
+    pub max: f64,
+    pub step: f64,
+}
+
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct CameraConfig {
@@ -32,6 +40,8 @@ pub struct CameraConfig {
     pub label: String,
     pub current: String,
     pub choices: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub range: Option<SliderRange>,
 }
 
 #[derive(Serialize, Clone)]
@@ -70,6 +80,15 @@ const CONFIG_CANDIDATES: &[(&str, &[&str])] = &[
     ("Shutter", &["shutterspeed", "shutterspeed2"]),
     ("White Balance", &["whitebalance"]),
     ("Format", &["imageformat", "imagequality"]), // RAW / JPEG / RAW+JPEG
+];
+
+// Numeric properties rendered as sliders; per label the first key the body
+// exposes wins. Key names cover Canon/Fuji/Sony/Olympus/Panasonic drivers;
+// bodies without one (Fuji has no tint over PTP) just don't get the row.
+const SLIDER_CANDIDATES: &[(&str, &str, SliderRange)] = &[
+    ("Color Temp", "colortemperature", SliderRange { min: 2500.0, max: 10000.0, step: 100.0 }),
+    ("Tint", "whitebalanceadjustb", SliderRange { min: -9.0, max: 9.0, step: 1.0 }),
+    ("Tint", "whitebalanceadjustgm", SliderRange { min: -9.0, max: 9.0, step: 1.0 }),
 ];
 
 #[tauri::command]
@@ -307,6 +326,7 @@ fn read_configs(camera: &gphoto2::Camera) -> Vec<CameraConfig> {
                     label: (*label).to_string(),
                     current: widget.choice(),
                     choices: widget.choices_iter().collect(),
+                    range: None,
                 })
             })
         })
@@ -321,35 +341,20 @@ fn read_configs(camera: &gphoto2::Camera) -> Vec<CameraConfig> {
             .retain(|choice| !choice.starts_with("Unknown value") || *choice == current);
     }
 
-    // Kelvin picker for the WB color-temperature modes: an INT widget the
-    // radio probe skips, exposed as a curated dropdown.
-    if let Ok(widget) = camera
-        .config_key::<gphoto2::widget::TextWidget>("colortemperature")
-        .wait()
-    {
-        const KELVIN: [u32; 16] = [
-            2500, 2800, 3000, 3200, 3600, 4000, 4500, 5000, 5500, 6000, 6500, 7000, 7500,
-            8000, 9000, 10000,
-        ];
-        let current = widget.value();
-        let mut choices: Vec<String> = KELVIN.iter().map(|k| k.to_string()).collect();
-        if !choices.contains(&current) {
-            choices.insert(0, current.clone());
+    // Numeric properties (INT text widgets the radio probe skips) as sliders.
+    for (label, key, range) in SLIDER_CANDIDATES {
+        if configs.iter().any(|c| c.label == *label) {
+            continue;
         }
-        let pos = configs
-            .iter()
-            .position(|c| c.label == "White Balance")
-            .map(|i| i + 1)
-            .unwrap_or(configs.len());
-        configs.insert(
-            pos,
-            CameraConfig {
-                key: "colortemperature".to_string(),
-                label: "Color Temp".to_string(),
-                current,
-                choices,
-            },
-        );
+        if let Ok(widget) = camera.config_key::<gphoto2::widget::TextWidget>(key).wait() {
+            configs.push(CameraConfig {
+                key: (*key).to_string(),
+                label: (*label).to_string(),
+                current: widget.value(),
+                choices: Vec::new(),
+                range: Some(*range),
+            });
+        }
     }
 
     // Bodies advertise the full mechanical f-stop scale regardless of the
