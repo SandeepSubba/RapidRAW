@@ -70,13 +70,10 @@ export function CameraSection() {
 
   const handleLiveView = (on: boolean) =>
     run('liveview', async () => {
-      setTether({ liveView: on }); // optimistic; revert if the body refuses
-      try {
-        await invoke(Invokes.TetherSetLiveView, { on });
-      } catch (err) {
-        setTether({ liveView: false });
-        throw err;
-      }
+      if (!on) setTether({ liveView: false }); // hide immediately on stop
+      await invoke(Invokes.TetherSetLiveView, { on });
+      // Only show the overlay once the probe frame succeeded — no flash.
+      if (on) setTether({ liveView: true });
     });
 
   const setConfigCurrent = (key: string, value: string) =>
