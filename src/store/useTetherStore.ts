@@ -5,7 +5,7 @@ export interface TetherCameraConfig {
   label: string;
   current: string;
   choices: Array<string>;
-  range?: { min: number; max: number; step: number };
+  range?: { min: number; max: number; step: number; default: number };
 }
 
 export interface TetherCamera {

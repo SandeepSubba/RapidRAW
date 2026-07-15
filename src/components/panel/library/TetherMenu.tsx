@@ -55,7 +55,7 @@ function ConfigSlider({
       min={min}
       max={max}
       step={range.step}
-      defaultValue={Number(config.current) || min}
+      defaultValue={snap(range.default)}
       value={value}
       onChange={handleChange}
     />
@@ -150,16 +150,6 @@ export function CameraSection() {
     }));
 
   const handleConfig = (key: string, value: string) => {
-    // Kelvin only takes effect in the temperature WB mode; switch it for the
-    // user (any driver labels that choice with "temperature").
-    if (key === 'colortemperature') {
-      const wb = camera?.configs.find((c) => c.key === 'whitebalance');
-      const kelvinMode = wb?.choices.find((c) => /temperature/i.test(c));
-      if (wb && kelvinMode && !/temperature/i.test(wb.current)) {
-        setConfigCurrent(wb.key, kelvinMode);
-        invoke(Invokes.TetherSetConfig, { key: wb.key, value: kelvinMode }).catch(() => {});
-      }
-    }
     const previous = camera?.configs.find((c) => c.key === key)?.current;
     setConfigCurrent(key, value); // optimistic; revert if the body refuses
     return run(key, () =>
