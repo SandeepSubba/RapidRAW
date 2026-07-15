@@ -31,6 +31,7 @@ pub struct SliderRange {
     pub min: f64,
     pub max: f64,
     pub step: f64,
+    pub default: f64,
 }
 
 #[derive(Serialize, Clone)]
@@ -78,7 +79,6 @@ const CONFIG_CANDIDATES: &[(&str, &[&str])] = &[
     ("ISO", &["iso", "isospeed"]),
     ("Aperture", &["aperture", "f-number", "fnumber"]),
     ("Shutter", &["shutterspeed", "shutterspeed2"]),
-    ("White Balance", &["whitebalance"]),
     ("Format", &["imageformat", "imagequality"]), // RAW / JPEG / RAW+JPEG
 ];
 
@@ -86,9 +86,9 @@ const CONFIG_CANDIDATES: &[(&str, &[&str])] = &[
 // exposes wins. Key names cover Canon/Fuji/Sony/Olympus/Panasonic drivers;
 // bodies without one (Fuji has no tint over PTP) just don't get the row.
 const SLIDER_CANDIDATES: &[(&str, &str, SliderRange)] = &[
-    ("Color Temp", "colortemperature", SliderRange { min: 2500.0, max: 10000.0, step: 100.0 }),
-    ("Tint", "whitebalanceadjustb", SliderRange { min: -9.0, max: 9.0, step: 1.0 }),
-    ("Tint", "whitebalanceadjustgm", SliderRange { min: -9.0, max: 9.0, step: 1.0 }),
+    ("Color Temp", "colortemperature", SliderRange { min: 2500.0, max: 10000.0, step: 100.0, default: 5500.0 }),
+    ("Tint", "whitebalanceadjustb", SliderRange { min: -9.0, max: 9.0, step: 1.0, default: 0.0 }),
+    ("Tint", "whitebalanceadjustgm", SliderRange { min: -9.0, max: 9.0, step: 1.0, default: 0.0 }),
 ];
 
 #[tauri::command]
@@ -548,6 +548,24 @@ fn initiate_capture(camera: &gphoto2::Camera) -> Result<(), String> {
 }
 
 fn set_config(camera: &gphoto2::Camera, key: &str, value: &str) -> Result<(), String> {
+    // Kelvin only takes effect in the temperature WB mode; flip it first
+    // (every driver labels that choice with "temperature"). Best-effort —
+    // the WB widget itself is no longer surfaced in the UI.
+    if key == "colortemperature" {
+        if let Ok(wb) = camera
+            .config_key::<gphoto2::widget::RadioWidget>("whitebalance")
+            .wait()
+        {
+            if let Some(target) = wb
+                .choices_iter()
+                .find(|c| c.to_lowercase().contains("temperature"))
+            {
+                if wb.choice() != target && wb.set_choice(&target).is_ok() {
+                    let _ = camera.set_config(&wb).wait();
+                }
+            }
+        }
+    }
     if let Ok(widget) = camera
         .config_key::<gphoto2::widget::RadioWidget>(key)
         .wait()
