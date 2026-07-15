@@ -464,6 +464,19 @@ mod tests {
     }
 
     #[test]
+    fn unique_path_suffixes_collisions() {
+        use super::unique_path;
+        let dir = std::env::temp_dir().join(format!("rr-tether-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(unique_path(&dir, "DSCF0001.RAF"), dir.join("DSCF0001.RAF"));
+        std::fs::write(dir.join("DSCF0001.RAF"), b"x").unwrap();
+        assert_eq!(unique_path(&dir, "DSCF0001.RAF"), dir.join("DSCF0001-1.RAF"));
+        std::fs::write(dir.join("DSCF0001-1.RAF"), b"x").unwrap();
+        assert_eq!(unique_path(&dir, "DSCF0001.RAF"), dir.join("DSCF0001-2.RAF"));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
     fn f_number_choices() {
         assert_eq!(parse_f_number("f/2.8"), Some(2.8));
         assert_eq!(parse_f_number("F4"), Some(4.0));
@@ -589,12 +602,30 @@ fn grab_preview_frame(camera: &gphoto2::Camera, ctx: &gphoto2::Context) -> Resul
     Ok(STANDARD.encode(&data))
 }
 
+// Camera frame counters reset/wrap, so a new shot can carry the name of a
+// file already in the session folder; never overwrite or drop it — suffix
+// (DSCF0001.RAF → DSCF0001-1.RAF).
+fn unique_path(dest: &std::path::Path, name: &str) -> PathBuf {
+    let target = dest.join(name);
+    if !target.exists() {
+        return target;
+    }
+    let (stem, ext) = match name.rsplit_once('.') {
+        Some((s, e)) => (s, format!(".{e}")),
+        None => (name, String::new()),
+    };
+    (1..)
+        .map(|i| dest.join(format!("{stem}-{i}{ext}")))
+        .find(|p| !p.exists())
+        .unwrap()
+}
+
 fn download_file(
     camera: &gphoto2::Camera,
     path: &gphoto2::file::CameraFilePath,
     dest: &PathBuf,
 ) -> Result<(), String> {
-    let target = dest.join(path.name().as_ref());
+    let target = unique_path(dest, path.name().as_ref());
     camera
         .fs()
         .download_to(&path.folder(), &path.name(), &target)
