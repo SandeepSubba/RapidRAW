@@ -341,12 +341,26 @@ fn read_configs(camera: &gphoto2::Camera) -> Vec<CameraConfig> {
             .retain(|choice| !choice.starts_with("Unknown value") || *choice == current);
     }
 
-    // Numeric properties (INT text widgets the radio probe skips) as sliders.
+    // Numeric properties as sliders. Bodies expose these either as an
+    // enumerated radio (Fuji/Canon list every Kelvin stop they accept) or as
+    // a bare INT text widget; radio choices are kept so the UI snaps to
+    // values the body actually takes.
     for (label, key, range) in SLIDER_CANDIDATES {
         if configs.iter().any(|c| c.label == *label) {
             continue;
         }
-        if let Ok(widget) = camera.config_key::<gphoto2::widget::TextWidget>(key).wait() {
+        if let Ok(widget) = camera.config_key::<gphoto2::widget::RadioWidget>(key).wait() {
+            let choices: Vec<String> = widget.choices_iter().collect();
+            if choices.len() >= 2 && choices.iter().all(|c| c.trim().parse::<f64>().is_ok()) {
+                configs.push(CameraConfig {
+                    key: (*key).to_string(),
+                    label: (*label).to_string(),
+                    current: widget.choice(),
+                    choices,
+                    range: Some(*range),
+                });
+            }
+        } else if let Ok(widget) = camera.config_key::<gphoto2::widget::TextWidget>(key).wait() {
             configs.push(CameraConfig {
                 key: (*key).to_string(),
                 label: (*label).to_string(),
