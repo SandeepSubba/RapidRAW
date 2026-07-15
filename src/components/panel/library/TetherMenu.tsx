@@ -28,27 +28,34 @@ function ConfigSlider({
   onCommit: (value: string) => void;
 }) {
   const range = config.range!;
-  const [value, setValue] = useState(() => Number(config.current) || range.min);
+  // Enumerated bodies (Fuji/Canon Kelvin lists) only accept their own values;
+  // bound the slider by them and snap commits to the nearest one.
+  const steps = config.choices.map(Number).filter((n) => !Number.isNaN(n));
+  const min = steps.length ? Math.min(...steps) : range.min;
+  const max = steps.length ? Math.max(...steps) : range.max;
+  const snap = (v: number) =>
+    steps.length ? steps.reduce((a, b) => (Math.abs(b - v) < Math.abs(a - v) ? b : a)) : v;
+  const [value, setValue] = useState(() => Number(config.current) || min);
   const commitTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => {
-    setValue(Number(config.current) || range.min);
-  }, [config.current, range.min]);
+    setValue(Number(config.current) || min);
+  }, [config.current, min]);
 
   const handleChange = (e: any) => {
     const next = Number(e.target.value);
     setValue(next);
     clearTimeout(commitTimer.current);
-    commitTimer.current = setTimeout(() => onCommit(String(next)), 400);
+    commitTimer.current = setTimeout(() => onCommit(String(snap(next))), 400);
   };
 
   return (
     <Slider
       label={config.label}
-      min={range.min}
-      max={range.max}
+      min={min}
+      max={max}
       step={range.step}
-      defaultValue={Number(config.current) || range.min}
+      defaultValue={Number(config.current) || min}
       value={value}
       onChange={handleChange}
     />
@@ -143,6 +150,16 @@ export function CameraSection() {
     }));
 
   const handleConfig = (key: string, value: string) => {
+    // Kelvin only takes effect in the temperature WB mode; switch it for the
+    // user (any driver labels that choice with "temperature").
+    if (key === 'colortemperature') {
+      const wb = camera?.configs.find((c) => c.key === 'whitebalance');
+      const kelvinMode = wb?.choices.find((c) => /temperature/i.test(c));
+      if (wb && kelvinMode && !/temperature/i.test(wb.current)) {
+        setConfigCurrent(wb.key, kelvinMode);
+        invoke(Invokes.TetherSetConfig, { key: wb.key, value: kelvinMode }).catch(() => {});
+      }
+    }
     const previous = camera?.configs.find((c) => c.key === key)?.current;
     setConfigCurrent(key, value); // optimistic; revert if the body refuses
     return run(key, () =>
