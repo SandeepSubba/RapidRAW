@@ -55,11 +55,13 @@ export const ADJUSTMENT_NUDGES: AdjustmentNudge[] = [
   { action: 'temperature_down', description: 'settings.keybinds.actions.temperature_down', defaultCombo: ['shift', 'Minus'], adjustmentKey: 'temperature', delta: -5, min: -100, max: 100 },
   { action: 'tint_up', description: 'settings.keybinds.actions.tint_up', defaultCombo: ['ctrl', 'shift', 'alt', 'Equal'], adjustmentKey: 'tint', delta: 5, min: -100, max: 100 },
   { action: 'tint_down', description: 'settings.keybinds.actions.tint_down', defaultCombo: ['ctrl', 'shift', 'alt', 'Minus'], adjustmentKey: 'tint', delta: -5, min: -100, max: 100 },
-  // Vignette amount on V. Unlike the +/- sliders above, the bare key goes
-  // negative (darker) since a dark vignette is the common intent; Shift+V
-  // brightens. Range is the Effects slider's own -100..100.
-  { action: 'vignette_down', description: 'settings.keybinds.actions.vignette_down', defaultCombo: ['KeyV'], adjustmentKey: 'vignetteAmount', delta: -5, min: -100, max: 100 },
-  { action: 'vignette_up', description: 'settings.keybinds.actions.vignette_up', defaultCombo: ['shift', 'KeyV'], adjustmentKey: 'vignetteAmount', delta: 5, min: -100, max: 100 },
+  // Vignette — same +/- family as the sliders above. Every modifier combo with
+  // Equal/Minus was already taken (alt/shift/ctrl and their pairs, plus ctrl for
+  // zoom), so vignette gets the bare +/- pair. Equal (+) lightens, Minus (-)
+  // darkens, matching the +=increase convention. Range is the Effects slider's
+  // own -100..100.
+  { action: 'vignette_down', description: 'settings.keybinds.actions.vignette_down', defaultCombo: ['Minus'], adjustmentKey: 'vignetteAmount', delta: -5, min: -100, max: 100 },
+  { action: 'vignette_up', description: 'settings.keybinds.actions.vignette_up', defaultCombo: ['Equal'], adjustmentKey: 'vignetteAmount', delta: 5, min: -100, max: 100 },
 ];
 
 export const KEYBIND_DEFINITIONS: KeybindDefinition[] = [
