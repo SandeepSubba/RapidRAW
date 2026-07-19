@@ -50,11 +50,12 @@ export const ADJUSTMENT_NUDGES: AdjustmentNudge[] = [
   { action: 'vibrance_up', description: 'settings.keybinds.actions.vibrance_up', defaultCombo: ['shift', 'alt', 'Equal'], adjustmentKey: 'vibrance', delta: 5, min: -100, max: 100 },
   { action: 'vibrance_down', description: 'settings.keybinds.actions.vibrance_down', defaultCombo: ['shift', 'alt', 'Minus'], adjustmentKey: 'vibrance', delta: -5, min: -100, max: 100 },
   // Temperature / Tint together cover white balance. Temperature gets the
-  // simpler Shift + +/- combo; tint takes the fuller modifier family.
-  { action: 'temperature_up', description: 'settings.keybinds.actions.temperature_up', defaultCombo: ['shift', 'Equal'], adjustmentKey: 'temperature', delta: 5, min: -100, max: 100 },
-  { action: 'temperature_down', description: 'settings.keybinds.actions.temperature_down', defaultCombo: ['shift', 'Minus'], adjustmentKey: 'temperature', delta: -5, min: -100, max: 100 },
-  { action: 'tint_up', description: 'settings.keybinds.actions.tint_up', defaultCombo: ['ctrl', 'shift', 'alt', 'Equal'], adjustmentKey: 'tint', delta: 5, min: -100, max: 100 },
-  { action: 'tint_down', description: 'settings.keybinds.actions.tint_down', defaultCombo: ['ctrl', 'shift', 'alt', 'Minus'], adjustmentKey: 'tint', delta: -5, min: -100, max: 100 },
+  // simpler Shift + +/- combo; tint takes the fuller modifier family. Step is 1
+  // (not 5 like the tonal sliders) so white balance nudges stay subtle.
+  { action: 'temperature_up', description: 'settings.keybinds.actions.temperature_up', defaultCombo: ['shift', 'Equal'], adjustmentKey: 'temperature', delta: 1, min: -100, max: 100 },
+  { action: 'temperature_down', description: 'settings.keybinds.actions.temperature_down', defaultCombo: ['shift', 'Minus'], adjustmentKey: 'temperature', delta: -1, min: -100, max: 100 },
+  { action: 'tint_up', description: 'settings.keybinds.actions.tint_up', defaultCombo: ['ctrl', 'shift', 'alt', 'Equal'], adjustmentKey: 'tint', delta: 1, min: -100, max: 100 },
+  { action: 'tint_down', description: 'settings.keybinds.actions.tint_down', defaultCombo: ['ctrl', 'shift', 'alt', 'Minus'], adjustmentKey: 'tint', delta: -1, min: -100, max: 100 },
   // Vignette on Alt + +/-, same +=increase / -=decrease direction as every other
   // adjustment so muscle memory carries over: Alt+- darkens (more vignette),
   // Alt++ lightens. Range is the Effects slider's own -100..100.
