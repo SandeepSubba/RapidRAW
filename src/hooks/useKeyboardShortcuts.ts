@@ -351,12 +351,13 @@ export const useKeyboardShortcuts = ({
         shouldFire: (s: any) => !!s.editor.selectedImage,
         execute: (e: any, s: any) => {
           e.preventDefault();
-          // Toggle the crop tool: leave to Adjustments if already cropping,
-          // otherwise enter crop mode (straighten off — that's the S tool).
+          // In the crop panel: toggle the crop overlay on/off. Otherwise open the
+          // panel AND switch the crop tool on (straighten off — that's the S tool)
+          // so the crop handles appear right away instead of needing a click.
           if (s.ui.activeRightPanel === Panel.Crop) {
-            s.ui.setRightPanel(Panel.Adjustments);
+            s.editor.setEditor({ cropToolActive: !s.editor.cropToolActive });
           } else {
-            s.editor.setEditor({ isStraightenActive: false });
+            s.editor.setEditor({ isStraightenActive: false, cropToolActive: true });
             s.ui.setRightPanel(Panel.Crop);
           }
         },

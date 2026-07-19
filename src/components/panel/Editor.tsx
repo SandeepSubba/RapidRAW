@@ -309,11 +309,18 @@ export default function Editor({ onBackToLibrary, onContextMenu, transformWrappe
   const isMasking = activeRightPanel === Panel.Masks;
   const isAiEditing = activeRightPanel === Panel.Ai;
 
-  // Crop is opt-in: reset it to off whenever the crop panel opens/closes or the
-  // image changes, so it never activates by itself (fork behaviour).
+  // Crop is opt-in: turn it off when leaving the crop panel or switching images,
+  // so it never activates by itself (fork behaviour). Opening the panel is left
+  // alone so an explicit activator — the crop button or the C shortcut — can set
+  // cropToolActive true and have the overlay show immediately.
   useEffect(() => {
     setEditor({ cropToolActive: false });
-  }, [isCropping, selectedImage, setEditor]);
+  }, [selectedImage, setEditor]);
+  useEffect(() => {
+    if (!isCropping) {
+      setEditor({ cropToolActive: false });
+    }
+  }, [isCropping, setEditor]);
 
   const croppedDimensions = useMemo<ImageDimensions | null>(() => {
     if (!selectedImage?.width || !selectedImage?.height) {
