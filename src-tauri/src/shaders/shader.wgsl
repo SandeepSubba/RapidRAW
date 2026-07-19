@@ -1712,11 +1712,13 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
         let uv_round = sign(uv_centered) * pow(abs(uv_centered), vec2<f32>(v_round, v_round));
         let d = length(uv_round * vec2<f32>(1.0, aspect)) * 0.5;
         let vignette_mask = smoothstep(v_mid - v_feather, v_mid + v_feather, d);
-        if (v_amount < 0.0) {
-            composite_rgb_linear *= (1.0 + v_amount * vignette_mask);
-        } else {
-            composite_rgb_linear = mix(composite_rgb_linear, vec3<f32>(1.0), v_amount * vignette_mask);
-        }
+        // Natural vignette: shift exposure at the edges rather than compositing
+        // black or white over them. exp2(EV) is a plain multiply in linear light,
+        // so the corners fall off (or lift) like a real lens instead of crushing
+        // to pure black / washing to pure white. v_amount is -1..1; 2 EV at the
+        // extremes keeps -0.5 at the old -1 EV (x0.5) so mid-slider feel is kept.
+        let vignette_ev = v_amount * 2.0 * vignette_mask;
+        composite_rgb_linear *= exp2(vignette_ev);
     }
 
     var base_srgb: vec3<f32>;
