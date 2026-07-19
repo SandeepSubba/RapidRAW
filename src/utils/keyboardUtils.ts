@@ -55,12 +55,11 @@ export const ADJUSTMENT_NUDGES: AdjustmentNudge[] = [
   { action: 'temperature_down', description: 'settings.keybinds.actions.temperature_down', defaultCombo: ['shift', 'Minus'], adjustmentKey: 'temperature', delta: -5, min: -100, max: 100 },
   { action: 'tint_up', description: 'settings.keybinds.actions.tint_up', defaultCombo: ['ctrl', 'shift', 'alt', 'Equal'], adjustmentKey: 'tint', delta: 5, min: -100, max: 100 },
   { action: 'tint_down', description: 'settings.keybinds.actions.tint_down', defaultCombo: ['ctrl', 'shift', 'alt', 'Minus'], adjustmentKey: 'tint', delta: -5, min: -100, max: 100 },
-  // Vignette on Alt + +/- (exposure vacated this slot for Ctrl). Here + adds
-  // vignette — darker corners — and - removes it, so the sign reads as "amount
-  // of vignette" rather than the raw signed value. Range is the Effects slider's
-  // own -100..100.
-  { action: 'vignette_down', description: 'settings.keybinds.actions.vignette_down', defaultCombo: ['alt', 'Equal'], adjustmentKey: 'vignetteAmount', delta: -5, min: -100, max: 100 },
-  { action: 'vignette_up', description: 'settings.keybinds.actions.vignette_up', defaultCombo: ['alt', 'Minus'], adjustmentKey: 'vignetteAmount', delta: 5, min: -100, max: 100 },
+  // Vignette on Alt + +/-, same +=increase / -=decrease direction as every other
+  // adjustment so muscle memory carries over: Alt+- darkens (more vignette),
+  // Alt++ lightens. Range is the Effects slider's own -100..100.
+  { action: 'vignette_down', description: 'settings.keybinds.actions.vignette_down', defaultCombo: ['alt', 'Minus'], adjustmentKey: 'vignetteAmount', delta: -5, min: -100, max: 100 },
+  { action: 'vignette_up', description: 'settings.keybinds.actions.vignette_up', defaultCombo: ['alt', 'Equal'], adjustmentKey: 'vignetteAmount', delta: 5, min: -100, max: 100 },
 ];
 
 export const KEYBIND_DEFINITIONS: KeybindDefinition[] = [
