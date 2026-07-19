@@ -1622,6 +1622,14 @@ pub fn process_and_get_dynamic_image_with_analytics(
     )
 }
 
+/// Square, grow-only size (rounded up to 256) for the shared GPU processor.
+/// Sizing to the larger side means a rotated frame — width/height swapped
+/// between portrait and landscape — reuses the processor instead of triggering a
+/// realloc, since a square big enough for the long side fits either orientation.
+fn processor_side(width: u32, height: u32) -> u32 {
+    (width.max(height) + 255) & !255
+}
+
 #[allow(clippy::too_many_arguments)]
 fn process_and_get_dynamic_image_inner(
     context: &GpuContext,
@@ -1653,11 +1661,16 @@ fn process_and_get_dynamic_image_inner(
 
     let mut processor_lock = state.gpu_processor.lock().unwrap();
     let mut needs_new_processor = false;
-    let new_width = (width + 255) & !255;
-    let new_height = (height + 255) & !255;
+    // Size the shared processor square to its larger side, grow-only. A portrait
+    // frame after a landscape one (or vice versa) then reuses the same processor
+    // instead of forcing a full teardown+realloc every time width/height swap —
+    // which during a mixed-orientation batch export was ~one realloc per image.
+    let side = processor_side(width, height);
+    let new_width = side;
+    let new_height = side;
 
     if let Some(p) = processor_lock.as_ref() {
-        if p.width < width || p.height < height {
+        if p.width < side || p.height < side {
             needs_new_processor = true;
         }
     } else {
@@ -2027,4 +2040,24 @@ fn process_and_get_dynamic_image_inner(
     let img_buf = ImageBuffer::<Rgba<u8>, Vec<u8>>::from_raw(out_w, out_h, processed_pixels)
         .ok_or("Failed to create image buffer from GPU data")?;
     Ok(DynamicImage::ImageRgba8(img_buf))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::processor_side;
+
+    #[test]
+    fn processor_reused_across_orientation() {
+        // A landscape frame and its portrait rotation yield the same square side,
+        // so the reuse check (p.width/height < side) stays false — no realloc.
+        let landscape = processor_side(6240, 4160);
+        let portrait = processor_side(4160, 6240);
+        assert_eq!(landscape, portrait);
+        assert_eq!(landscape, 6400); // rounded up to the next multiple of 256
+
+        // Only a genuinely larger frame grows it (grow-only), and it always
+        // rounds up to a 256 multiple.
+        assert!(processor_side(6500, 4000) > landscape);
+        assert_eq!(processor_side(1, 1), 256);
+    }
 }
