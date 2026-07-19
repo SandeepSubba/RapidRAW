@@ -36,11 +36,11 @@ export interface AdjustmentNudge {
 }
 
 export const ADJUSTMENT_NUDGES: AdjustmentNudge[] = [
-  // Exposure — Capture One uses Ctrl/Cmd + +/-, but that combo is bound to Zoom
-  // here, so exposure moves to Alt + +/-. Step matches Capture One (0.1 EV).
+  // Exposure — Ctrl/Cmd + +/-, matching Capture One. Zoom moved off this combo
+  // to the bare +/- keys to free it. Step matches Capture One (0.1 EV).
   // Note: the UI's Exposure slider writes `brightness`; `exposure` is the EV Shift slider.
-  { action: 'exposure_up', description: 'settings.keybinds.actions.exposure_up', defaultCombo: ['alt', 'Equal'], adjustmentKey: 'brightness', delta: 0.1, min: -5, max: 5 },
-  { action: 'exposure_down', description: 'settings.keybinds.actions.exposure_down', defaultCombo: ['alt', 'Minus'], adjustmentKey: 'brightness', delta: -0.1, min: -5, max: 5 },
+  { action: 'exposure_up', description: 'settings.keybinds.actions.exposure_up', defaultCombo: ['ctrl', 'Equal'], adjustmentKey: 'brightness', delta: 0.1, min: -5, max: 5 },
+  { action: 'exposure_down', description: 'settings.keybinds.actions.exposure_down', defaultCombo: ['ctrl', 'Minus'], adjustmentKey: 'brightness', delta: -0.1, min: -5, max: 5 },
   // Contrast — matches Capture One's Ctrl(+Shift+Cmd) modifier family.
   { action: 'contrast_up', description: 'settings.keybinds.actions.contrast_up', defaultCombo: ['ctrl', 'shift', 'Equal'], adjustmentKey: 'contrast', delta: 5, min: -100, max: 100 },
   { action: 'contrast_down', description: 'settings.keybinds.actions.contrast_down', defaultCombo: ['ctrl', 'shift', 'Minus'], adjustmentKey: 'contrast', delta: -5, min: -100, max: 100 },
@@ -55,13 +55,12 @@ export const ADJUSTMENT_NUDGES: AdjustmentNudge[] = [
   { action: 'temperature_down', description: 'settings.keybinds.actions.temperature_down', defaultCombo: ['shift', 'Minus'], adjustmentKey: 'temperature', delta: -5, min: -100, max: 100 },
   { action: 'tint_up', description: 'settings.keybinds.actions.tint_up', defaultCombo: ['ctrl', 'shift', 'alt', 'Equal'], adjustmentKey: 'tint', delta: 5, min: -100, max: 100 },
   { action: 'tint_down', description: 'settings.keybinds.actions.tint_down', defaultCombo: ['ctrl', 'shift', 'alt', 'Minus'], adjustmentKey: 'tint', delta: -5, min: -100, max: 100 },
-  // Vignette — same +/- family as the sliders above. Every modifier combo with
-  // Equal/Minus was already taken (alt/shift/ctrl and their pairs, plus ctrl for
-  // zoom), so vignette gets the bare +/- pair. Equal (+) lightens, Minus (-)
-  // darkens, matching the +=increase convention. Range is the Effects slider's
+  // Vignette on Alt + +/- (exposure vacated this slot for Ctrl). Here + adds
+  // vignette — darker corners — and - removes it, so the sign reads as "amount
+  // of vignette" rather than the raw signed value. Range is the Effects slider's
   // own -100..100.
-  { action: 'vignette_down', description: 'settings.keybinds.actions.vignette_down', defaultCombo: ['Minus'], adjustmentKey: 'vignetteAmount', delta: -5, min: -100, max: 100 },
-  { action: 'vignette_up', description: 'settings.keybinds.actions.vignette_up', defaultCombo: ['Equal'], adjustmentKey: 'vignetteAmount', delta: 5, min: -100, max: 100 },
+  { action: 'vignette_down', description: 'settings.keybinds.actions.vignette_down', defaultCombo: ['alt', 'Equal'], adjustmentKey: 'vignetteAmount', delta: -5, min: -100, max: 100 },
+  { action: 'vignette_up', description: 'settings.keybinds.actions.vignette_up', defaultCombo: ['alt', 'Minus'], adjustmentKey: 'vignetteAmount', delta: 5, min: -100, max: 100 },
 ];
 
 export const KEYBIND_DEFINITIONS: KeybindDefinition[] = [
@@ -126,15 +125,16 @@ export const KEYBIND_DEFINITIONS: KeybindDefinition[] = [
     section: 'view',
   },
   {
+    // Bare +/- for zoom; Ctrl/Cmd + +/- is exposure (Capture One convention).
     action: 'zoom_in',
     description: 'settings.keybinds.actions.zoom_in',
-    defaultCombo: ['ctrl', 'Equal'],
+    defaultCombo: ['Equal'],
     section: 'view',
   },
   {
     action: 'zoom_out',
     description: 'settings.keybinds.actions.zoom_out',
-    defaultCombo: ['ctrl', 'Minus'],
+    defaultCombo: ['Minus'],
     section: 'view',
   },
   {
