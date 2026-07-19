@@ -755,7 +755,13 @@ pub async fn export_images(
 
     let available_ram_gb = sys.available_memory() as f64 / 1024.0 / 1024.0 / 1024.0;
 
-    let ram_based_limit = (available_ram_gb / 4.0).floor() as usize;
+    // Budget ~2 GB of free RAM per export thread. A 26 MP frame decoded to f32
+    // RGBA peaks around ~1–1.5 GB with working copies, so 2 GB leaves headroom
+    // without collapsing to one thread on a 7–8 GB-free machine — the old /4.0
+    // gave just 1 thread there, serializing the whole batch while the GPU (now
+    // ~1 s/frame) sat idle waiting on single-threaded decode/encode/write.
+    // ponytail: static per-thread estimate; tune the divisor if peak RAM/frame changes.
+    let ram_based_limit = (available_ram_gb / 2.0).floor() as usize;
 
     let num_threads = if paths.len() == 1 {
         1
