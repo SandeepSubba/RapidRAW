@@ -55,6 +55,11 @@ export const ADJUSTMENT_NUDGES: AdjustmentNudge[] = [
   { action: 'temperature_down', description: 'settings.keybinds.actions.temperature_down', defaultCombo: ['shift', 'Minus'], adjustmentKey: 'temperature', delta: -5, min: -100, max: 100 },
   { action: 'tint_up', description: 'settings.keybinds.actions.tint_up', defaultCombo: ['ctrl', 'shift', 'alt', 'Equal'], adjustmentKey: 'tint', delta: 5, min: -100, max: 100 },
   { action: 'tint_down', description: 'settings.keybinds.actions.tint_down', defaultCombo: ['ctrl', 'shift', 'alt', 'Minus'], adjustmentKey: 'tint', delta: -5, min: -100, max: 100 },
+  // Vignette amount on V. Unlike the +/- sliders above, the bare key goes
+  // negative (darker) since a dark vignette is the common intent; Shift+V
+  // brightens. Range is the Effects slider's own -100..100.
+  { action: 'vignette_down', description: 'settings.keybinds.actions.vignette_down', defaultCombo: ['KeyV'], adjustmentKey: 'vignetteAmount', delta: -5, min: -100, max: 100 },
+  { action: 'vignette_up', description: 'settings.keybinds.actions.vignette_up', defaultCombo: ['shift', 'KeyV'], adjustmentKey: 'vignetteAmount', delta: 5, min: -100, max: 100 },
 ];
 
 export const KEYBIND_DEFINITIONS: KeybindDefinition[] = [
@@ -280,6 +285,12 @@ export const KEYBIND_DEFINITIONS: KeybindDefinition[] = [
     action: 'rotate_right',
     description: 'settings.keybinds.actions.rotate_right',
     defaultCombo: ['BracketRight'],
+    section: 'editing',
+  },
+  {
+    action: 'activate_crop',
+    description: 'settings.keybinds.actions.activate_crop',
+    defaultCombo: ['KeyC'],
     section: 'editing',
   },
   {

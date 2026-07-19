@@ -1502,6 +1502,7 @@
     },
     "keybinds": {
       "actions": {
+        "activate_crop": "Activate Crop tool",
         "brush_size_down": "Decrease brush size",
         "brush_size_up": "Increase brush size",
         "color_label_blue": "Color label: Blue",
@@ -1555,6 +1556,8 @@
         "undo": "Undo adjustment",
         "vibrance_down": "Decrease vibrance",
         "vibrance_up": "Increase vibrance",
+        "vignette_down": "Darken vignette",
+        "vignette_up": "Lighten vignette",
         "zoom_100": "Zoom to 100%",
         "zoom_fit": "Zoom to fit",
         "zoom_in": "Zoom in",
