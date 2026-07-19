@@ -531,7 +531,7 @@ export default function PresetsPanel({ onNavigateToCommunity }: PresetsPanelProp
           break;
         }
 
-        const blob = new Blob([imageData], { type: 'image/jpeg' });
+        const blob = new Blob([new Uint8Array(imageData)], { type: 'image/jpeg' });
         const url = URL.createObjectURL(blob);
         setPreviews((prev: Record<string, string | null>) => {
           const oldUrl = prev[preset.id];
@@ -597,7 +597,7 @@ export default function PresetsPanel({ onNavigateToCommunity }: PresetsPanelProp
 
         if (pathAtStart !== currentImagePathRef.current) return;
 
-        const blob = new Blob([imageData], { type: 'image/jpeg' });
+        const blob = new Blob([new Uint8Array(imageData)], { type: 'image/jpeg' });
         const url = URL.createObjectURL(blob);
 
         setPreviews((prev: Record<string, string | null>) => {
