@@ -347,6 +347,20 @@ export const useKeyboardShortcuts = ({
           s.ui.setUI({ isSettingsOpen: true });
         },
       },
+      activate_crop: {
+        shouldFire: (s: any) => !!s.editor.selectedImage,
+        execute: (e: any, s: any) => {
+          e.preventDefault();
+          // Toggle the crop tool: leave to Adjustments if already cropping,
+          // otherwise enter crop mode (straighten off — that's the S tool).
+          if (s.ui.activeRightPanel === Panel.Crop) {
+            s.ui.setRightPanel(Panel.Adjustments);
+          } else {
+            s.editor.setEditor({ isStraightenActive: false });
+            s.ui.setRightPanel(Panel.Crop);
+          }
+        },
+      },
       toggle_crop: {
         shouldFire: (s: any) => !!s.editor.selectedImage,
         execute: (e: any, s: any) => {
