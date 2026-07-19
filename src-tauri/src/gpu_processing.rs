@@ -1283,14 +1283,9 @@ impl GpuProcessor {
         const TILE_SIZE: u32 = 2048;
         const TILE_OVERLAP: u32 = 128;
 
-        let mut final_pixels = vec![
-            0u8;
-            if skip_cpu_readback {
-                0
-            } else {
-                (out_width * out_height * 4) as usize
-            }
-        ];
+        // Filled by a single whole-ROI readback after the tile loop (see below);
+        // stays empty on the display path (skip_cpu_readback).
+        let mut final_pixels: Vec<u8> = Vec::new();
 
         let start_tile_x = bounds.x / TILE_SIZE;
         let start_tile_y = bounds.y / TILE_SIZE;
@@ -1320,12 +1315,6 @@ impl GpuProcessor {
                 let input_y_end = (y_end + TILE_OVERLAP).min(height);
                 let input_width = input_x_end - input_x_start;
                 let input_height = input_y_end - input_y_start;
-
-                let input_texture_size = wgpu::Extent3d {
-                    width: input_width,
-                    height: input_height,
-                    depth_or_array_layers: 1,
-                };
 
                 let run_blur = |base_radius: f32, output_view: &wgpu::TextureView| -> bool {
                     let radius = (base_radius * scale).ceil().max(1.0) as u32;
@@ -1515,7 +1504,9 @@ impl GpuProcessor {
                 let crop_x_start = x_start - input_x_start;
                 let crop_y_start = y_start - input_y_start;
 
-                if output_to_display {
+                // Assemble every tile into working_texture — for display, and now
+                // for export too so the whole ROI can be read back in one shot.
+                if output_to_display || !skip_cpu_readback {
                     main_encoder.copy_texture_to_texture(
                         wgpu::TexelCopyTextureInfo {
                             texture: &self.tile_output_texture,
@@ -1546,33 +1537,30 @@ impl GpuProcessor {
                 }
 
                 queue.submit(Some(main_encoder.finish()));
-
-                if !skip_cpu_readback {
-                    let processed_tile_data = read_texture_data_roi(
-                        device,
-                        queue,
-                        &self.tile_output_texture,
-                        wgpu::Origin3d::ZERO,
-                        input_texture_size,
-                    )?;
-
-                    for row in 0..tile_height {
-                        let final_y = y_start + row - bounds.y;
-                        let final_x = x_start - bounds.x;
-                        let final_row_offset = (final_y * out_width + final_x) as usize * 4;
-                        let source_y = crop_y_start + row;
-                        let source_row_offset =
-                            (source_y * input_width + crop_x_start) as usize * 4;
-                        let copy_bytes = (tile_width * 4) as usize;
-
-                        final_pixels[final_row_offset..final_row_offset + copy_bytes]
-                            .copy_from_slice(
-                                &processed_tile_data
-                                    [source_row_offset..source_row_offset + copy_bytes],
-                            );
-                    }
-                }
             }
+        }
+
+        // One readback of the whole ROI from the assembled working texture, rather
+        // than a synchronous per-tile readback (previously 12 blocking map+poll
+        // round-trips per 26MP frame, each allocating its own ~21MB buffer). Tiles
+        // were copied into working_texture above; its [bounds] sub-region is the
+        // packed result, so no per-row reassembly is needed.
+        if !skip_cpu_readback {
+            final_pixels = read_texture_data_roi(
+                device,
+                queue,
+                &self.working_texture,
+                wgpu::Origin3d {
+                    x: bounds.x,
+                    y: bounds.y,
+                    z: 0,
+                },
+                wgpu::Extent3d {
+                    width: out_width,
+                    height: out_height,
+                    depth_or_array_layers: 1,
+                },
+            )?;
         }
 
         Ok((final_pixels, out_width, out_height, bounds.x, bounds.y))
