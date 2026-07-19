@@ -1071,16 +1071,18 @@ pub async fn export_images(
 }
 
 #[tauri::command]
-pub fn cancel_export(state: tauri::State<AppState>) -> Result<(), String> {
-    match state.export_task_handle.lock().unwrap().take() {
-        Some(handle) => {
-            handle.abort();
-            println!("Export task cancellation requested.");
-        }
-        _ => {
-            return Err("No export task is currently running.".to_string());
-        }
+pub fn cancel_export(
+    state: tauri::State<AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<(), String> {
+    if let Some(handle) = state.export_task_handle.lock().unwrap().take() {
+        handle.abort();
+        println!("Export task cancellation requested.");
     }
+    // Emit the terminal event ourselves: aborting the task kills it before it can
+    // emit `export-cancelled`, so the UI would otherwise hang on "Exporting…".
+    // Emitting unconditionally also clears a UI already stuck with no live task.
+    let _ = app_handle.emit("export-cancelled", ());
     Ok(())
 }
 
