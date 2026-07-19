@@ -5,93 +5,152 @@ LOCALES_DIR = Path("./locales")
 
 TRANSLATIONS = {
     "de": {
-        "name": "Alphabetisch",
-        "created": "Erstellungsdatum",
-        "modified": "Änderungsdatum",
-        "imageCount": "Bildanzahl",
-        "sortFolders": "Ordner sortieren"
+        "masks": {
+            "clone": "Klonen",
+            "heal": "Reparieren"
+        },
+        "ai": {
+            "manualCleanupTitle": "Manuelle Bereinigung",
+            "generativeEditTitle": "Generative Bearbeitung",
+            "patches_clone": "Klonen {{count}}",
+            "patches_heal": "Reparieren {{count}}"
+        }
     },
     "en": {
-        "name": "Alphabetically",
-        "created": "Date Created",
-        "modified": "Date Modified",
-        "imageCount": "Image Count",
-        "sortFolders": "Sort Folders"
+        "masks": {
+            "clone": "Clone",
+            "heal": "Heal"
+        },
+        "ai": {
+            "manualCleanupTitle": "Manual Cleanup",
+            "generativeEditTitle": "Generative Edit",
+            "patches_clone": "Clone {{count}}",
+            "patches_heal": "Heal {{count}}"
+        }
     },
     "es": {
-        "name": "Alfabéticamente",
-        "created": "Fecha de creación",
-        "modified": "Fecha de modificación",
-        "imageCount": "Recuento de imágenes",
-        "sortFolders": "Ordenar carpetas"
+        "masks": {
+            "clone": "Clonar",
+            "heal": "Curar"
+        },
+        "ai": {
+            "manualCleanupTitle": "Limpieza manual",
+            "generativeEditTitle": "Edición generativa",
+            "patches_clone": "Clonar {{count}}",
+            "patches_heal": "Curar {{count}}"
+        }
     },
     "fr": {
-        "name": "Alphabétique",
-        "created": "Date de création",
-        "modified": "Date de modification",
-        "imageCount": "Nombre d'images",
-        "sortFolders": "Trier les dossiers"
+        "masks": {
+            "clone": "Cloner",
+            "heal": "Corriger"
+        },
+        "ai": {
+            "manualCleanupTitle": "Nettoyage manuel",
+            "generativeEditTitle": "Édition générative",
+            "patches_clone": "Cloner {{count}}",
+            "patches_heal": "Corriger {{count}}"
+        }
     },
     "it": {
-        "name": "In ordine alfabetico",
-        "created": "Data di creazione",
-        "modified": "Data di modifica",
-        "imageCount": "Conteggio immagini",
-        "sortFolders": "Ordina cartelle"
+        "masks": {
+            "clone": "Clona",
+            "heal": "Ripara"
+        },
+        "ai": {
+            "manualCleanupTitle": "Pulizia manuale",
+            "generativeEditTitle": "Modifica generativa",
+            "patches_clone": "Clona {{count}}",
+            "patches_heal": "Ripara {{count}}"
+        }
     },
     "ja": {
-        "name": "アルファベット順",
-        "created": "作成日",
-        "modified": "更新日",
-        "imageCount": "画像数",
-        "sortFolders": "フォルダーを並べ替え"
+        "masks": {
+            "clone": "クローン",
+            "heal": "修復"
+        },
+        "ai": {
+            "manualCleanupTitle": "手動クリーンアップ",
+            "generativeEditTitle": "生成編集",
+            "patches_clone": "クローン {{count}}",
+            "patches_heal": "修復 {{count}}"
+        }
     },
     "ko": {
-        "name": "알파벳순",
-        "created": "생성일",
-        "modified": "수정일",
-        "imageCount": "이미지 수",
-        "sortFolders": "폴더 정렬"
+        "masks": {
+            "clone": "복제",
+            "heal": "복구"
+        },
+        "ai": {
+            "manualCleanupTitle": "수동 정리",
+            "generativeEditTitle": "생성형 편집",
+            "patches_clone": "복제 {{count}}",
+            "patches_heal": "복구 {{count}}"
+        }
     },
     "pl": {
-        "name": "Alfabetycznie",
-        "created": "Data utworzenia",
-        "modified": "Data modyfikacji",
-        "imageCount": "Liczba obrazów",
-        "sortFolders": "Sortuj foldery"
+        "masks": {
+            "clone": "Klonowanie",
+            "heal": "Naprawianie"
+        },
+        "ai": {
+            "manualCleanupTitle": "Ręczne czyszczenie",
+            "generativeEditTitle": "Edycja generatywna",
+            "patches_clone": "Klonowanie {{count}}",
+            "patches_heal": "Naprawianie {{count}}"
+        }
     },
     "pt": {
-        "name": "Alfabeticamente",
-        "created": "Data de criação",
-        "modified": "Data de modificação",
-        "imageCount": "Contagem de imagens",
-        "sortFolders": "Ordenar pastas"
+        "masks": {
+            "clone": "Clonar",
+            "heal": "Restaurar"
+        },
+        "ai": {
+            "manualCleanupTitle": "Limpeza Manual",
+            "generativeEditTitle": "Edição Generativa",
+            "patches_clone": "Clonar {{count}}",
+            "patches_heal": "Restaurar {{count}}"
+        }
     },
     "ru": {
-        "name": "По алфавиту",
-        "created": "Дата создания",
-        "modified": "Дата изменения",
-        "imageCount": "Количество изображений",
-        "sortFolders": "Сортировать папки"
+        "masks": {
+            "clone": "Штамп",
+            "heal": "Восстановление"
+        },
+        "ai": {
+            "manualCleanupTitle": "Ручная очистка",
+            "generativeEditTitle": "Генеративное редактирование",
+            "patches_clone": "Штамп {{count}}",
+            "patches_heal": "Восстановление {{count}}"
+        }
     },
     "zh-CN": {
-        "name": "按字母顺序",
-        "created": "创建日期",
-        "modified": "修改日期",
-        "imageCount": "图像数量",
-        "sortFolders": "对文件夹排序"
+        "masks": {
+            "clone": "克隆",
+            "heal": "修复"
+        },
+        "ai": {
+            "manualCleanupTitle": "手动清理",
+            "generativeEditTitle": "生成式编辑",
+            "patches_clone": "克隆 {{count}}",
+            "patches_heal": "修复 {{count}}"
+        }
     },
     "zh-TW": {
-        "name": "按字母順序",
-        "created": "建立日期",
-        "modified": "修改日期",
-        "imageCount": "影像數量",
-        "sortFolders": "對資料夾排序"
+        "masks": {
+            "clone": "仿製",
+            "heal": "修復"
+        },
+        "ai": {
+            "manualCleanupTitle": "手動清理",
+            "generativeEditTitle": "生成式編輯",
+            "patches_clone": "仿製 {{count}}",
+            "patches_heal": "修復 {{count}}"
+        }
     }
 }
 
 def sort_dict_recursively(item):
-    """Recursively sorts dictionary keys alphabetically."""
     if isinstance(item, dict):
         return {k: sort_dict_recursively(v) for k, v in sorted(item.items())}
     elif isinstance(item, list):
@@ -110,24 +169,22 @@ def update_json_file(file_path: Path, trans: dict):
         print(f"Error parsing JSON in {file_path.name}. Skipping.")
         return
 
-    if "library" not in data or not isinstance(data["library"], dict):
-        data["library"] = {}
-    if "folders" not in data["library"] or not isinstance(data["library"]["folders"], dict):
-        data["library"]["folders"] = {}
+    # masks -> types -> clone / heal
+    masks_node = data.setdefault("masks", {})
+    types_node = masks_node.setdefault("types", {})
+    types_node["clone"] = trans["masks"]["clone"]
+    types_node["heal"] = trans["masks"]["heal"]
 
-    folders = data["library"]["folders"]
+    # editor -> ai -> title translations
+    editor_node = data.setdefault("editor", {})
+    ai_node = editor_node.setdefault("ai", {})
+    ai_node["manualCleanupTitle"] = trans["ai"]["manualCleanupTitle"]
+    ai_node["generativeEditTitle"] = trans["ai"]["generativeEditTitle"]
 
-    if "sort" not in folders or not isinstance(folders["sort"], dict):
-        folders["sort"] = {}
-    if "tooltips" not in folders or not isinstance(folders["tooltips"], dict):
-        folders["tooltips"] = {}
-
-    folders["sort"]["name"] = trans["name"]
-    folders["sort"]["created"] = trans["created"]
-    folders["sort"]["modified"] = trans["modified"]
-    folders["sort"]["imageCount"] = trans["imageCount"]
-
-    folders["tooltips"]["sortFolders"] = trans["sortFolders"]
+    # editor -> ai -> patches -> clone / heal
+    patches_node = ai_node.setdefault("patches", {})
+    patches_node["clone"] = trans["ai"]["patches_clone"]
+    patches_node["heal"] = trans["ai"]["patches_heal"]
 
     sorted_data = sort_dict_recursively(data)
 

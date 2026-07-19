@@ -571,7 +571,7 @@ export function useAppContextMenus(props: UseAppContextMenusProps) {
           disabled: !isSingleSelection,
           icon: Copy,
           label: t('contextMenus.editor.copyAdjustments'),
-          onClick: () => handleCopyAdjustments(),
+          onClick: () => handleCopyAdjustments(finalSelection[0]),
         },
         {
           disabled: copiedAdjustments === null,

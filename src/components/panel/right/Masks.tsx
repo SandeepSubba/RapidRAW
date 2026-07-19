@@ -14,6 +14,8 @@ import {
   TriangleRight,
   User,
   Sun,
+  Stamp,
+  Bandage,
 } from 'lucide-react';
 import i18n from 'i18next';
 
@@ -32,6 +34,8 @@ export enum Mask {
   Luminance = 'luminance',
   QuickEraser = 'quick-eraser',
   Radial = 'radial',
+  Clone = 'clone',
+  Heal = 'heal',
 }
 
 export enum SubMaskMode {
@@ -82,6 +86,8 @@ export function formatMaskTypeName(type: string) {
   if (type === Mask.Linear) return i18n.t('masks.types.linear');
   if (type === Mask.Luminance) return i18n.t('masks.types.luminance');
   if (type === Mask.Radial) return i18n.t('masks.types.radial');
+  if (type === Mask.Clone) return i18n.t('masks.types.clone');
+  if (type === Mask.Heal) return i18n.t('masks.types.heal');
   return type.charAt(0).toUpperCase() + type.slice(1);
 }
 
@@ -112,6 +118,8 @@ export const MASK_ICON_MAP: Record<Mask, any> = {
   [Mask.Luminance]: Sparkles,
   [Mask.QuickEraser]: Eraser,
   [Mask.Radial]: Circle,
+  [Mask.Clone]: Stamp,
+  [Mask.Heal]: Bandage,
 };
 
 export const MASK_PANEL_CREATION_TYPES: Array<MaskType> = [
@@ -166,7 +174,22 @@ export const MASK_PANEL_CREATION_TYPES: Array<MaskType> = [
   },
 ];
 
-export const AI_PANEL_CREATION_TYPES: Array<MaskType> = [
+export const AI_MANUAL_CLEANUP_TYPES: Array<MaskType> = [
+  {
+    disabled: false,
+    icon: Stamp,
+    name: 'Clone',
+    type: Mask.Clone,
+  },
+  {
+    disabled: false,
+    icon: Bandage,
+    name: 'Heal',
+    type: Mask.Heal,
+  },
+];
+
+export const AI_GENERATIVE_CREATION_TYPES: Array<MaskType> = [
   {
     disabled: false,
     icon: Eraser,
@@ -309,46 +332,6 @@ export const OTHERS_MASK_TYPES: Array<MaskType> = [
 ];
 
 export const AI_SUB_MASK_COMPONENT_TYPES: Array<MaskType> = [
-  {
-    disabled: false,
-    icon: Sparkles,
-    name: 'Subject',
-    type: Mask.AiSubject,
-  },
-  {
-    disabled: false,
-    icon: User,
-    name: 'Foreground',
-    type: Mask.AiForeground,
-  },
-  {
-    disabled: false,
-    icon: Eye,
-    name: 'Eyes',
-    type: Mask.AiEyes,
-  },
-  {
-    disabled: false,
-    icon: Smile,
-    name: 'Mouth',
-    type: Mask.AiMouth,
-  },
-  {
-    disabled: false,
-    icon: Brush,
-    name: 'Brush',
-    type: Mask.Brush,
-  },
-  {
-    disabled: false,
-    icon: TriangleRight,
-    name: 'Linear',
-    type: Mask.Linear,
-  },
-  {
-    disabled: false,
-    icon: Circle,
-    name: 'Radial',
-    type: Mask.Radial,
-  },
+  ...AI_MANUAL_CLEANUP_TYPES,
+  ...AI_GENERATIVE_CREATION_TYPES,
 ];

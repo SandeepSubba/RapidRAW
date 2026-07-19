@@ -224,28 +224,25 @@ pub fn get_album_images(
                 .unwrap_or(0);
 
             let is_virtual_copy = virtual_path.contains("?vc=");
+            let is_cloud_placeholder = crate::file_management::is_cloud_placeholder(&source_path);
 
-            let (is_edited, is_negative, tags, rating) = {
-                let mut metadata = crate::exif_processing::load_sidecar(&sidecar_path);
+            let xmp_is_placeholder = enable_xmp_sync
+                && resolve_xmp_path(&source_path)
+                    .is_some_and(|p| crate::file_management::is_cloud_placeholder(&p));
 
-                if enable_xmp_sync
-                    && sync_metadata_from_xmp(&source_path, &mut metadata)
-                    && let Ok(json) = serde_json::to_string_pretty(&metadata)
+            let (is_edited, is_negative, tags, rating) =
+                if crate::file_management::is_cloud_placeholder(&sidecar_path) || xmp_is_placeholder
                 {
-                    let _ = fs::write(&sidecar_path, json);
-                }
-
-                let is_raw = crate::formats::is_raw_file(&source_path);
-                let tm_override =
-                    crate::image_processing::resolve_tonemapper_override(&settings, is_raw);
-                let edited = crate::image_processing::is_image_edited(
-                    &metadata.adjustments,
-                    is_raw,
-                    tm_override,
-                );
-                let negative = crate::file_management::adjustments_is_negative(&metadata.adjustments);
-                (edited, negative, metadata.tags, metadata.rating)
-            };
+                    enqueue_metadata(
+                        &app_handle,
+                        virtual_path.clone(),
+                        source_path.clone(),
+                        sidecar_path.clone(),
+                    );
+                    (false, false, None, 0)
+                } else {
+                    resolve_image_metadata(&source_path, &sidecar_path, enable_xmp_sync, &settings)
+                };
 
             Some(ImageFile {
                 path: virtual_path,
@@ -256,6 +253,7 @@ pub fn get_album_images(
                 exif: None,
                 is_virtual_copy,
                 rating,
+                is_cloud_placeholder,
             })
         })
         .collect();

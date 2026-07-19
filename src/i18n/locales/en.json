@@ -66,13 +66,13 @@
       "whiteBalance": "White Balance"
     },
     "curves": {
-      "channelTitle": "{{channel}} Channel",
       "channels": {
         "blue": "Blue",
         "green": "Green",
         "luma": "Luma",
         "red": "Red"
       },
+      "channelTitle": "{{channel}} Channel",
       "copyParametric": "Copy {{channel}} Parametric Curve",
       "copyPoint": "Copy {{channel}} Point Curve",
       "curveDataUnavailable": "Curve data not available.",
@@ -355,7 +355,9 @@
       "dropzoneText": "Drop here to create a new edit",
       "editSettingsTitle": "Edit Settings",
       "editsTitle": "Edits",
+      "generativeEditTitle": "Generative Edit",
       "inpaintingTitle": "Inpainting",
+      "manualCleanupTitle": "Manual Cleanup",
       "noImageSelected": "No image selected.",
       "params": {
         "feather": "Feather",
@@ -365,6 +367,12 @@
         "aiEdit": "AI Edit {{count}}",
         "aiEdit_one": "AI Edit {{count}}",
         "aiEdit_other": "AI Edit {{count}}",
+        "clone": "Clone {{count}}",
+        "clone_one": "Clone {{count}}",
+        "clone_other": "Clone {{count}}",
+        "heal": "Heal {{count}}",
+        "heal_one": "Heal {{count}}",
+        "heal_other": "Heal {{count}}",
         "invertedName": "{{name}} Inverted",
         "quickErase": "Quick Erase {{count}}",
         "quickErase_one": "Quick Erase {{count}}",
@@ -505,6 +513,11 @@
         "transform": "Perspective and keystone correction"
       }
     },
+    "externalEdit": {
+      "done": "Done",
+      "exporting": "Exporting…",
+      "savesTo": "External edit — saves to"
+    },
     "masks": {
       "actions": {
         "addComponent": "Add",
@@ -595,6 +608,7 @@
       "tooltips": {
         "addToCurrent": "Add {{name}} to Current Mask or Create New (Right-click)",
         "createNew": "Create New {{name}} Mask",
+        "selectNewSourcePoint": "{{modifier}} + Click to select a new source point",
         "showMore": "Show More Mask Types"
       }
     },
@@ -645,8 +659,8 @@
       "organization": {
         "addTagPlaceholder": "Add tag...",
         "colorLabel": "Color Label",
-        "noTags": "No tags",
         "none": "None",
+        "noTags": "No tags",
         "rating": "Rating",
         "ratingLabels": "Rating & Labels",
         "tags": "Tags",
@@ -824,12 +838,12 @@
       "estimatedSize": "Estimated file size: ~{{size}}",
       "estimatedTotalSize": "Estimated total size: ~{{size}}",
       "estimatingSize": "Estimating size...",
+      "exporting": "Exporting…",
+      "exportingProgress": "Exporting… ({{current}}/{{total}})",
       "exportMultiple": "Export {{count}} {{label}}",
       "exportMultiple_one": "Export {{count}} {{label}}",
       "exportMultiple_other": "Export {{count}} {{label}}",
       "exportSingle": "Export {{label}}",
-      "exporting": "Exporting…",
-      "exportingProgress": "Exporting… ({{current}}/{{total}})",
       "failed": "Export failed",
       "noImageSelected": "No image selected for export.",
       "noImagesSelected": "No images selected.",
@@ -979,6 +993,7 @@
       "progress": "Importing... ({{current}}/{{total}})"
     },
     "items": {
+      "cloudPlaceholder": "Stored in iCloud — not downloaded",
       "collapseFolder": "Collapse Folder",
       "currentFolder": "Current Folder",
       "expandFolder": "Expand Folder",
@@ -1053,10 +1068,12 @@
     "types": {
       "all": "Whole Image",
       "brush": "Brush",
+      "clone": "Clone",
       "color": "Color",
       "depth": "Depth",
       "flow": "Flow",
       "foreground": "Foreground",
+      "heal": "Heal",
       "linear": "Linear",
       "luminance": "Luminance",
       "others": "Others",
@@ -1167,9 +1184,9 @@
       "applyButton_one": "Apply to 1 image",
       "applyButton_other": "Apply to {{count}} images",
       "bestImage": "Best Image",
+      "blurryImagesTab": "Blurry Images",
       "blurThreshold": "Blur Threshold",
       "blurThresholdDesc": "Images with a sharpness score below this value are flagged. Higher is stricter.",
-      "blurryImagesTab": "Blurry Images",
       "cancel": "Cancel",
       "close": "Close",
       "cullingFailed": "Culling Failed",
@@ -1502,6 +1519,7 @@
         "exposure_down": "Decrease exposure",
         "exposure_up": "Increase exposure",
         "open_image": "Open selected image",
+        "open_settings": "Open settings",
         "paste_adjustments": "Paste copied adjustments",
         "paste_files": "Paste file(s) to current folder",
         "preview_next": "Next image",
@@ -1707,8 +1725,8 @@
     "tagging": {
       "addCustomPlaceholder": "Add custom AI tags (comma separated)...",
       "addCustomTooltip": "Add AI tag",
-      "addShortcutTooltip": "Add Shortcut",
       "addShortcutsPlaceholder": "Add shortcuts (comma separated)...",
+      "addShortcutTooltip": "Add Shortcut",
       "aiTagging": "AI Tagging",
       "aiTaggingDesc": "Enables automatic image tagging using an AI (CLIP) model. This will download an additional model and impact performance while browsing folders. Tags are used for searching a folder.",
       "amount": "Amount",
@@ -1815,9 +1833,13 @@
     },
     "lut": {
       "clearLut": "Clear LUT",
+      "empty": "No LUTs yet — import some",
       "filterLabel": "LUT Files",
+      "import": "Import profiles",
+      "importFailed": "Failed to import LUTs",
       "intensity": "Intensity",
       "label": "LUT",
+      "removeLut": "Remove LUT",
       "select": "Select",
       "selectLutFile": "Select a LUT file",
       "unsupportedFormat": "Unsupported file format(s) detected: .{{ext}}"

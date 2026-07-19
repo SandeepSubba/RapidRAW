@@ -87,7 +87,7 @@ export function useEditorActions() {
       const isAndroid = useSettingsStore.getState().osPlatform === 'android';
       try {
         const result: { size: number } = await invoke('load_and_parse_lut', { path });
-        let name = isAndroid
+        let name = isAndroid && path.startsWith('content://')
           ? await invoke<string>('resolve_android_content_uri_name', { uriStr: path })
           : path.split(/[\\/]/).pop() || 'LUT';
         setAdjustments((prev: Adjustments) => ({
@@ -103,6 +103,24 @@ export function useEditorActions() {
       }
     },
     [setAdjustments],
+  );
+
+  const setLutPreviewOverride = useCallback(
+    (path: string | null) => {
+      setEditor((state) => {
+        if (!path) return { previewOverride: null };
+        const name = path.split(/[\\/]/).pop() || 'LUT';
+        return {
+          previewOverride: {
+            ...state.adjustments,
+            lutPath: path,
+            lutName: name,
+            lutIntensity: state.adjustments.lutIntensity,
+          },
+        };
+      });
+    },
+    [setEditor],
   );
 
   const handleResetAdjustments = useCallback(
@@ -138,22 +156,22 @@ export function useEditorActions() {
     const { libraryActivePath, multiSelectedPaths } = useLibraryStore.getState();
     let sourceAdjustments: any = null;
 
-    if (selectedImage) {
+    const pathToCopyFrom =
+      pathOverride || (selectedImage ? selectedImage.path : libraryActivePath || multiSelectedPaths[0]);
+
+    if (selectedImage && pathToCopyFrom === selectedImage.path) {
       sourceAdjustments = adjustments;
-    } else {
-      const pathToCopyFrom = pathOverride || libraryActivePath || multiSelectedPaths[0];
-      if (pathToCopyFrom) {
-        try {
-          const meta: any = await invoke(Invokes.LoadMetadata, { path: pathToCopyFrom });
-          if (meta?.adjustments && !meta.adjustments.is_null) {
-            sourceAdjustments = normalizeLoadedAdjustments(meta.adjustments);
-          } else {
-            sourceAdjustments = INITIAL_ADJUSTMENTS;
-          }
-        } catch (err) {
-          toast.error(`Failed to load metadata for copying: ${err}`);
-          return;
+    } else if (pathToCopyFrom) {
+      try {
+        const meta: any = await invoke(Invokes.LoadMetadata, { path: pathToCopyFrom });
+        if (meta?.adjustments && !meta.adjustments.is_null) {
+          sourceAdjustments = normalizeLoadedAdjustments(meta.adjustments);
+        } else {
+          sourceAdjustments = INITIAL_ADJUSTMENTS;
         }
+      } catch (err) {
+        toast.error(`Failed to load metadata for copying: ${err}`);
+        return;
       }
     }
 
@@ -293,6 +311,7 @@ export function useEditorActions() {
     handleRotate,
     handleAutoAdjustments,
     handleLutSelect,
+    setLutPreviewOverride,
     handleResetAdjustments,
     handleCopyAdjustments,
     handlePasteAdjustments,

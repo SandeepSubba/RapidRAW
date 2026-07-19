@@ -5,6 +5,7 @@ use rawler::decoders::RawDecodeParams;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tauri::{AppHandle, Emitter};
@@ -27,6 +28,9 @@ fn load_for_analysis(
     path: &str,
     settings: &crate::app_settings::AppSettings,
 ) -> Result<DynamicImage, String> {
+    if crate::file_management::is_cloud_placeholder(Path::new(path)) {
+        return Err(format!("'{}' is stored in iCloud and not downloaded", path));
+    }
     if is_raw_file(path) {
         if let Some(img) = try_fast_embedded_preview(path) {
             return Ok(img);
