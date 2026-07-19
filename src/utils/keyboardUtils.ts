@@ -41,14 +41,15 @@ export const ADJUSTMENT_NUDGES: AdjustmentNudge[] = [
   // Note: the UI's Exposure slider writes `brightness`; `exposure` is the EV Shift slider.
   { action: 'exposure_up', description: 'settings.keybinds.actions.exposure_up', defaultCombo: ['ctrl', 'Equal'], adjustmentKey: 'brightness', delta: 0.1, min: -5, max: 5 },
   { action: 'exposure_down', description: 'settings.keybinds.actions.exposure_down', defaultCombo: ['ctrl', 'Minus'], adjustmentKey: 'brightness', delta: -0.1, min: -5, max: 5 },
-  // Contrast — matches Capture One's Ctrl(+Shift+Cmd) modifier family.
-  { action: 'contrast_up', description: 'settings.keybinds.actions.contrast_up', defaultCombo: ['ctrl', 'shift', 'Equal'], adjustmentKey: 'contrast', delta: 5, min: -100, max: 100 },
-  { action: 'contrast_down', description: 'settings.keybinds.actions.contrast_down', defaultCombo: ['ctrl', 'shift', 'Minus'], adjustmentKey: 'contrast', delta: -5, min: -100, max: 100 },
+  // Contrast — matches Capture One's Ctrl(+Shift+Cmd) modifier family. Step 1
+  // for subtle nudges (as with temperature/tint below).
+  { action: 'contrast_up', description: 'settings.keybinds.actions.contrast_up', defaultCombo: ['ctrl', 'shift', 'Equal'], adjustmentKey: 'contrast', delta: 1, min: -100, max: 100 },
+  { action: 'contrast_down', description: 'settings.keybinds.actions.contrast_down', defaultCombo: ['ctrl', 'shift', 'Minus'], adjustmentKey: 'contrast', delta: -1, min: -100, max: 100 },
   // Saturation — matches Capture One's Ctrl(+Alt+Cmd) modifier family.
-  { action: 'saturation_up', description: 'settings.keybinds.actions.saturation_up', defaultCombo: ['ctrl', 'alt', 'Equal'], adjustmentKey: 'saturation', delta: 5, min: -100, max: 100 },
-  { action: 'saturation_down', description: 'settings.keybinds.actions.saturation_down', defaultCombo: ['ctrl', 'alt', 'Minus'], adjustmentKey: 'saturation', delta: -5, min: -100, max: 100 },
-  { action: 'vibrance_up', description: 'settings.keybinds.actions.vibrance_up', defaultCombo: ['shift', 'alt', 'Equal'], adjustmentKey: 'vibrance', delta: 5, min: -100, max: 100 },
-  { action: 'vibrance_down', description: 'settings.keybinds.actions.vibrance_down', defaultCombo: ['shift', 'alt', 'Minus'], adjustmentKey: 'vibrance', delta: -5, min: -100, max: 100 },
+  { action: 'saturation_up', description: 'settings.keybinds.actions.saturation_up', defaultCombo: ['ctrl', 'alt', 'Equal'], adjustmentKey: 'saturation', delta: 1, min: -100, max: 100 },
+  { action: 'saturation_down', description: 'settings.keybinds.actions.saturation_down', defaultCombo: ['ctrl', 'alt', 'Minus'], adjustmentKey: 'saturation', delta: -1, min: -100, max: 100 },
+  { action: 'vibrance_up', description: 'settings.keybinds.actions.vibrance_up', defaultCombo: ['shift', 'alt', 'Equal'], adjustmentKey: 'vibrance', delta: 1, min: -100, max: 100 },
+  { action: 'vibrance_down', description: 'settings.keybinds.actions.vibrance_down', defaultCombo: ['shift', 'alt', 'Minus'], adjustmentKey: 'vibrance', delta: -1, min: -100, max: 100 },
   // Temperature / Tint together cover white balance. Temperature gets the
   // simpler Shift + +/- combo; tint takes the fuller modifier family. Step is 1
   // (not 5 like the tonal sliders) so white balance nudges stay subtle.
