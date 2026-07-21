@@ -60,8 +60,8 @@ export const ADJUSTMENT_NUDGES: AdjustmentNudge[] = [
   // Vignette on Alt + +/-, same +=increase / -=decrease direction as every other
   // adjustment so muscle memory carries over: Alt+- darkens (more vignette),
   // Alt++ lightens. Range is the Effects slider's own -100..100.
-  { action: 'vignette_down', description: 'settings.keybinds.actions.vignette_down', defaultCombo: ['alt', 'Minus'], adjustmentKey: 'vignetteAmount', delta: -5, min: -100, max: 100 },
-  { action: 'vignette_up', description: 'settings.keybinds.actions.vignette_up', defaultCombo: ['alt', 'Equal'], adjustmentKey: 'vignetteAmount', delta: 5, min: -100, max: 100 },
+  { action: 'vignette_down', description: 'settings.keybinds.actions.vignette_down', defaultCombo: ['alt', 'Minus'], adjustmentKey: 'vignetteAmount', delta: -1, min: -100, max: 100 },
+  { action: 'vignette_up', description: 'settings.keybinds.actions.vignette_up', defaultCombo: ['alt', 'Equal'], adjustmentKey: 'vignetteAmount', delta: 1, min: -100, max: 100 },
 ];
 
 // Effective step magnitude for an adjustment nudge, honoring a user override
