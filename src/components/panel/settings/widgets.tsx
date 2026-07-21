@@ -37,6 +37,10 @@ export interface KeybindRowProps {
   recordingAction: string | null;
   onStartRecording: (action: string) => void;
   isConflicting: boolean;
+  // Present only for adjustment nudge rows: the configurable step magnitude.
+  step?: number;
+  defaultStep?: number;
+  onStepChange?: (step: number) => void;
 }
 
 export interface SettingItemProps {
@@ -53,6 +57,9 @@ export const KeybindRow = ({
   recordingAction,
   onStartRecording,
   isConflicting,
+  step,
+  defaultStep,
+  onStepChange,
 }: KeybindRowProps) => {
   const { t } = useTranslation();
   const recording = recordingAction === def.action;
@@ -76,12 +83,41 @@ export const KeybindRow = ({
     return () => window.removeEventListener('keydown', handler, { capture: true });
   }, [recording, def.action, onSave, onStartRecording]);
 
+  // Local text state for the step field so partial input (e.g. "0.") doesn't get
+  // clobbered by the committed value while typing; commit valid positives only.
+  const [stepText, setStepText] = useState(step != null ? String(step) : '');
+  useEffect(() => {
+    setStepText(step != null ? String(step) : '');
+  }, [step]);
+
   const displayCombo = currentCombo !== undefined ? (currentCombo.length ? currentCombo : null) : def.defaultCombo;
 
   return (
     <div className="flex justify-between items-center py-2">
       <Text variant={TextVariants.label}>{t(def.description as any)}</Text>
       <div className="flex items-center gap-1">
+        {onStepChange && (
+          <div className="flex items-center gap-1.5 mr-2">
+            <Text variant={TextVariants.small} className="text-text-secondary">
+              {t('settings.controls.step')}
+            </Text>
+            <input
+              type="number"
+              inputMode="decimal"
+              min={0}
+              step={defaultStep ?? 1}
+              value={stepText}
+              onChange={(e) => {
+                setStepText(e.target.value);
+                const v = parseFloat(e.target.value);
+                if (!Number.isNaN(v) && v > 0) onStepChange(v);
+              }}
+              onBlur={() => setStepText(step != null ? String(step) : '')}
+              className="w-16 px-2 py-1 text-sm text-text-primary bg-bg-primary border border-border-color rounded-md focus:border-accent focus:outline-none"
+              aria-label={t('settings.controls.step')}
+            />
+          </div>
+        )}
         {isConflicting && <span className="text-yellow-400 text-xs">⚠</span>}
         <button onClick={() => onStartRecording(def.action)} className="flex items-center gap-1 flex-wrap shrink-0">
           {recording ? (

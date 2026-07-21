@@ -1421,6 +1421,7 @@
       "pressKey": "Press a key... (Esc to clear)",
       "resetDefaults": "Reset All to Defaults",
       "speed": "Speed",
+      "step": "Step",
       "title": "Mouse Controls",
       "zoom": "Zoom Speed Multiplier",
       "zoomDesc": "Adjust how fast the canvas zooms in and out when using the scroll wheel or pinch gesture."

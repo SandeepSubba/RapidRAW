@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { ImageFile, Panel, ExifOverlay } from '../components/ui/AppProperties';
-import { KEYBIND_DEFINITIONS, ADJUSTMENT_NUDGES, normalizeCombo } from '../utils/keyboardUtils';
+import { KEYBIND_DEFINITIONS, ADJUSTMENT_NUDGES, normalizeCombo, resolveNudgeStep } from '../utils/keyboardUtils';
 import { useEditorStore } from '../store/useEditorStore';
 import { useLibraryStore } from '../store/useLibraryStore';
 import { useSettingsStore } from '../store/useSettingsStore';
@@ -487,10 +487,13 @@ export const useKeyboardShortcuts = ({
         shouldFire: (s: any) => !!s.editor.selectedImage,
         execute: (e: any) => {
           e.preventDefault();
+          // Read the step live so user changes in Settings apply without a rebuild.
+          const step = resolveNudgeStep(nudge, useSettingsStore.getState().appSettings?.adjustmentSteps);
+          const delta = nudge.delta < 0 ? -step : step;
           setAdjustments((prev: any) => {
             const current = typeof prev[nudge.adjustmentKey] === 'number' ? prev[nudge.adjustmentKey] : 0;
-            // Round to 2 decimals so repeated 0.1 EV steps don't accumulate float drift.
-            const next = Math.round(Math.min(nudge.max, Math.max(nudge.min, current + nudge.delta)) * 100) / 100;
+            // Round to 2 decimals so repeated fractional steps don't accumulate float drift.
+            const next = Math.round(Math.min(nudge.max, Math.max(nudge.min, current + delta)) * 100) / 100;
             return { ...prev, [nudge.adjustmentKey]: next };
           });
         },

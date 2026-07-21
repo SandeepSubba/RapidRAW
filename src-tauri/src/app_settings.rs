@@ -423,6 +423,12 @@ pub struct AppSettings {
     pub zoom_speed_multiplier: Option<f32>,
     #[serde(default)]
     pub keybinds: HashMap<String, Vec<String>>,
+    // Per-adjustment nudge step magnitude, keyed by adjustment key (e.g.
+    // "brightness", "contrast"). Overrides the built-in default step for the
+    // keyboard increase/decrease shortcuts; the direction stays fixed by the
+    // shortcut. Empty map = use built-in defaults.
+    #[serde(default)]
+    pub adjustment_steps: HashMap<String, f64>,
     #[serde(default)]
     pub thumbnail_worker_threads: Option<u32>,
     #[serde(default)]
@@ -519,6 +525,7 @@ impl Default for AppSettings {
             canvas_input_mode: Some("mouse".to_string()),
             zoom_speed_multiplier: Some(1.0),
             keybinds: HashMap::new(),
+            adjustment_steps: HashMap::new(),
             #[cfg(target_os = "android")]
             thumbnail_worker_threads: Some(2),
             #[cfg(not(target_os = "android"))]

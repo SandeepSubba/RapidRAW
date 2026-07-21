@@ -28,7 +28,7 @@ import Slider from '../ui/Slider';
 import { ThemeProps, THEMES, DEFAULT_THEME_ID } from '../../utils/themes';
 import { useTranslation } from 'react-i18next';
 import { Invokes } from '../ui/AppProperties';
-import { KEYBIND_DEFINITIONS, KEYBIND_SECTIONS } from '../../utils/keyboardUtils';
+import { ADJUSTMENT_NUDGES, KEYBIND_DEFINITIONS, KEYBIND_SECTIONS, resolveNudgeStep } from '../../utils/keyboardUtils';
 import Text from '../ui/Text';
 import { TextColors, TextVariants, TextWeights } from '../../types/typography';
 import { useOsPlatform } from '../../hooks/useOsPlatform';
@@ -581,6 +581,16 @@ export default function SettingsPanel({
   const handleKeybindSave = (action: string, combo: string[]) => {
     const newKeybinds = { ...(appSettings?.keybinds || {}), [action]: combo };
     onSettingsChange({ ...appSettings, keybinds: newKeybinds });
+  };
+
+  // Adjustment rows carry a configurable step; look up the nudge (which holds the
+  // adjustmentKey + default step) by action. Step is stored per adjustmentKey so
+  // the increase and decrease rows for one adjustment share a single value.
+  const nudgeByAction = useMemo(() => new Map(ADJUSTMENT_NUDGES.map((n) => [n.action, n])), []);
+
+  const handleAdjustmentStepSave = (adjustmentKey: string, step: number) => {
+    const newSteps = { ...(appSettings?.adjustmentSteps || {}), [adjustmentKey]: step };
+    onSettingsChange({ ...appSettings, adjustmentSteps: newSteps });
   };
 
   const conflictingKeys = useMemo(() => {
@@ -2011,24 +2021,35 @@ export default function SettingsPanel({
                         <div key={section.id}>
                           <Text variant={TextVariants.heading}>{t(section.label as any)}</Text>
                           <div className="divide-y divide-border-color">
-                            {sectionDefs.map((def) => (
-                              <KeybindRow
-                                key={def.action}
-                                def={def}
-                                currentCombo={userKb[def.action]}
-                                osPlatform={osPlatform}
-                                onSave={handleKeybindSave}
-                                recordingAction={recordingAction}
-                                onStartRecording={setRecordingAction}
-                                isConflicting={conflictingKeys.has(def.action)}
-                              />
-                            ))}
+                            {sectionDefs.map((def) => {
+                              const nudge = nudgeByAction.get(def.action);
+                              return (
+                                <KeybindRow
+                                  key={def.action}
+                                  def={def}
+                                  currentCombo={userKb[def.action]}
+                                  osPlatform={osPlatform}
+                                  onSave={handleKeybindSave}
+                                  recordingAction={recordingAction}
+                                  onStartRecording={setRecordingAction}
+                                  isConflicting={conflictingKeys.has(def.action)}
+                                  step={nudge ? resolveNudgeStep(nudge, appSettings?.adjustmentSteps) : undefined}
+                                  defaultStep={nudge ? Math.abs(nudge.delta) : undefined}
+                                  onStepChange={
+                                    nudge ? (v: number) => handleAdjustmentStepSave(nudge.adjustmentKey, v) : undefined
+                                  }
+                                />
+                              );
+                            })}
                           </div>
                         </div>
                       );
                     })}
                     <div className="flex justify-end mt-6">
-                      <Button variant="ghost" onClick={() => onSettingsChange({ ...appSettings, keybinds: {} })}>
+                      <Button
+                        variant="ghost"
+                        onClick={() => onSettingsChange({ ...appSettings, keybinds: {}, adjustmentSteps: {} })}
+                      >
                         {t('settings.controls.resetDefaults')}
                       </Button>
                     </div>

@@ -64,6 +64,15 @@ export const ADJUSTMENT_NUDGES: AdjustmentNudge[] = [
   { action: 'vignette_up', description: 'settings.keybinds.actions.vignette_up', defaultCombo: ['alt', 'Equal'], adjustmentKey: 'vignetteAmount', delta: 5, min: -100, max: 100 },
 ];
 
+// Effective step magnitude for an adjustment nudge, honoring a user override
+// (appSettings.adjustmentSteps, keyed by adjustmentKey). Falls back to the
+// built-in |delta|. The direction (sign) always comes from the nudge itself, so
+// a single configurable step drives both the increase and decrease shortcuts.
+export function resolveNudgeStep(nudge: AdjustmentNudge, overrides?: Record<string, number>): number {
+  const override = overrides?.[nudge.adjustmentKey];
+  return typeof override === 'number' && override > 0 ? override : Math.abs(nudge.delta);
+}
+
 export const KEYBIND_DEFINITIONS: KeybindDefinition[] = [
   {
     action: 'open_image',
