@@ -93,11 +93,11 @@ export const KeybindRow = ({
   const displayCombo = currentCombo !== undefined ? (currentCombo.length ? currentCombo : null) : def.defaultCombo;
 
   return (
-    <div className="flex justify-between items-center py-2">
+    <div className="flex justify-between items-center py-2 gap-4">
       <Text variant={TextVariants.label}>{t(def.description as any)}</Text>
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-3 shrink-0">
         {onStepChange && (
-          <div className="flex items-center gap-1.5 mr-2">
+          <div className="flex items-center gap-1.5">
             <Text variant={TextVariants.small} className="text-text-secondary">
               {t('settings.controls.step')}
             </Text>
@@ -113,13 +113,14 @@ export const KeybindRow = ({
                 if (!Number.isNaN(v) && v > 0) onStepChange(v);
               }}
               onBlur={() => setStepText(step != null ? String(step) : '')}
-              className="w-16 px-2 py-1 text-sm text-text-primary bg-bg-primary border border-border-color rounded-md focus:border-accent focus:outline-none"
+              className="w-16 px-2 py-1 text-sm text-text-primary bg-bg-primary border border-border-color rounded-md focus:border-accent focus:outline-none [color-scheme:dark]"
               aria-label={t('settings.controls.step')}
             />
           </div>
         )}
         {isConflicting && <span className="text-yellow-400 text-xs">⚠</span>}
-        <button onClick={() => onStartRecording(def.action)} className="flex items-center gap-1 flex-wrap shrink-0">
+        <div className="min-w-[13rem] flex justify-end shrink-0">
+          <button onClick={() => onStartRecording(def.action)} className="flex items-center gap-1 shrink-0">
           {recording ? (
             <Text
               as="kbd"
@@ -145,7 +146,8 @@ export const KeybindRow = ({
               )}
             </Text>
           )}
-        </button>
+          </button>
+        </div>
       </div>
     </div>
   );
