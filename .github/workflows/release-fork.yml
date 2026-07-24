@@ -37,18 +37,18 @@ jobs:
             label: 'Windows x64'
           - platform: 'macos-14'
             target: ''
-            args: '--bundles app,dmg'
+            args: '--features tether-usb --bundles app,dmg'
             label: 'macOS (Apple Silicon)'
           # Intel macOS is cross-compiled on an Apple Silicon runner. The dedicated
           # Intel runner (macos-13) is scarce/being retired and can hang in queue,
           # so we target x86_64 from macos-14 instead — no Intel runner needed.
           - platform: 'macos-14'
             target: 'x86_64-apple-darwin'
-            args: '--target x86_64-apple-darwin --bundles app,dmg'
+            args: '--target x86_64-apple-darwin --features tether-usb --bundles app,dmg'
             label: 'macOS (Intel)'
           - platform: 'ubuntu-22.04'
             target: ''
-            args: '--bundles deb,appimage'
+            args: '--features tether-usb --bundles deb,appimage'
             label: 'Linux x64'
 
     name: ${{ matrix.label }}
@@ -92,7 +92,12 @@ jobs:
             libssl-dev \
             libayatana-appindicator3-dev \
             librsvg2-dev \
-            patchelf
+            patchelf \
+            libgphoto2-dev
+
+      - name: Install macOS system dependencies
+        if: runner.os == 'macOS'
+        run: brew install libgphoto2 pkg-config
 
       - name: Install frontend dependencies
         run: npm install

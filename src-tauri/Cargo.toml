@@ -73,7 +73,7 @@ gphoto2 = { version = "3", optional = true }
 # Direct USB tethering needs libgphoto2 on the build machine
 # (brew install libgphoto2 / apt install libgphoto2-dev). Windows: build
 # with --no-default-features (folder-watch tethering still works there).
-default = ["tether-usb"]
+default = []
 tether-usb = ["dep:gphoto2"]
 
 [target.'cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))'.dependencies]
