@@ -8,6 +8,7 @@ import { Status } from '../../ui/ExportImportProperties';
 import { useSdImportActions } from '../../../hooks/useSdImportActions';
 import { useImportKeyboard } from '../../../hooks/useImportKeyboard';
 import SourcePicker from './SourcePicker';
+import ScannerPane from './ScannerPane';
 import CullGroupsGrid from './CullGroupsGrid';
 import ImportReviewBar from './ImportReviewBar';
 
@@ -73,6 +74,8 @@ export default function ImportView() {
     switch (stage) {
       case 'source':
         return <SourcePicker />;
+      case 'scanner':
+        return <ScannerPane />;
       case 'scanning':
         return <ProgressPane icon={<Loader2 size={40} className="text-accent animate-spin" />} title="Scanning for images…" />;
       case 'culling':
@@ -109,14 +112,16 @@ export default function ImportView() {
     <div className="flex flex-col h-full w-full bg-bg-primary">
       <header className="shrink-0 flex items-center gap-3 px-4 py-3 border-b border-surface">
         <button
-          onClick={closeImporter}
+          onClick={() => closeImporter()}
           className="p-2 rounded-md text-text-secondary hover:bg-surface transition-colors"
           data-tooltip="Back to library"
         >
           <ArrowLeft size={18} />
         </button>
         <div className="min-w-0">
-          <h1 className="text-text-primary font-medium leading-tight">Import from SD card</h1>
+          <h1 className="text-text-primary font-medium leading-tight">
+            {stage === 'scanner' ? 'Scan film' : 'Import from SD card'}
+          </h1>
           {sourcePath && (
             <p className="text-xs text-text-secondary truncate">
               {sourcePath}

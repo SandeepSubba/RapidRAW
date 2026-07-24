@@ -550,10 +550,17 @@ function App() {
     const unlistenLost = listen('tether-camera-lost', () => {
       useTetherStore.getState().setTether({ camera: null, liveView: false });
     });
+    // Scanned frames land in the current library folder; refresh so they're
+    // there when the scan view closes. No auto-select — that would eject the
+    // user from the scan pane between frames of a roll.
+    const unlistenScan = listen('scan-complete', () => {
+      tetherHandlersRef.current.handleLibraryRefresh();
+    });
     return () => {
       clearTimeout(selectTimeout);
       unlisten.then((f) => f());
       unlistenLost.then((f) => f());
+      unlistenScan.then((f) => f());
     };
   }, []);
 

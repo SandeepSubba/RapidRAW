@@ -37,6 +37,7 @@ mod raw_processing;
 mod sd_import;
 mod tagging;
 mod tagging_utils;
+mod scanning;
 mod tethering;
 mod window_customizer;
 
@@ -2359,6 +2360,7 @@ pub fn run() {
         })
         .manage(tethering::TetherState::default())
         .manage(tethering::usb::UsbCameraState::default())
+        .manage(scanning::ScanState::default())
         .invoke_handler(tauri::generate_handler![
             apply_adjustments,
             generate_preview_for_path,
@@ -2484,6 +2486,11 @@ pub fn run() {
             tethering::usb::tether_trigger_capture,
             tethering::usb::tether_set_config,
             tethering::usb::tether_set_live_view,
+            scanning::scan_detect_scanner,
+            scanning::scan_preview,
+            scanning::scan_rerender_preview,
+            scanning::scan_start,
+            scanning::scan_cancel,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

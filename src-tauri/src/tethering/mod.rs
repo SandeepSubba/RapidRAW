@@ -88,6 +88,25 @@ struct TetherShotPayload {
     shot_count: u32,
 }
 
+// Device frame counters reset/wrap (cameras) and scan rolls reuse prefixes
+// (scanner), so a new file can carry the name of one already in the folder;
+// never overwrite or drop it — suffix (DSCF0001.RAF → DSCF0001-1.RAF).
+// Shared by USB tethering and the film-scanner module.
+pub(crate) fn unique_path(dest: &std::path::Path, name: &str) -> PathBuf {
+    let target = dest.join(name);
+    if !target.exists() {
+        return target;
+    }
+    let (stem, ext) = match name.rsplit_once('.') {
+        Some((s, e)) => (s, format!(".{e}")),
+        None => (name, String::new()),
+    };
+    (1..)
+        .map(|i| dest.join(format!("{stem}-{i}{ext}")))
+        .find(|p| !p.exists())
+        .unwrap()
+}
+
 const POLL_INTERVAL: Duration = Duration::from_millis(500);
 // A file is ingested once its size is non-zero and unchanged for two
 // consecutive polls — vendor utilities stream RAWs progressively, so

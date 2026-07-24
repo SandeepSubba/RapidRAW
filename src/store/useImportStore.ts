@@ -23,7 +23,7 @@ export interface ImportFileSettings {
   autoLensCorrection: boolean;
 }
 
-export type ImportStage = 'source' | 'scanning' | 'culling' | 'scoring' | 'review' | 'importing';
+export type ImportStage = 'source' | 'scanner' | 'scanning' | 'culling' | 'scoring' | 'review' | 'importing';
 
 export interface ImportProgress {
   current: number;

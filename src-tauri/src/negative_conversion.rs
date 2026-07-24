@@ -220,7 +220,17 @@ pub fn maybe_apply_negative(image: DynamicImage, real_path: &str) -> DynamicImag
     }
 }
 
-fn analyze_bounds_for(image: &DynamicImage) -> [ChannelBounds; 3] {
+/// Positive render with caller-supplied params and bounds (scanner path: bounds
+/// come from the detected film-frame region, exposure from the auto anchor).
+pub fn positive_with(
+    image: &DynamicImage,
+    params: &NegativeConversionParams,
+    bounds: [ChannelBounds; 3],
+) -> DynamicImage {
+    run_pipeline(image, params, Some(bounds))
+}
+
+pub fn analyze_bounds_for(image: &DynamicImage) -> [ChannelBounds; 3] {
     let ref_img = downscale_f32_image(image, 1080, 1080);
     let ref_rgb = ref_img.to_rgb32f();
     let (w, h) = ref_rgb.dimensions();

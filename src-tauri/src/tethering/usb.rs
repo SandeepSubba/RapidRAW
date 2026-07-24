@@ -602,23 +602,7 @@ fn grab_preview_frame(camera: &gphoto2::Camera, ctx: &gphoto2::Context) -> Resul
     Ok(STANDARD.encode(&data))
 }
 
-// Camera frame counters reset/wrap, so a new shot can carry the name of a
-// file already in the session folder; never overwrite or drop it — suffix
-// (DSCF0001.RAF → DSCF0001-1.RAF).
-fn unique_path(dest: &std::path::Path, name: &str) -> PathBuf {
-    let target = dest.join(name);
-    if !target.exists() {
-        return target;
-    }
-    let (stem, ext) = match name.rsplit_once('.') {
-        Some((s, e)) => (s, format!(".{e}")),
-        None => (name, String::new()),
-    };
-    (1..)
-        .map(|i| dest.join(format!("{stem}-{i}{ext}")))
-        .find(|p| !p.exists())
-        .unwrap()
-}
+use super::unique_path;
 
 fn download_file(
     camera: &gphoto2::Camera,
