@@ -9,10 +9,16 @@ use tauri::{AppHandle, Emitter};
 
 use crate::tethering::unique_path;
 
+// Tone solve from the last preview: (bounds, exposure, gain). Scan frame reuses
+// it once so the saved render matches the tuned preview exactly instead of
+// re-solving on a fresh pass that can land slightly differently.
+type ToneSolve = ([crate::negative_conversion::ChannelBounds; 3], f32, f32);
+
 #[derive(Default)]
 pub struct ScanState {
     child: Arc<Mutex<Option<Child>>>,
     cancelled: Arc<AtomicBool>,
+    preview_tone: Arc<Mutex<Option<ToneSolve>>>,
 }
 
 #[derive(Serialize, Clone)]
@@ -93,6 +99,7 @@ fn run_scanimage(
     state_child: &Arc<Mutex<Option<Child>>>,
     cancelled: &Arc<AtomicBool>,
     app_handle: &AppHandle,
+    source: &str,
     mode: &str,
     dpi: u32,
     tmp_out: &Path,
@@ -104,7 +111,7 @@ fn run_scanimage(
     // avoids that and saves a separate probe.
     let mut child = Command::new(scanimage_bin())
         .args([
-            "--source", "Transparency Adapter",
+            "--source", source,
             "--mode", mode,
             "--depth", "16",
             "--resolution", &dpi.to_string(),
@@ -199,17 +206,184 @@ fn scan_mode(film_type: &str) -> &'static str {
     if film_type == "bw" { "Gray" } else { "Color" }
 }
 
+const SRC_VISIBLE: &str = "Transparency Adapter";
+const SRC_INFRARED: &str = "Transparency Adapter Infrared";
+
+// image::open guesses the format from the extension (scan temps like .partial
+// have none it recognizes) and its default decode limit rejects 7200dpi TIFFs
+// (~437MB > 512MB cap with overhead) — sniff the bytes and lift the limit.
+fn open_image(path: &Path) -> Result<image::DynamicImage, String> {
+    let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+    let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes))
+        .with_guessed_format()
+        .map_err(|e| e.to_string())?;
+    reader.no_limits();
+    reader.decode().map_err(|e| e.to_string())
+}
+
+// --- IR dust/scratch removal (Digital-ICE style) -------------------------
+// Film dyes pass infrared; dust, scratches and fibers block it. An IR pass of
+// the same frame shows defects as dark spots on a nearly blank field, so:
+// mask = pixels well below the local IR background, fill = nearest clean
+// pixels in four directions, inverse-distance weighted. Registration between
+// passes measured dead-on (dx=dy=0) on real hardware, so no alignment step;
+// the 2px dilation absorbs sub-pixel drift.
+
+fn box_blur(src: &[f32], w: usize, h: usize, r: usize) -> Vec<f32> {
+    let mut tmp = vec![0.0f32; src.len()];
+    let mut out = vec![0.0f32; src.len()];
+    for y in 0..h {
+        let row = &src[y * w..(y + 1) * w];
+        let mut sum: f32 = row[..=(r.min(w - 1))].iter().sum();
+        let mut cnt = r.min(w - 1) + 1;
+        for x in 0..w {
+            tmp[y * w + x] = sum / cnt as f32;
+            if x + r + 1 < w {
+                sum += row[x + r + 1];
+                cnt += 1;
+            }
+            if x >= r {
+                sum -= row[x - r];
+                cnt -= 1;
+            }
+        }
+    }
+    for x in 0..w {
+        let mut sum = 0.0f32;
+        let mut cnt = 0usize;
+        for y in 0..=r.min(h - 1) {
+            sum += tmp[y * w + x];
+            cnt += 1;
+        }
+        for y in 0..h {
+            out[y * w + x] = sum / cnt as f32;
+            if y + r + 1 < h {
+                sum += tmp[(y + r + 1) * w + x];
+                cnt += 1;
+            }
+            if y >= r {
+                sum -= tmp[(y - r) * w + x];
+                cnt -= 1;
+            }
+        }
+    }
+    out
+}
+
+fn dilate(mask: &mut [bool], w: usize, h: usize, r: usize) {
+    let src = mask.to_vec();
+    for y in 0..h {
+        for x in 0..w {
+            if src[y * w + x] {
+                for dy in y.saturating_sub(r)..=(y + r).min(h - 1) {
+                    for dx in x.saturating_sub(r)..=(x + r).min(w - 1) {
+                        mask[dy * w + dx] = true;
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Defect mask from the IR gray frame; vis_luma gates out the holder/border,
+// which blocks IR too but isn't film.
+fn ir_defect_mask(ir_gray: &[f32], vis_luma: &[f32], w: usize, h: usize, dpi: u32) -> Vec<bool> {
+    let r = ((12 * dpi) / 1800).clamp(4, 48) as usize;
+    let bg = box_blur(ir_gray, w, h, r);
+    let resid: Vec<f32> = bg.iter().zip(ir_gray).map(|(b, v)| b - v).collect();
+    let mut sample: Vec<f32> = resid.iter().step_by(97).copied().collect();
+    sample.sort_by(f32::total_cmp);
+    let med = sample[sample.len() / 2];
+    let mut dev: Vec<f32> = sample.iter().map(|v| (v - med).abs()).collect();
+    dev.sort_by(f32::total_cmp);
+    let mad = dev[dev.len() / 2];
+    let thr = (6.0 * 1.4826 * mad).max(8.0 / 255.0);
+    let mut mask: Vec<bool> = resid
+        .iter()
+        .zip(vis_luma)
+        .map(|(rv, lv)| *rv > thr && *lv > 0.015)
+        .collect();
+    dilate(&mut mask, w, h, 2);
+    mask
+}
+
+// Fill masked pixels from the nearest unmasked pixel in each of the four
+// directions, weighted by inverse distance. Linear passes keep it O(n).
+fn fill_masked(rgb: &mut [f32], mask: &[bool], w: usize, h: usize) {
+    let mut acc = vec![0.0f32; rgb.len()];
+    let mut wsum = vec![0.0f32; w * h];
+    let mut pass = |iter: &mut dyn Iterator<Item = usize>, stride_reset: usize| {
+        let mut last: Option<(usize, usize)> = None; // (index, distance-counter start)
+        let mut steps = 0usize;
+        for (n, i) in iter.enumerate() {
+            if n % stride_reset == 0 {
+                last = None;
+            }
+            if !mask[i] {
+                last = Some((i, 0));
+                steps = 0;
+            } else if let Some((j, _)) = last {
+                steps += 1;
+                let wt = 1.0 / steps as f32;
+                acc[i * 3] += rgb[j * 3] * wt;
+                acc[i * 3 + 1] += rgb[j * 3 + 1] * wt;
+                acc[i * 3 + 2] += rgb[j * 3 + 2] * wt;
+                wsum[i] += wt;
+            }
+        }
+    };
+    // left→right and right→left per row
+    pass(&mut (0..h).flat_map(|y| (0..w).map(move |x| y * w + x)), w);
+    pass(&mut (0..h).flat_map(|y| (0..w).rev().map(move |x| y * w + x)), w);
+    // top→bottom and bottom→top per column
+    pass(&mut (0..w).flat_map(|x| (0..h).map(move |y| y * w + x)), h);
+    pass(&mut (0..w).flat_map(|x| (0..h).rev().map(move |y| y * w + x)), h);
+    for i in 0..w * h {
+        if mask[i] && wsum[i] > 0.0 {
+            for c in 0..3 {
+                rgb[i * 3 + c] = acc[i * 3 + c] / wsum[i];
+            }
+        }
+    }
+}
+
+// Run the IR clean on a finished visible scan: returns defect pixel count.
+fn ir_clean_scan(vis_path: &Path, ir_path: &Path, dpi: u32) -> Result<usize, String> {
+    let vis = open_image(vis_path)?.to_rgb32f();
+    let ir = open_image(ir_path)?.to_rgb32f();
+    let (w, h) = vis.dimensions();
+    if ir.dimensions() != (w, h) {
+        return Err("IR pass dimensions differ from visible scan".into());
+    }
+    let (w, h) = (w as usize, h as usize);
+    let ir_gray: Vec<f32> = ir.as_raw().chunks_exact(3).map(|c| (c[0] + c[1] + c[2]) / 3.0).collect();
+    let vis_luma: Vec<f32> = vis.as_raw().chunks_exact(3).map(|c| (c[0] + c[1] + c[2]) / 3.0).collect();
+    let mask = ir_defect_mask(&ir_gray, &vis_luma, w, h, dpi);
+    let count = mask.iter().filter(|m| **m).count();
+    if count == 0 {
+        return Ok(0);
+    }
+    let mut rgb = vis.into_raw();
+    fill_masked(&mut rgb, &mask, w, h);
+    let data: Vec<u16> = rgb.iter().map(|v| (v.clamp(0.0, 1.0) * 65535.0) as u16).collect();
+    image::ImageBuffer::<image::Rgb<u16>, Vec<u16>>::from_raw(w as u32, h as u32, data)
+        .ok_or_else(|| "buffer mismatch in IR clean".to_string())?
+        .save_with_format(vis_path, image::ImageFormat::Tiff)
+        .map_err(|e| e.to_string())?;
+    Ok(count)
+}
+
 // Average N identical passes into one 16-bit TIFF — multi-sampling à la
 // SilverFast: same exposure each pass (genesys exposes no exposure control),
 // so this cuts shadow noise rather than extending dynamic range.
 // ponytail: no sub-pixel registration — the carriage repeats well enough;
 // add alignment only if a real scan shows edge doubling.
 fn average_scans(passes: &[PathBuf], out: &Path) -> Result<(), String> {
-    let first = image::open(&passes[0]).map_err(|e| e.to_string())?.to_rgb16();
+    let first = open_image(&passes[0])?.to_rgb16();
     let (w, h) = first.dimensions();
     let mut acc: Vec<u32> = first.as_raw().iter().map(|&v| v as u32).collect();
     for p in &passes[1..] {
-        let img = image::open(p).map_err(|e| e.to_string())?.to_rgb16();
+        let img = open_image(p)?.to_rgb16();
         let (pw, ph) = img.dimensions();
         // Passes can drift by a row; sum the overlap.
         let (cw, ch) = (w.min(pw), h.min(ph));
@@ -437,6 +611,7 @@ fn render_preview(
     contrast: f32,
     rotation_steps: u32,
     app_handle: &AppHandle,
+    tone_slot: &Arc<Mutex<Option<ToneSolve>>>,
 ) -> Result<String, String> {
     use base64::{engine::general_purpose::STANDARD, Engine};
     use tauri::Manager;
@@ -445,10 +620,11 @@ fn render_preview(
     let sidecar = crate::exif_processing::get_primary_sidecar_path(tif);
     let _ = std::fs::remove_file(&sidecar);
     if film_type != "e6" {
-        let img = image::open(tif).map_err(|e| e.to_string())?;
+        let img = open_image(tif)?;
         let crop = detect_frame_crop(&img);
         let bounds = crate::negative_conversion::analyze_bounds_for(&crop);
         let (base_exposure, auto_gain) = auto_tone_for(&crop, bounds, DEFAULT_SCAN_CONTRAST);
+        *tone_slot.lock().unwrap() = Some((bounds, base_exposure, auto_gain));
         write_scan_sidecar(
             tif,
             Some((bounds, base_exposure, auto_gain)),
@@ -457,6 +633,7 @@ fn render_preview(
             contrast,
         )?;
     } else {
+        *tone_slot.lock().unwrap() = None;
         write_scan_sidecar(tif, None, rotation_steps, exposure_offset, contrast)?;
     }
 
@@ -490,18 +667,19 @@ pub async fn scan_preview(
     }
     let child_slot = state.child.clone();
     let cancelled = state.cancelled.clone();
+    let tone_slot = state.preview_tone.clone();
     tauri::async_runtime::spawn_blocking(move || {
         // Kept on disk so the exposure/contrast sliders can re-render without rescanning.
         let tmp = preview_tif_path();
         // 1800 dpi: the 900 dpi mode carries periodic decimation noise that the
         // negative auto-stretch amplifies into a visible grid.
-        run_scanimage(&child_slot, &cancelled, &app_handle, scan_mode(&film_type), 1800, &tmp, 0, 1).map_err(
+        run_scanimage(&child_slot, &cancelled, &app_handle, SRC_VISIBLE, scan_mode(&film_type), 1800, &tmp, 0, 1).map_err(
             |e| match e {
                 ScanFail::Cancelled => "cancelled".to_string(),
                 ScanFail::Error(m) => m,
             },
         )?;
-        render_preview(&tmp, &film_type, exposure_offset, contrast, rotation_steps, &app_handle)
+        render_preview(&tmp, &film_type, exposure_offset, contrast, rotation_steps, &app_handle, &tone_slot)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -523,8 +701,9 @@ pub async fn scan_rerender_preview(
     if !tif.exists() {
         return Err("No preview scanned yet".into());
     }
+    let tone_slot = state.preview_tone.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        render_preview(&tif, &film_type, exposure_offset, contrast, rotation_steps, &app_handle)
+        render_preview(&tif, &film_type, exposure_offset, contrast, rotation_steps, &app_handle, &tone_slot)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -538,6 +717,7 @@ pub async fn scan_start(
     contrast: f32,
     rotation_steps: u32,
     samples: u32,
+    ir_clean: bool,
     dest_folder: String,
     file_name: String,
     state: tauri::State<'_, ScanState>,
@@ -552,6 +732,9 @@ pub async fn scan_start(
     }
     let child_slot = state.child.clone();
     let cancelled = state.cancelled.clone();
+    // Consume-once: the very next Scan frame gets the previewed tone exactly;
+    // later frames (holder advanced, no fresh preview) re-solve on their own scan.
+    let preview_tone = state.preview_tone.lock().unwrap().take();
     log::info!("[scan] starting {file_name} @ {dpi}dpi into {dest_folder}");
 
     std::thread::spawn(move || {
@@ -559,8 +742,11 @@ pub async fn scan_start(
         // same dir keeps the final rename atomic.
         let tmp = dest.join(".rapidraw-scan.partial");
         let samples = samples.clamp(1, 4);
-        let scan_result = if samples == 1 {
-            run_scanimage(&child_slot, &cancelled, &app_handle, scan_mode(&film_type), dpi, &tmp, 0, 1)
+        // IR needs dye-based film; silver B&W blocks infrared everywhere.
+        let do_ir = ir_clean && film_type != "bw";
+        let total_passes = samples + do_ir as u32;
+        let mut scan_result = if samples == 1 {
+            run_scanimage(&child_slot, &cancelled, &app_handle, SRC_VISIBLE, scan_mode(&film_type), dpi, &tmp, 0, total_passes)
         } else {
             let pass_files: Vec<PathBuf> =
                 (0..samples).map(|i| dest.join(format!(".rapidraw-scan.pass{i}"))).collect();
@@ -571,8 +757,8 @@ pub async fn scan_start(
                     break;
                 }
                 if let Err(e) = run_scanimage(
-                    &child_slot, &cancelled, &app_handle, scan_mode(&film_type), dpi, pass_file,
-                    i as u32, samples,
+                    &child_slot, &cancelled, &app_handle, SRC_VISIBLE, scan_mode(&film_type), dpi, pass_file,
+                    i as u32, total_passes,
                 ) {
                     result = Err(e);
                     break;
@@ -587,6 +773,22 @@ pub async fn scan_start(
             }
             result
         };
+        if scan_result.is_ok() && do_ir && !cancelled.load(Ordering::SeqCst) {
+            let ir_tmp = dest.join(".rapidraw-scan.ir");
+            match run_scanimage(
+                &child_slot, &cancelled, &app_handle, SRC_INFRARED, scan_mode(&film_type), dpi,
+                &ir_tmp, samples, total_passes,
+            ) {
+                Ok(()) => match ir_clean_scan(&tmp, &ir_tmp, dpi) {
+                    Ok(n) => log::info!("[scan] IR clean filled {n} defect px"),
+                    // A failed clean never loses the scan itself.
+                    Err(e) => log::warn!("[scan] IR clean skipped: {e}"),
+                },
+                Err(ScanFail::Cancelled) => scan_result = Err(ScanFail::Cancelled),
+                Err(ScanFail::Error(m)) => log::warn!("[scan] IR pass failed, scan kept unclean: {m}"),
+            }
+            let _ = std::fs::remove_file(&ir_tmp);
+        }
         match scan_result {
             Ok(()) => {
                 let target = unique_path(&dest, &file_name);
@@ -600,13 +802,19 @@ pub async fn scan_start(
                 // Sidecar is written before scan-complete, so the library's first
                 // sight of the file (and its first thumbnail) is already converted.
                 let result = if film_type != "e6" {
-                    image::open(&target).map_err(|e| e.to_string()).and_then(|img| {
-                        let crop = detect_frame_crop(&img);
-                        let bounds = crate::negative_conversion::analyze_bounds_for(&crop);
-                        let (base_exposure, auto_gain) = auto_tone_for(&crop, bounds, DEFAULT_SCAN_CONTRAST);
+                    let tone = match preview_tone {
+                        Some(t) => Ok(t),
+                        None => open_image(&target).map(|img| {
+                            let crop = detect_frame_crop(&img);
+                            let bounds = crate::negative_conversion::analyze_bounds_for(&crop);
+                            let (exposure, gain) = auto_tone_for(&crop, bounds, DEFAULT_SCAN_CONTRAST);
+                            (bounds, exposure, gain)
+                        }),
+                    };
+                    tone.and_then(|(bounds, exposure, gain)| {
                         write_scan_sidecar(
                             &target,
-                            Some((bounds, base_exposure, auto_gain)),
+                            Some((bounds, exposure, gain)),
                             rotation_steps,
                             exposure_offset,
                             contrast,
@@ -623,9 +831,11 @@ pub async fn scan_start(
                 let _ = app_handle.emit("scan-complete", serde_json::json!({ "path": path, "fileName": file_name }));
             }
             Err(ScanFail::Cancelled) => {
+                let _ = std::fs::remove_file(&tmp);
                 let _ = app_handle.emit("scan-cancelled", ());
             }
             Err(ScanFail::Error(m)) => {
+                let _ = std::fs::remove_file(&tmp);
                 let _ = app_handle.emit("scan-error", serde_json::json!({ "message": m }));
             }
         }
@@ -635,7 +845,36 @@ pub async fn scan_start(
 
 #[cfg(test)]
 mod tests {
-    use super::{average_scans, detect_frame_crop};
+    use super::{average_scans, detect_frame_crop, fill_masked, ir_defect_mask};
+
+    #[test]
+    fn ir_mask_and_fill_remove_synthetic_speck() {
+        let (w, h) = (120usize, 100usize);
+        // IR frame: bright film field with one dark dust speck
+        let mut ir = vec![0.8f32; w * h];
+        for y in 40..44 {
+            for x in 60..65 {
+                ir[y * w + x] = 0.2;
+            }
+        }
+        let vis_luma = vec![0.5f32; w * h];
+        let mask = ir_defect_mask(&ir, &vis_luma, w, h, 1800);
+        assert!(mask[42 * w + 62], "speck not masked");
+        assert!(!mask[10 * w + 10], "clean area masked");
+
+        // Visible frame: flat gray with the defect burned in dark
+        let mut rgb = vec![0.5f32; w * h * 3];
+        for y in 40..44 {
+            for x in 60..65 {
+                for c in 0..3 {
+                    rgb[(y * w + x) * 3 + c] = 0.05;
+                }
+            }
+        }
+        fill_masked(&mut rgb, &mask, w, h);
+        let v = rgb[(42 * w + 62) * 3];
+        assert!((v - 0.5).abs() < 0.01, "fill missed: {v}");
+    }
 
     #[test]
     fn average_scans_midpoints_two_passes() {
@@ -648,10 +887,12 @@ mod tests {
                 .unwrap();
             p
         };
-        let passes = vec![mk("a.tif", 1000), mk("b.tif", 3000)];
-        let out = dir.join("out.tif");
+        // Extension-less names like production's temp files — image::open used to
+        // reject these, silently skipping the average/IR-clean steps.
+        let passes = vec![mk(".rapidraw-scan.pass0", 1000), mk(".rapidraw-scan.pass1", 3000)];
+        let out = dir.join(".rapidraw-scan.partial");
         average_scans(&passes, &out).unwrap();
-        let avg = image::open(&out).unwrap().to_rgb16();
+        let avg = super::open_image(&out).unwrap().to_rgb16();
         assert_eq!(avg.dimensions(), (8, 6));
         assert_eq!(avg.get_pixel(4, 3)[1], 2000);
         let _ = std::fs::remove_dir_all(&dir);

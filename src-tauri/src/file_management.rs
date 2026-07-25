@@ -2172,11 +2172,10 @@ pub async fn apply_orientation_to_paths(
                 &settings,
             );
 
-            if let Some((thumbnail_data, rating, is_edited)) = result {
-                let _ = app_handle.emit(
-                    "thumbnail-generated",
-                    serde_json::json!({ "path": path_str, "data": thumbnail_data, "rating": rating, "is_edited": is_edited  }),
-                );
+            if let Some((thumbnail_path, rating, is_edited)) = result {
+                // It's a cache-file path, not image data — the frontend must run it
+                // through convertFileSrc, which only the thumbnailPath key gets.
+                emit_thumbnail_generated(&app_handle, path_str, &thumbnail_path, rating, is_edited);
             }
 
             increment_thumbnail_progress(&state, &app_handle);
