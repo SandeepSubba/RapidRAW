@@ -142,6 +142,7 @@ export default function ScannerPane() {
         contrast: s.contrast,
         rotationSteps: s.rotationSteps,
         samples: s.samples,
+        irClean: s.irClean,
         destFolder: dest,
         fileName,
       });
@@ -197,7 +198,21 @@ export default function ScannerPane() {
         </div>
 
         <div>
-          <p className="text-xs text-text-secondary mb-2">Film type</p>
+          <p className="text-xs text-text-secondary mb-2">Roll Name</p>
+          <input
+            type="text"
+            value={s.prefix}
+            disabled={busy}
+            onChange={(e) => s.setScanner({ prefix: e.target.value.replace(/[/\\:]/g, '') })}
+            className="w-full px-2 py-1.5 text-sm text-text-primary bg-surface/60 border border-surface rounded-md focus:border-accent focus:outline-none"
+          />
+          <p className="text-[10px] text-text-secondary mt-1">
+            Next frame: {`${s.prefix || 'roll'}-${String(s.frameCount + 1).padStart(3, '0')}.tif`}
+          </p>
+        </div>
+
+        <div>
+          <p className="text-xs text-text-secondary mb-2">Film Type</p>
           <div className="flex flex-col gap-1.5">
             {FILM_TYPES.map((f) => (
               <button key={f.id} disabled={busy} onClick={() => s.setScanner({ filmType: f.id })} className={segBtn(s.filmType === f.id)}>
@@ -216,7 +231,11 @@ export default function ScannerPane() {
               </button>
             ))}
           </div>
-          <p className="text-[10px] text-text-secondary mt-1">dpi · 7200 is slow; 3600 suits most rolls</p>
+          <p className="text-[10px] text-text-secondary mt-1">
+            {s.dpi === 7200
+              ? '7200: slow, and the driver’s color calibration is off at this setting — expect color casts on color film. 3600 is the scanner’s optical sweet spot.'
+              : 'dpi · 7200 is slow; 3600 suits most rolls'}
+          </p>
         </div>
 
         <div>
@@ -231,19 +250,26 @@ export default function ScannerPane() {
           <p className="text-[10px] text-text-secondary mt-1">averages N scans · cuts shadow noise · N× scan time</p>
         </div>
 
-        <div>
-          <p className="text-xs text-text-secondary mb-2">Roll name</p>
-          <input
-            type="text"
-            value={s.prefix}
-            disabled={busy}
-            onChange={(e) => s.setScanner({ prefix: e.target.value.replace(/[/\\:]/g, '') })}
-            className="w-full px-2 py-1.5 text-sm text-text-primary bg-surface/60 border border-surface rounded-md focus:border-accent focus:outline-none"
-          />
-          <p className="text-[10px] text-text-secondary mt-1">
-            Next frame: {`${s.prefix || 'roll'}-${String(s.frameCount + 1).padStart(3, '0')}.tif`}
-          </p>
-        </div>
+        {s.filmType !== 'bw' && (
+          <div>
+            <p className="text-xs text-text-secondary mb-2">Dust removal (IR)</p>
+            <div className="flex gap-1.5">
+              {[false, true].map((on) => (
+                <button
+                  key={String(on)}
+                  disabled={busy}
+                  onClick={() => s.setScanner({ irClean: on })}
+                  className={`flex-1 ${segBtn(s.irClean === on)}`}
+                >
+                  {on ? 'On' : 'Off'}
+                </button>
+              ))}
+            </div>
+            <p className="text-[10px] text-text-secondary mt-1">
+              extra infrared pass finds dust &amp; scratches, fills them · not for silver B&amp;W film
+            </p>
+          </div>
+        )}
 
         <div>
           <Slider

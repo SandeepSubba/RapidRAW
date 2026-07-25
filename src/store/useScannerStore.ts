@@ -16,6 +16,7 @@ interface ScannerState {
   filmType: FilmType;
   dpi: number;
   samples: number;
+  irClean: boolean;
   exposureOffset: number;
   contrast: number;
   rotationSteps: number;
@@ -37,6 +38,7 @@ export const useScannerStore = create<ScannerState>()(
       filmType: 'c41',
       dpi: 3600,
       samples: 1,
+      irClean: false,
       exposureOffset: 0,
       contrast: 0,
       rotationSteps: 0,
@@ -55,6 +57,7 @@ export const useScannerStore = create<ScannerState>()(
         filmType: state.filmType,
         dpi: state.dpi,
         samples: state.samples,
+        irClean: state.irClean,
         exposureOffset: state.exposureOffset,
         contrast: state.contrast,
         rotationSteps: state.rotationSteps,
