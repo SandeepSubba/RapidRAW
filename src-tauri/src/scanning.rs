@@ -12,7 +12,7 @@ use crate::tethering::unique_path;
 // Tone solve from the last preview: (bounds, exposure, gain). Scan frame reuses
 // it once so the saved render matches the tuned preview exactly instead of
 // re-solving on a fresh pass that can land slightly differently.
-type ToneSolve = ([crate::negative_conversion::ChannelBounds; 3], f32, f32);
+type ToneSolve = ([crate::negative_conversion::ChannelBounds; 3], f32, f32, f32);
 
 #[derive(Default)]
 pub struct ScanState {
@@ -26,6 +26,15 @@ pub struct ScanState {
 pub struct ScannerDevice {
     pub name: String,
     pub model: String,
+}
+
+// Preview JPEG plus, when auto-crop is on, the detected frame rect normalized
+// to the displayed image [x, y, w, h] so the pane can dim the area outside it.
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewResult {
+    pub data: String,
+    pub crop: Option<[f32; 4]>,
 }
 
 #[derive(Serialize, Clone)]
@@ -347,6 +356,22 @@ fn fill_masked(rgb: &mut [f32], mask: &[bool], w: usize, h: usize) {
     }
 }
 
+// 2x2 average, dropping any odd trailing row/column.
+fn downsample2(src: &[f32], w: usize, h: usize) -> Vec<f32> {
+    let (dw, dh) = (w / 2, h / 2);
+    let mut out = vec![0.0f32; dw * dh];
+    for y in 0..dh {
+        for x in 0..dw {
+            out[y * dw + x] = (src[2 * y * w + 2 * x]
+                + src[2 * y * w + 2 * x + 1]
+                + src[(2 * y + 1) * w + 2 * x]
+                + src[(2 * y + 1) * w + 2 * x + 1])
+                / 4.0;
+        }
+    }
+    out
+}
+
 // Run the IR clean on a finished visible scan: returns defect pixel count.
 fn ir_clean_scan(vis_path: &Path, ir_path: &Path, dpi: u32) -> Result<usize, String> {
     let vis = open_image(vis_path)?.to_rgb32f();
@@ -358,7 +383,37 @@ fn ir_clean_scan(vis_path: &Path, ir_path: &Path, dpi: u32) -> Result<usize, Str
     let (w, h) = (w as usize, h as usize);
     let ir_gray: Vec<f32> = ir.as_raw().chunks_exact(3).map(|c| (c[0] + c[1] + c[2]) / 3.0).collect();
     let vis_luma: Vec<f32> = vis.as_raw().chunks_exact(3).map(|c| (c[0] + c[1] + c[2]) / 3.0).collect();
-    let mask = ir_defect_mask(&ir_gray, &vis_luma, w, h, dpi);
+    // The 7200dpi IR pass is so noisy that a MAD threshold on the full-res
+    // residual only catches the biggest chunks (measured: thr 0.165 vs the
+    // 0.031 floor, 0.1% masked vs 0.6% on 3600 scans of the same film).
+    // Detect on a 2x2-averaged frame instead — 3600-equivalent noise — and
+    // upscale the mask; the fill still runs at full resolution.
+    let mask = if dpi >= 7200 {
+        let (dw, dh) = (w / 2, h / 2);
+        let m = ir_defect_mask(
+            &downsample2(&ir_gray, w, h),
+            &downsample2(&vis_luma, w, h),
+            dw,
+            dh,
+            dpi / 2,
+        );
+        let mut full = vec![false; w * h];
+        for y in 0..dh {
+            for x in 0..dw {
+                if m[y * dw + x] {
+                    full[2 * y * w + 2 * x] = true;
+                    full[2 * y * w + 2 * x + 1] = true;
+                    full[(2 * y + 1) * w + 2 * x] = true;
+                    full[(2 * y + 1) * w + 2 * x + 1] = true;
+                }
+            }
+        }
+        // cover the upsampling edge at full res
+        dilate(&mut full, w, h, 2);
+        full
+    } else {
+        ir_defect_mask(&ir_gray, &vis_luma, w, h, dpi)
+    };
     let count = mask.iter().filter(|m| **m).count();
     if count == 0 {
         return Ok(0);
@@ -371,6 +426,76 @@ fn ir_clean_scan(vis_path: &Path, ir_path: &Path, dpi: u32) -> Result<usize, Str
         .save_with_format(vis_path, image::ImageFormat::Tiff)
         .map_err(|e| e.to_string())?;
     Ok(count)
+}
+
+// Store scans in a deflate+predictor TIFF, keeping `keep_bits` significant
+// bits (16 = lossless; at 12 the discarded bits sit ~100x below the scanner's
+// measured noise floor and the file lands at about half the raw size —
+// 109MB -> 55MB at 3600dpi). The scan date and scanner make/model are embedded
+// as real TIFF tags so any application can read them, not just the sidecar.
+// Encodes to memory and renames over the original, so a failure never costs
+// the scan.
+fn compress_scan(path: &Path, keep_bits: u8, scanner_model: &str) -> Result<u64, String> {
+    use tiff::encoder::{colortype::ColorType, compression::DeflateLevel, Compression, TiffEncoder};
+    use tiff::tags::Tag;
+
+    let img = open_image(path)?;
+    let mask = !(((1u32 << (16 - keep_bits.clamp(10, 16) as u32)) - 1) as u16);
+    let date = chrono::Local::now().format("%Y:%m:%d %H:%M:%S").to_string();
+
+    fn write<C: ColorType<Inner = u16>>(
+        buf: &mut std::io::Cursor<Vec<u8>>,
+        (w, h): (u32, u32),
+        data: &[u16],
+        date: &str,
+        scanner_model: &str,
+    ) -> Result<(), String> {
+        let mut enc = TiffEncoder::new(buf)
+            .map_err(|e| e.to_string())?
+            .with_compression(Compression::Deflate(DeflateLevel::default()))
+            .with_predictor(tiff::tags::Predictor::Horizontal);
+        let mut image = enc.new_image::<C>(w, h).map_err(|e| e.to_string())?;
+        let d = image.encoder();
+        let _ = d.write_tag(Tag::DateTime, date);
+        // EXIF DateTimeOriginal; in IFD0 rather than an Exif sub-IFD, which
+        // exiftool and most readers accept.
+        let _ = d.write_tag(Tag::Unknown(36867), date);
+        let _ = d.write_tag(Tag::Software, "RapidRAW film scanner");
+        if let Some((make, model)) = scanner_model.split_once(' ') {
+            let _ = d.write_tag(Tag::Make, make);
+            let _ = d.write_tag(Tag::Model, model);
+        } else if !scanner_model.is_empty() {
+            let _ = d.write_tag(Tag::Model, scanner_model);
+        }
+        image.write_data(data).map_err(|e| e.to_string())
+    }
+
+    let mut buf = std::io::Cursor::new(Vec::new());
+    match img {
+        image::DynamicImage::ImageLuma16(g) => {
+            let (w, h) = g.dimensions();
+            let mut data = g.into_raw();
+            for v in &mut data {
+                *v &= mask;
+            }
+            write::<tiff::encoder::colortype::Gray16>(&mut buf, (w, h), &data, &date, scanner_model)?;
+        }
+        other => {
+            let rgb = other.to_rgb16();
+            let (w, h) = rgb.dimensions();
+            let mut data = rgb.into_raw();
+            for v in &mut data {
+                *v &= mask;
+            }
+            write::<tiff::encoder::colortype::RGB16>(&mut buf, (w, h), &data, &date, scanner_model)?;
+        }
+    }
+    let bytes = buf.into_inner();
+    let size = bytes.len() as u64;
+    let tmp = path.with_file_name(".rapidraw-scan.compress");
+    std::fs::write(&tmp, bytes).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, path).map_err(|e| e.to_string())?;
+    Ok(size)
 }
 
 // Average N identical passes into one 16-bit TIFF — multi-sampling à la
@@ -410,10 +535,59 @@ fn average_scans(passes: &[PathBuf], out: &Path) -> Result<(), String> {
 // find the largest contiguous span per axis that isn't holder-black, inset it,
 // and crop. Falls back to the full image when detection looks implausible.
 fn detect_frame_crop(img: &image::DynamicImage) -> image::DynamicImage {
+    // Deep inset (span/12 per side): bounds/tone sampling must stay well clear
+    // of bar soft-edges and light bleed, cropping into the image is fine there.
+    match detect_frame_rect(img, 12, false) {
+        Some((x, y, w, h)) => img.crop_imm(x, y, w, h),
+        None => img.clone(),
+    }
+}
+
+// The frame border carries non-image bands the bright-run pass keeps: the dim
+// aperture-shadow sliver between holder and image (renders as a white ring in
+// the positive) and the film rebate (bright base on negatives, black on E-6).
+// Both deviate hard from the frame's median level, while image lines hover
+// around it — trim each side inward to the first K consecutive in-band lines,
+// bounded to 10% per side so a dark or bright image edge can't be eaten.
+fn trim_edge_bands(means: &[f32], lo: usize, hi: usize) -> (usize, usize) {
+    let span = hi - lo;
+    if span < 40 {
+        return (lo, hi);
+    }
+    let mut sorted: Vec<f32> = means[lo..hi].to_vec();
+    sorted.sort_by(f32::total_cmp);
+    let median = sorted[sorted.len() / 2];
+    let in_band = |m: f32| m >= 0.75 * median && m <= 1.3 * median;
+    const K: usize = 4;
+    let cap = span / 10;
+    let settle = |idx: &mut dyn Iterator<Item = usize>| -> Option<usize> {
+        let mut streak = 0usize;
+        for (n, i) in idx.enumerate() {
+            if n >= cap + K {
+                break;
+            }
+            streak = if in_band(means[i]) { streak + 1 } else { 0 };
+            if streak == K {
+                return Some(n + 1 - K);
+            }
+        }
+        None
+    };
+    let nlo = lo + settle(&mut (lo..hi)).unwrap_or(0);
+    let nhi = hi - settle(&mut (lo..hi).rev()).unwrap_or(0);
+    (nlo, nhi)
+}
+
+// Frame rect (x, y, w, h) in the full image's pixel space, or None when
+// detection looks implausible (caller falls back to the whole frame).
+// inset_div: each side is inset by span/inset_div — use a large divisor for a
+// user-facing crop that should hug the frame edges. rebate: additionally trim
+// rebate/aperture-shadow bands off the frame border (any film type).
+fn detect_frame_rect(img: &image::DynamicImage, inset_div: usize, rebate: bool) -> Option<(u32, u32, u32, u32)> {
     let small = img.thumbnail(400, 400).to_rgb32f();
     let (w, h) = small.dimensions();
     if w < 20 || h < 20 {
-        return img.clone();
+        return None;
     }
     // Red channel: brightest through the C-41 orange mask, fine for B&W/E-6 too.
     let col_mean: Vec<f32> = (0..w)
@@ -449,21 +623,37 @@ fn detect_frame_crop(img: &image::DynamicImage) -> image::DynamicImage {
         best
     }
 
-    let (cx0, cx1) = largest_bright_run(&col_mean);
-    let (cy0, cy1) = largest_bright_run(&row_mean);
+    let (mut cx0, mut cx1) = largest_bright_run(&col_mean);
+    let (mut cy0, mut cy1) = largest_bright_run(&row_mean);
     if cx1 - cx0 < (w as usize) * 3 / 10 || cy1 - cy0 < (h as usize) * 3 / 10 {
-        return img.clone();
+        return None;
     }
-    // Inset to stay clear of soft bar edges and light bleed.
-    let inset_x = (cx1 - cx0) / 12;
-    let inset_y = (cy1 - cy0) / 12;
+    if rebate {
+        (cx0, cx1) = trim_edge_bands(&col_mean, cx0, cx1);
+        (cy0, cy1) = trim_edge_bands(&row_mean, cy0, cy1);
+    }
+    let inset_x = (cx1 - cx0) / inset_div;
+    let inset_y = (cy1 - cy0) / inset_div;
     let sx = img.width() as f32 / w as f32;
     let sy = img.height() as f32 / h as f32;
-    let x = ((cx0 + inset_x) as f32 * sx) as u32;
-    let y = ((cy0 + inset_y) as f32 * sy) as u32;
-    let cw = ((cx1 - cx0 - 2 * inset_x) as f32 * sx) as u32;
-    let ch = ((cy1 - cy0 - 2 * inset_y) as f32 * sy) as u32;
-    img.crop_imm(x.min(img.width() - 1), y.min(img.height() - 1), cw.max(1), ch.max(1))
+    let x = (((cx0 + inset_x) as f32 * sx) as u32).min(img.width() - 1);
+    let y = (((cy0 + inset_y) as f32 * sy) as u32).min(img.height() - 1);
+    let cw = (((cx1 - cx0 - 2 * inset_x) as f32 * sx) as u32).max(1).min(img.width() - x);
+    let ch = (((cy1 - cy0 - 2 * inset_y) as f32 * sy) as u32).max(1).min(img.height() - y);
+    Some((x, y, cw, ch))
+}
+
+// Map a rect through orientationSteps quarter-turns (image crate rotate90 = CW),
+// so an auto-crop detected on the raw scan lands in the post-orientation space
+// the editor's crop is applied in. Returns the rect and the rotated dimensions.
+fn rotate_rect(r: (u32, u32, u32, u32), w: u32, h: u32, steps: u32) -> ((u32, u32, u32, u32), (u32, u32)) {
+    let (x, y, rw, rh) = r;
+    match steps % 4 {
+        1 => ((h - (y + rh), x, rh, rw), (h, w)),
+        2 => ((w - (x + rw), h - (y + rh), rw, rh), (w, h)),
+        3 => ((y, w - (x + rw), rh, rw), (h, w)),
+        _ => ((x, y, rw, rh), (w, h)),
+    }
 }
 
 // Auto-tone: anchor the frame's median to ~0.38 display. Two knobs both darken,
@@ -474,9 +664,14 @@ fn detect_frame_crop(img: &image::DynamicImage) -> image::DynamicImage {
 //     why a plain exposure solve pegged at -6.4 and still blew out a bright scan).
 //   - pre-curve gain: scales density before the curve → monotonic, unlimited
 //     range, but lands the median on the flat toe → milky, low-contrast.
-// So use the center shift as the primary (rich) knob up to a safe limit, and only
-// once it's exhausted let gain finish the darkening (no blow-out). Returns
-// (exposure, gain); solved at DEFAULT_SCAN_CONTRAST so contrast still bites.
+// So use the center shift as the primary (rich) knob up to a safe limit. Once
+// it's exhausted (very thin scans — genesys underexposes badly at 7200dpi),
+// finish the darkening AFTER the conversion via the editor's Exposure key
+// instead of pre-curve gain: gain squashes the channels through different parts
+// of the sigmoid and the divergent 7200 channel response comes out as a purple/
+// yellow crossover, while a post-conversion EV cut is hue-neutral (and the user
+// can re-tune it in the edit view). Returns (exposure, gain, brightness_ev);
+// solved at DEFAULT_SCAN_CONTRAST so contrast still bites.
 const AUTO_TARGET: f32 = 0.38;
 const SAFE_X0_MAX: f32 = 0.95;
 
@@ -484,7 +679,8 @@ fn auto_tone_for(
     crop: &image::DynamicImage,
     bounds: [crate::negative_conversion::ChannelBounds; 3],
     contrast: f32,
-) -> (f32, f32) {
+    hue_safe: bool,
+) -> (f32, f32, f32) {
     let small = crop.thumbnail(540, 540).to_rgb32f();
     let mut n_green: Vec<f32> = small
         .as_raw()
@@ -495,7 +691,7 @@ fn auto_tone_for(
         })
         .collect();
     if n_green.is_empty() {
-        return (0.0, 1.0);
+        return (0.0, 1.0, 0.0);
     }
     let mid = n_green.len() / 2;
     n_green.select_nth_unstable_by(mid, f32::total_cmp);
@@ -511,7 +707,17 @@ fn auto_tone_for(
         ((sigmoid - y0) / (y1 - y0)).clamp(0.0, 1.0)
     };
 
-    let (mut x0, mut gain) = (0.6f32, 1.0f32);
+    // genesys underexposes 7200dpi scans with a per-channel response skew;
+    // any curve-center shift or pre-curve gain turns that skew into a purple/
+    // yellow crossover. Keep the curve at its neutral center and reach the
+    // brightness anchor entirely with a hue-neutral post-conversion EV shift
+    // (the editor's Exposure key, re-tunable in the edit view).
+    if hue_safe {
+        let ev = (target / curve(n_med, 0.6).max(1e-4)).log2().clamp(-5.0, 5.0);
+        return (0.0, 1.0, ev);
+    }
+
+    let (mut x0, mut gain, ev) = (0.6f32, 1.0f32, 0.0f32);
     if curve(n_med, SAFE_X0_MAX) > target {
         // Even at the safe center limit it's still too bright — shift to the limit,
         // then bisect gain (<1) to bring the median the rest of the way down.
@@ -539,7 +745,7 @@ fn auto_tone_for(
         }
         x0 = (lo + hi) / 2.0;
     }
-    (((0.6 - x0) / 0.25).clamp(-7.0, 3.0), gain)
+    (((0.6 - x0) / 0.25).clamp(-7.0, 3.0), gain, ev)
 }
 
 pub const DEFAULT_SCAN_CONTRAST: f32 = 1.5;
@@ -558,15 +764,22 @@ fn write_scan_sidecar(
     rotation_steps: u32,
     brightness: f32,
     contrast: f32,
+    crop: Option<(u32, u32, u32, u32)>,
 ) -> Result<(), String> {
     let steps = rotation_steps % 4;
-    if negative.is_none() && steps == 0 && brightness == 0.0 && contrast == 0.0 {
-        return Ok(());
-    }
     let sidecar = crate::exif_processing::get_primary_sidecar_path(target);
     let mut meta = crate::exif_processing::load_sidecar(&sidecar);
     if !meta.adjustments.is_object() {
         meta.adjustments = serde_json::json!({});
+    }
+    // Scan timestamp as the sidecar's EXIF date — scanimage TIFFs carry no
+    // capture date, which leaves the library nothing to sort on.
+    if meta.exif.is_none() {
+        let now = chrono::Local::now().format("%Y:%m:%d %H:%M:%S").to_string();
+        meta.exif = Some(std::collections::HashMap::from([
+            ("DateTimeOriginal".to_string(), now.clone()),
+            ("CreateDate".to_string(), now),
+        ]));
     }
     if let Some((bounds, exposure, weight)) = negative {
         meta.adjustments["negativeConversion"] = serde_json::json!({
@@ -592,6 +805,10 @@ fn write_scan_sidecar(
     if contrast != 0.0 {
         meta.adjustments["contrast"] = serde_json::json!(contrast);
     }
+    if let Some((x, y, w, h)) = crop {
+        // Post-orientation pixel rect; the editor's crop tool can refine it.
+        meta.adjustments["crop"] = serde_json::json!({ "x": x, "y": y, "width": w, "height": h, "unit": "px" });
+    }
     let json = serde_json::to_string_pretty(&meta).map_err(|e| e.to_string())?;
     std::fs::write(&sidecar, json).map_err(|e| e.to_string())
 }
@@ -610,32 +827,54 @@ fn render_preview(
     exposure_offset: f32,
     contrast: f32,
     rotation_steps: u32,
+    auto_crop: bool,
     app_handle: &AppHandle,
     tone_slot: &Arc<Mutex<Option<ToneSolve>>>,
-) -> Result<String, String> {
+) -> Result<PreviewResult, String> {
     use base64::{engine::general_purpose::STANDARD, Engine};
     use tauri::Manager;
 
     // Fresh sidecar every render — a film-type switch must not inherit stale params.
     let sidecar = crate::exif_processing::get_primary_sidecar_path(tif);
     let _ = std::fs::remove_file(&sidecar);
+    // Loaded once for tone (non-E6) and/or the auto-crop overlay rect.
+    let src = if film_type != "e6" || auto_crop { Some(open_image(tif)?) } else { None };
     if film_type != "e6" {
-        let img = open_image(tif)?;
-        let crop = detect_frame_crop(&img);
+        let img = src.as_ref().unwrap();
+        let crop = detect_frame_crop(img);
         let bounds = crate::negative_conversion::analyze_bounds_for(&crop);
-        let (base_exposure, auto_gain) = auto_tone_for(&crop, bounds, DEFAULT_SCAN_CONTRAST);
-        *tone_slot.lock().unwrap() = Some((bounds, base_exposure, auto_gain));
+        let (base_exposure, auto_gain, auto_ev) = auto_tone_for(&crop, bounds, DEFAULT_SCAN_CONTRAST, false);
+        *tone_slot.lock().unwrap() = Some((bounds, base_exposure, auto_gain, auto_ev));
         write_scan_sidecar(
             tif,
             Some((bounds, base_exposure, auto_gain)),
             rotation_steps,
-            exposure_offset,
+            exposure_offset + auto_ev,
             contrast,
+            None,
         )?;
     } else {
         *tone_slot.lock().unwrap() = None;
-        write_scan_sidecar(tif, None, rotation_steps, exposure_offset, contrast)?;
+        write_scan_sidecar(tif, None, rotation_steps, exposure_offset, contrast, None)?;
     }
+
+    // Overlay rect only — the preview image itself stays uncropped so the dimmed
+    // area is visible; the crop is baked into the sidecar at scan time, not here.
+    let crop = if auto_crop {
+        src.as_ref().and_then(|im| {
+            let (w, h) = (im.width(), im.height());
+            // A rect that spans ~the whole window means no holder bars were in
+            // view — nothing confident to trim, so don't dim or write a crop.
+            detect_frame_rect(im, 100, true)
+                .filter(|r| (r.2 as u64) * (r.3 as u64) * 100 < (w as u64) * (h as u64) * 95)
+                .map(|r| {
+                let ((cx, cy, cw, ch), (rw, rh)) = rotate_rect(r, w, h, rotation_steps);
+                [cx as f32 / rw as f32, cy as f32 / rh as f32, cw as f32 / rw as f32, ch as f32 / rh as f32]
+            })
+        })
+    } else {
+        None
+    };
 
     let path_str = tif.to_string_lossy().to_string();
     let state = app_handle.state::<crate::AppState>();
@@ -650,7 +889,7 @@ fn render_preview(
     image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 88)
         .encode_image(&img.to_rgb8())
         .map_err(|e| e.to_string())?;
-    Ok(format!("data:image/jpeg;base64,{}", STANDARD.encode(&jpeg)))
+    Ok(PreviewResult { data: format!("data:image/jpeg;base64,{}", STANDARD.encode(&jpeg)), crop })
 }
 
 #[tauri::command]
@@ -659,9 +898,10 @@ pub async fn scan_preview(
     exposure_offset: f32,
     contrast: f32,
     rotation_steps: u32,
+    auto_crop: bool,
     state: tauri::State<'_, ScanState>,
     app_handle: AppHandle,
-) -> Result<String, String> {
+) -> Result<PreviewResult, String> {
     if state.child.lock().unwrap().is_some() {
         return Err("A scan is already running".into());
     }
@@ -679,7 +919,7 @@ pub async fn scan_preview(
                 ScanFail::Error(m) => m,
             },
         )?;
-        render_preview(&tmp, &film_type, exposure_offset, contrast, rotation_steps, &app_handle, &tone_slot)
+        render_preview(&tmp, &film_type, exposure_offset, contrast, rotation_steps, auto_crop, &app_handle, &tone_slot)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -691,9 +931,10 @@ pub async fn scan_rerender_preview(
     exposure_offset: f32,
     contrast: f32,
     rotation_steps: u32,
+    auto_crop: bool,
     state: tauri::State<'_, ScanState>,
     app_handle: AppHandle,
-) -> Result<String, String> {
+) -> Result<PreviewResult, String> {
     if state.child.lock().unwrap().is_some() {
         return Err("A scan is already running".into());
     }
@@ -703,7 +944,7 @@ pub async fn scan_rerender_preview(
     }
     let tone_slot = state.preview_tone.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        render_preview(&tif, &film_type, exposure_offset, contrast, rotation_steps, &app_handle, &tone_slot)
+        render_preview(&tif, &film_type, exposure_offset, contrast, rotation_steps, auto_crop, &app_handle, &tone_slot)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -718,6 +959,9 @@ pub async fn scan_start(
     rotation_steps: u32,
     samples: u32,
     ir_clean: bool,
+    auto_crop: bool,
+    bit_depth: u32,
+    scanner_model: String,
     dest_folder: String,
     file_name: String,
     state: tauri::State<'_, ScanState>,
@@ -789,6 +1033,13 @@ pub async fn scan_start(
             }
             let _ = std::fs::remove_file(&ir_tmp);
         }
+        if scan_result.is_ok() && !cancelled.load(Ordering::SeqCst) {
+            let keep_bits = if matches!(bit_depth, 10 | 12 | 16) { bit_depth as u8 } else { 12 };
+            match compress_scan(&tmp, keep_bits, &scanner_model) {
+                Ok(size) => log::info!("[scan] compressed to {} MB ({keep_bits}-bit)", size / 1_000_000),
+                Err(e) => log::warn!("[scan] compression skipped, keeping raw TIFF: {e}"),
+            }
+        }
         match scan_result {
             Ok(()) => {
                 let target = unique_path(&dest, &file_name);
@@ -799,29 +1050,46 @@ pub async fn scan_start(
                     return;
                 }
                 let path = target.to_string_lossy().to_string();
+                // Auto-crop frame rect in post-orientation space (opt-in, so the
+                // extra decode only happens when asked). ponytail: separate decode
+                // from the tone one below; fold together only if it ever matters.
+                let crop_rect = if auto_crop {
+                    open_image(&target).ok().and_then(|img| {
+                        let (w, h) = (img.width(), img.height());
+                        detect_frame_rect(&img, 100, true)
+                            .filter(|r| (r.2 as u64) * (r.3 as u64) * 100 < (w as u64) * (h as u64) * 95)
+                            .map(|r| rotate_rect(r, w, h, rotation_steps).0)
+                    })
+                } else {
+                    None
+                };
                 // Sidecar is written before scan-complete, so the library's first
                 // sight of the file (and its first thumbnail) is already converted.
                 let result = if film_type != "e6" {
+                    // The 1800dpi preview's cached solve can't represent the skewed
+                    // 7200 response — at 7200 always re-solve on the actual scan.
                     let tone = match preview_tone {
-                        Some(t) => Ok(t),
-                        None => open_image(&target).map(|img| {
+                        Some(t) if dpi != 7200 => Ok(t),
+                        _ => open_image(&target).map(|img| {
                             let crop = detect_frame_crop(&img);
                             let bounds = crate::negative_conversion::analyze_bounds_for(&crop);
-                            let (exposure, gain) = auto_tone_for(&crop, bounds, DEFAULT_SCAN_CONTRAST);
-                            (bounds, exposure, gain)
+                            let (exposure, gain, ev) =
+                                auto_tone_for(&crop, bounds, DEFAULT_SCAN_CONTRAST, dpi == 7200);
+                            (bounds, exposure, gain, ev)
                         }),
                     };
-                    tone.and_then(|(bounds, exposure, gain)| {
+                    tone.and_then(|(bounds, exposure, gain, ev)| {
                         write_scan_sidecar(
                             &target,
                             Some((bounds, exposure, gain)),
                             rotation_steps,
-                            exposure_offset,
+                            exposure_offset + ev,
                             contrast,
+                            crop_rect,
                         )
                     })
                 } else {
-                    write_scan_sidecar(&target, None, rotation_steps, exposure_offset, contrast)
+                    write_scan_sidecar(&target, None, rotation_steps, exposure_offset, contrast, crop_rect)
                 };
                 if let Err(e) = result {
                     log::warn!("[scan] sidecar write failed for {path}: {e}");
@@ -896,6 +1164,84 @@ mod tests {
         assert_eq!(avg.dimensions(), (8, 6));
         assert_eq!(avg.get_pixel(4, 3)[1], 2000);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn compress_scan_quantizes_shrinks_and_round_trips() {
+        let dir = std::env::temp_dir().join(format!("rr-compress-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join(".rapidraw-scan.partial");
+        // Gradient plus deterministic noise, so deflate has realistic work.
+        let mut rng: u32 = 12345;
+        let mut img = image::ImageBuffer::<image::Rgb<u16>, Vec<u16>>::new(128, 128);
+        for (x, y, px) in img.enumerate_pixels_mut() {
+            rng = rng.wrapping_mul(1664525).wrapping_add(1013904223);
+            let noise = (rng >> 20) as u16; // 0..4095
+            *px = image::Rgb([(x * 500) as u16 ^ noise, (y * 500) as u16 ^ noise, noise]);
+        }
+        let orig = img.clone();
+        img.save_with_format(&p, image::ImageFormat::Tiff).unwrap();
+        let raw_size = std::fs::metadata(&p).unwrap().len();
+        super::compress_scan(&p, 12, "PLUSTEK OpticFilm 7600i (v1)").unwrap();
+        assert!(std::fs::metadata(&p).unwrap().len() < raw_size, "no size reduction");
+        // Round-trip through the app's own decoder: proves deflate+predictor
+        // 16-bit TIFFs stay readable, and only sub-noise bits changed.
+        let back = super::open_image(&p).unwrap().to_rgb16();
+        assert_eq!(back.dimensions(), (128, 128));
+        for (a, b) in orig.as_raw().iter().zip(back.as_raw()) {
+            assert_eq!(a & 0xFFF0, *b, "quantized value mismatch");
+        }
+        // Embedded tags must be readable by a standard EXIF reader.
+        let file = std::fs::File::open(&p).unwrap();
+        let exif = exif::Reader::new().read_from_container(&mut std::io::BufReader::new(file)).unwrap();
+        assert!(exif.get_field(exif::Tag::DateTime, exif::In::PRIMARY).is_some(), "DateTime missing");
+        let model = exif.get_field(exif::Tag::Model, exif::In::PRIMARY).expect("Model missing");
+        assert!(model.display_value().to_string().contains("OpticFilm"));
+
+        // 16-bit mode: bit-exact lossless.
+        img.save_with_format(&p, image::ImageFormat::Tiff).unwrap();
+        super::compress_scan(&p, 16, "").unwrap();
+        let back = super::open_image(&p).unwrap().to_rgb16();
+        assert_eq!(orig.as_raw(), back.as_raw(), "16-bit mode must be lossless");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn edge_band_trim_removes_shadow_and_rebate() {
+        // Measured 1800dpi profile shape: holder black, dim aperture-shadow
+        // sliver, image plateau ~0.13, bright rebate band near the far edge.
+        let mut means = vec![0.13f32; 200];
+        means[0] = 0.0;
+        means[1] = 0.01;
+        means[2] = 0.05;
+        means[3] = 0.08;
+        for m in &mut means[192..197] {
+            *m = 0.30;
+        }
+        means[197] = 0.34;
+        means[198] = 0.20;
+        means[199] = 0.14;
+        let (lo, hi) = super::trim_edge_bands(&means, 0, 200);
+        assert!((4..=6).contains(&lo), "left shadow not trimmed: {lo}");
+        assert!((188..=192).contains(&hi), "right rebate not trimmed: {hi}");
+        // A frame with clean edges is untouched.
+        let flat = vec![0.13f32; 200];
+        assert_eq!(super::trim_edge_bands(&flat, 0, 200), (0, 200));
+    }
+
+    #[test]
+    fn rotate_rect_matches_rotate90_cw() {
+        // 100x60 image, rect near top-left. rotate90() is clockwise.
+        let (w, h) = (100u32, 60u32);
+        let r = (10, 5, 20, 8); // x,y,w,h
+        // 90 CW: top-left corner moves to top-right; dims swap to 60x100.
+        assert_eq!(super::rotate_rect(r, w, h, 1), ((60 - (5 + 8), 10, 8, 20), (60, 100)));
+        // 180: mirror both axes, dims unchanged.
+        assert_eq!(super::rotate_rect(r, w, h, 2), ((100 - (10 + 20), 60 - (5 + 8), 20, 8), (100, 60)));
+        // 270 CW: inverse of 90.
+        assert_eq!(super::rotate_rect(r, w, h, 3), ((5, 100 - (10 + 20), 8, 20), (60, 100)));
+        // 0: identity.
+        assert_eq!(super::rotate_rect(r, w, h, 0), (r, (100, 60)));
     }
 
     #[test]

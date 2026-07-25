@@ -17,6 +17,8 @@ const FILM_TYPES: { id: FilmType; label: string }[] = [
 ];
 const RESOLUTIONS = [900, 1800, 3600, 7200];
 
+type PreviewResult = { data: string; crop: [number, number, number, number] | null };
+
 export function detectScanner() {
   const { setScanner } = useScannerStore.getState();
   setScanner({ detect: 'detecting' });
@@ -79,13 +81,14 @@ export default function ScannerPane() {
     if (!s.device || busy) return;
     s.setScanner({ scanning: 'preview', progress: 0, error: null });
     try {
-      const data = await invoke<string>(Invokes.ScanPreview, {
+      const res = await invoke<PreviewResult>(Invokes.ScanPreview, {
         filmType: s.filmType,
         exposureOffset: s.exposureOffset,
         contrast: s.contrast,
         rotationSteps: s.rotationSteps,
+        autoCrop: s.autoCrop,
       });
-      s.setScanner({ previewData: data, scanning: 'idle', progress: 0 });
+      s.setScanner({ previewData: res.data, cropRect: res.crop, scanning: 'idle', progress: 0 });
     } catch (e) {
       s.setScanner({ scanning: 'idle', progress: 0, error: String(e) });
     }
@@ -97,13 +100,14 @@ export default function ScannerPane() {
     rerenderTimer.current = setTimeout(async () => {
       try {
         const st = useScannerStore.getState();
-        const data = await invoke<string>(Invokes.ScanRerenderPreview, {
+        const res = await invoke<PreviewResult>(Invokes.ScanRerenderPreview, {
           filmType: st.filmType,
           exposureOffset: st.exposureOffset,
           contrast: st.contrast,
           rotationSteps: st.rotationSteps,
+          autoCrop: st.autoCrop,
         });
-        st.setScanner({ previewData: data });
+        st.setScanner({ previewData: res.data, cropRect: res.crop });
       } catch {
         // No cached preview (or a scan is running) — settings still apply to the next scan.
       }
@@ -125,6 +129,11 @@ export default function ScannerPane() {
     if (s.previewData) rerenderPreview(50);
   };
 
+  const handleAutoCrop = (on: boolean) => {
+    s.setScanner({ autoCrop: on, cropRect: on ? s.cropRect : null });
+    if (s.previewData) rerenderPreview(50);
+  };
+
   const handleScan = async () => {
     if (!s.device || busy) return;
     const dest = effectiveDest;
@@ -143,6 +152,9 @@ export default function ScannerPane() {
         rotationSteps: s.rotationSteps,
         samples: s.samples,
         irClean: s.irClean,
+        autoCrop: s.autoCrop,
+        bitDepth: s.bitDepth,
+        scannerModel: s.device?.model ?? '',
         destFolder: dest,
         fileName,
       });
@@ -162,7 +174,21 @@ export default function ScannerPane() {
     <div className="flex-1 flex min-h-0">
       <div className="flex-1 flex flex-col items-center justify-center p-6 min-w-0">
         {s.previewData ? (
-          <img src={s.previewData} alt="Scan preview" className="max-w-full max-h-full object-contain rounded-md shadow-lg" />
+          <div className="relative max-w-full max-h-full overflow-hidden rounded-md shadow-lg">
+            <img src={s.previewData} alt="Scan preview" className="block max-w-full max-h-full" />
+            {s.autoCrop && s.cropRect && (
+              <div
+                className="absolute pointer-events-none border border-white/70"
+                style={{
+                  left: `${s.cropRect[0] * 100}%`,
+                  top: `${s.cropRect[1] * 100}%`,
+                  width: `${s.cropRect[2] * 100}%`,
+                  height: `${s.cropRect[3] * 100}%`,
+                  boxShadow: '0 0 0 9999px rgba(0,0,0,0.55)',
+                }}
+              />
+            )}
+          </div>
         ) : (
           <div className="text-text-secondary flex flex-col items-center gap-3">
             <Film size={48} className="opacity-40" />
@@ -223,23 +249,32 @@ export default function ScannerPane() {
         </div>
 
         <div>
-          <p className="text-xs text-text-secondary mb-2">Resolution</p>
+          <p className="text-xs text-text-secondary mb-2" data-tooltip="dpi · 7200 is slow; 3600 suits most rolls">
+            Resolution
+          </p>
           <div className="flex gap-1.5">
             {RESOLUTIONS.map((r) => (
-              <button key={r} disabled={busy} onClick={() => s.setScanner({ dpi: r })} className={`flex-1 ${segBtn(s.dpi === r)}`}>
+              <button
+                key={r}
+                disabled={busy}
+                onClick={() => s.setScanner({ dpi: r })}
+                className={`flex-1 ${segBtn(s.dpi === r)}`}
+                data-tooltip={
+                  r === 7200
+                    ? 'Slow, and the driver’s color calibration is off at 7200 — expect color casts on color film. 3600 is the scanner’s optical sweet spot.'
+                    : undefined
+                }
+              >
                 {r}
               </button>
             ))}
           </div>
-          <p className="text-[10px] text-text-secondary mt-1">
-            {s.dpi === 7200
-              ? '7200: slow, and the driver’s color calibration is off at this setting — expect color casts on color film. 3600 is the scanner’s optical sweet spot.'
-              : 'dpi · 7200 is slow; 3600 suits most rolls'}
-          </p>
         </div>
 
         <div>
-          <p className="text-xs text-text-secondary mb-2">Sampling</p>
+          <p className="text-xs text-text-secondary mb-2" data-tooltip="averages N scans · cuts shadow noise · N× scan time">
+            Sampling
+          </p>
           <div className="flex gap-1.5">
             {[1, 2, 4].map((n) => (
               <button key={n} disabled={busy} onClick={() => s.setScanner({ samples: n })} className={`flex-1 ${segBtn(s.samples === n)}`}>
@@ -247,12 +282,32 @@ export default function ScannerPane() {
               </button>
             ))}
           </div>
-          <p className="text-[10px] text-text-secondary mt-1">averages N scans · cuts shadow noise · N× scan time</p>
+        </div>
+
+        <div>
+          <p
+            className="text-xs text-text-secondary mb-2"
+            data-tooltip="16: lossless, biggest file · 12: half size, discards only bits ~100× below the scanner's noise · 10: smallest, still below noise"
+          >
+            Bit Depth
+          </p>
+          <div className="flex gap-1.5">
+            {[16, 12, 10].map((b) => (
+              <button key={b} disabled={busy} onClick={() => s.setScanner({ bitDepth: b })} className={`flex-1 ${segBtn(s.bitDepth === b)}`}>
+                {b}
+              </button>
+            ))}
+          </div>
         </div>
 
         {s.filmType !== 'bw' && (
           <div>
-            <p className="text-xs text-text-secondary mb-2">Dust removal (IR)</p>
+            <p
+              className="text-xs text-text-secondary mb-2"
+              data-tooltip="extra infrared pass finds dust & scratches, fills them · not for silver B&W film"
+            >
+              Dust removal (IR)
+            </p>
             <div className="flex gap-1.5">
               {[false, true].map((on) => (
                 <button
@@ -265,13 +320,10 @@ export default function ScannerPane() {
                 </button>
               ))}
             </div>
-            <p className="text-[10px] text-text-secondary mt-1">
-              extra infrared pass finds dust &amp; scratches, fills them · not for silver B&amp;W film
-            </p>
           </div>
         )}
 
-        <div>
+        <div data-tooltip="Saved as editor adjustments — re-tune them any time in the edit view">
           <Slider
             label="Exposure"
             min={-3}
@@ -281,9 +333,6 @@ export default function ScannerPane() {
             defaultValue={0}
             onChange={(e: any) => handleExposureChange(parseFloat(e.target.value))}
           />
-          <p className="text-[10px] text-text-secondary mt-1">
-            Saved as editor adjustments — re-tune them any time in the edit view
-          </p>
         </div>
 
         <Slider
@@ -306,6 +355,19 @@ export default function ScannerPane() {
             <RotateCw size={14} />
             Rotate 90° {s.rotationSteps > 0 && `(${s.rotationSteps * 90}°)`}
           </button>
+        </div>
+
+        <div>
+          <p className="text-xs text-text-secondary mb-2" data-tooltip="Non-destructive crop">
+            Auto crop
+          </p>
+          <div className="flex gap-1.5">
+            {[false, true].map((on) => (
+              <button key={String(on)} disabled={busy} onClick={() => handleAutoCrop(on)} className={`flex-1 ${segBtn(s.autoCrop === on)}`}>
+                {on ? 'On' : 'Off'}
+              </button>
+            ))}
+          </div>
         </div>
 
         {s.error && <p className="text-xs text-red-500">{s.error}</p>}
