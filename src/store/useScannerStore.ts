@@ -17,6 +17,9 @@ interface ScannerState {
   dpi: number;
   samples: number;
   irClean: boolean;
+  bitDepth: number;
+  autoCrop: boolean;
+  cropRect: [number, number, number, number] | null;
   exposureOffset: number;
   contrast: number;
   rotationSteps: number;
@@ -39,6 +42,9 @@ export const useScannerStore = create<ScannerState>()(
       dpi: 3600,
       samples: 1,
       irClean: false,
+      bitDepth: 12,
+      autoCrop: false,
+      cropRect: null,
       exposureOffset: 0,
       contrast: 0,
       rotationSteps: 0,
@@ -58,6 +64,8 @@ export const useScannerStore = create<ScannerState>()(
         dpi: state.dpi,
         samples: state.samples,
         irClean: state.irClean,
+        bitDepth: state.bitDepth,
+        autoCrop: state.autoCrop,
         exposureOffset: state.exposureOffset,
         contrast: state.contrast,
         rotationSteps: state.rotationSteps,

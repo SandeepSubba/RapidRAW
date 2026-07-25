@@ -68,6 +68,7 @@ dependencies = [
  "tauri-plugin-shell",
  "tauri-plugin-single-instance",
  "tempfile",
+ "tiff",
  "tokenizers",
  "tokio",
  "trash",
