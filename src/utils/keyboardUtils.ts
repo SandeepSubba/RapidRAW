@@ -47,12 +47,11 @@ export const ADJUSTMENT_NUDGES: AdjustmentNudge[] = [
   // Contrast (C).
   { action: 'contrast_up', description: 'settings.keybinds.actions.contrast_up', defaultCombo: ['KeyC', 'Equal'], adjustmentKey: 'contrast', delta: 1, min: -100, max: 100 },
   { action: 'contrast_down', description: 'settings.keybinds.actions.contrast_down', defaultCombo: ['KeyC', 'Minus'], adjustmentKey: 'contrast', delta: -1, min: -100, max: 100 },
-  // Tonal sliders: Highlights (H), Shadows (D), Whites (Z), Blacks (Y). Shadows
-  // is deliberately inverted (D+- raises, D++ lowers) per the author's mapping.
+  // Tonal sliders: Highlights (H), Shadows (D), Whites (Z), Blacks (Y).
   { action: 'highlights_up', description: 'settings.keybinds.actions.highlights_up', defaultCombo: ['KeyH', 'Equal'], adjustmentKey: 'highlights', delta: 1, min: -100, max: 100 },
   { action: 'highlights_down', description: 'settings.keybinds.actions.highlights_down', defaultCombo: ['KeyH', 'Minus'], adjustmentKey: 'highlights', delta: -1, min: -100, max: 100 },
-  { action: 'shadows_up', description: 'settings.keybinds.actions.shadows_up', defaultCombo: ['KeyD', 'Minus'], adjustmentKey: 'shadows', delta: 1, min: -100, max: 100 },
-  { action: 'shadows_down', description: 'settings.keybinds.actions.shadows_down', defaultCombo: ['KeyD', 'Equal'], adjustmentKey: 'shadows', delta: -1, min: -100, max: 100 },
+  { action: 'shadows_up', description: 'settings.keybinds.actions.shadows_up', defaultCombo: ['KeyD', 'Equal'], adjustmentKey: 'shadows', delta: 1, min: -100, max: 100 },
+  { action: 'shadows_down', description: 'settings.keybinds.actions.shadows_down', defaultCombo: ['KeyD', 'Minus'], adjustmentKey: 'shadows', delta: -1, min: -100, max: 100 },
   { action: 'whites_up', description: 'settings.keybinds.actions.whites_up', defaultCombo: ['KeyZ', 'Equal'], adjustmentKey: 'whites', delta: 1, min: -100, max: 100 },
   { action: 'whites_down', description: 'settings.keybinds.actions.whites_down', defaultCombo: ['KeyZ', 'Minus'], adjustmentKey: 'whites', delta: -1, min: -100, max: 100 },
   { action: 'blacks_up', description: 'settings.keybinds.actions.blacks_up', defaultCombo: ['KeyY', 'Equal'], adjustmentKey: 'blacks', delta: 1, min: -100, max: 100 },
