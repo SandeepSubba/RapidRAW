@@ -31,6 +31,33 @@ detail in [`docs/IMAGE_IMPORTER.md`](IMAGE_IMPORTER.md).
   correction so imported RAWs open already corrected.
 - **Windows SD-card eject** support from within the importer.
 
+## Film scanner
+
+Scan 35mm film directly into the library via SANE, documented in detail in
+[`docs/FILM_SCANNER.md`](FILM_SCANNER.md). Frames land already inverted, tuned,
+and dated.
+
+- **C-41 / B&W / E-6** — colour-negative, B&W-negative, and slide film, inverted
+  (or not, for slides) on scan with automatic orange-mask neutralisation.
+- **Runtime capability detection** — sources, resolutions, depth, and infrared
+  availability are read from the scanner via `scanimage -A`, so the UI adapts to
+  each device instead of assuming one model.
+- **IR dust & scratch removal** — an infrared pass detects and inpaints dust,
+  hair, and surface scratches (when the scanner exposes an IR source).
+- **Multi-sampling** — averages N passes to cut shadow noise.
+- **Auto-tone** — density-domain inversion with hue-neutral high-dpi handling;
+  Exposure/Contrast are written as re-tunable editor adjustments.
+- **Auto crop** — detects the film frame (holder bars, aperture shadow, rebate)
+  and writes a non-destructive crop; the preview dims what will be trimmed.
+- **10 / 12 / 16-bit compressed TIFF** — deflate + predictor; 12-bit halves the
+  file with no visible loss.
+- **Embedded metadata** — scan date and scanner make/model as TIFF/EXIF tags for
+  cross-application date sorting.
+- **Background scanning** with an inactivity watchdog and graceful (SIGTERM)
+  shutdown so a wedged scan can't zombie the USB device.
+- Runs on **macOS** (`brew install sane-backends`) and **Linux** (`sane-utils`);
+  Windows is unsupported (no SANE).
+
 ## Crop, rotate & perspective
 
 - **Opt-in crop tool** (fork behaviour) — the Crop panel no longer auto-activates a
