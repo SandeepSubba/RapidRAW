@@ -10,9 +10,19 @@ export interface ScannerDevice {
   model: string;
 }
 
+export interface ScannerCaps {
+  sourceVisible: string;
+  sourceInfrared: string | null;
+  resolutions: number[];
+  defaultResolution: number;
+  maxDepth: number;
+  hasTransparency: boolean;
+}
+
 interface ScannerState {
   detect: ScannerDetect;
   device: ScannerDevice | null;
+  caps: ScannerCaps | null;
   filmType: FilmType;
   dpi: number;
   samples: number;
@@ -38,6 +48,7 @@ export const useScannerStore = create<ScannerState>()(
     (set) => ({
       detect: 'unknown',
       device: null,
+      caps: null,
       filmType: 'c41',
       dpi: 3600,
       samples: 1,

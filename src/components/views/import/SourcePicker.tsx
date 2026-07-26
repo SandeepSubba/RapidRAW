@@ -24,10 +24,14 @@ function ScannerSourceCard() {
   const setImport = useImportStore((s) => s.setImport);
 
   useEffect(() => {
-    if (detect === 'unknown') detectScanner();
-  }, [detect]);
+    // Re-probe every time the source list opens: the scanner may have been
+    // unplugged since the last detection, so a cached "ready" goes stale.
+    if (useScannerStore.getState().detect !== 'detecting') detectScanner();
+  }, []);
 
-  const ready = detect === 'ready' && device;
+  const caps = useScannerStore((s) => s.caps);
+  const noFilm = detect === 'ready' && caps != null && !caps.hasTransparency;
+  const ready = detect === 'ready' && device && !noFilm;
   return (
     <button
       onClick={() => (ready ? setImport({ stage: 'scanner' }) : detectScanner())}
@@ -46,10 +50,13 @@ function ScannerSourceCard() {
           )}
         </div>
         <span className="text-xs text-text-secondary truncate block">
-          {detect === 'no-scanimage' && 'SANE not installed — brew install sane-backends, then click to retry'}
+          {detect === 'no-scanimage' &&
+            'SANE not found — install sane-backends (macOS: brew, Linux: apt/dnf) to enable film scanning'}
           {detect === 'no-scanner' && 'No scanner found — connect it, power on, click to retry'}
           {detect === 'detecting' && 'Looking for scanners…'}
-          {(detect === 'ready' || detect === 'unknown') && (device?.name || 'Scan film directly into your library')}
+          {noFilm && 'No transparency unit — this scanner can’t scan film'}
+          {detect === 'ready' && !noFilm && (device?.name || 'Scan film directly into your library')}
+          {detect === 'unknown' && 'Scan film directly into your library'}
         </span>
       </div>
     </button>
