@@ -287,7 +287,7 @@ export default function ScannerPane() {
             Bit Depth
           </p>
           <div className="flex gap-1.5">
-            {[16, 12, 10].map((b) => (
+            {[10, 12, 16].map((b) => (
               <button key={b} disabled={busy} onClick={() => s.setScanner({ bitDepth: b })} className={`flex-1 ${segBtn(s.bitDepth === b)}`}>
                 {b}
               </button>
