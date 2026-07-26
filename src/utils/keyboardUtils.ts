@@ -36,32 +36,40 @@ export interface AdjustmentNudge {
 }
 
 export const ADJUSTMENT_NUDGES: AdjustmentNudge[] = [
-  // Exposure — Ctrl/Cmd + +/-, matching Capture One. Zoom moved off this combo
-  // to the bare +/- keys to free it. Step matches Capture One (0.1 EV).
-  // Note: the UI's Exposure slider writes `brightness`; `exposure` is the EV Shift slider.
-  { action: 'exposure_up', description: 'settings.keybinds.actions.exposure_up', defaultCombo: ['ctrl', 'Equal'], adjustmentKey: 'brightness', delta: 0.1, min: -5, max: 5 },
-  { action: 'exposure_down', description: 'settings.keybinds.actions.exposure_down', defaultCombo: ['ctrl', 'Minus'], adjustmentKey: 'brightness', delta: -0.1, min: -5, max: 5 },
-  // Contrast — matches Capture One's Ctrl(+Shift+Cmd) modifier family. Step 1
-  // for subtle nudges (as with temperature/tint below).
-  { action: 'contrast_up', description: 'settings.keybinds.actions.contrast_up', defaultCombo: ['ctrl', 'shift', 'Equal'], adjustmentKey: 'contrast', delta: 1, min: -100, max: 100 },
-  { action: 'contrast_down', description: 'settings.keybinds.actions.contrast_down', defaultCombo: ['ctrl', 'shift', 'Minus'], adjustmentKey: 'contrast', delta: -1, min: -100, max: 100 },
-  // Saturation — matches Capture One's Ctrl(+Alt+Cmd) modifier family.
-  { action: 'saturation_up', description: 'settings.keybinds.actions.saturation_up', defaultCombo: ['ctrl', 'alt', 'Equal'], adjustmentKey: 'saturation', delta: 1, min: -100, max: 100 },
-  { action: 'saturation_down', description: 'settings.keybinds.actions.saturation_down', defaultCombo: ['ctrl', 'alt', 'Minus'], adjustmentKey: 'saturation', delta: -1, min: -100, max: 100 },
-  { action: 'vibrance_up', description: 'settings.keybinds.actions.vibrance_up', defaultCombo: ['shift', 'alt', 'Equal'], adjustmentKey: 'vibrance', delta: 1, min: -100, max: 100 },
-  { action: 'vibrance_down', description: 'settings.keybinds.actions.vibrance_down', defaultCombo: ['shift', 'alt', 'Minus'], adjustmentKey: 'vibrance', delta: -1, min: -100, max: 100 },
-  // Temperature / Tint together cover white balance. Temperature gets the
-  // simpler Shift + +/- combo; tint takes the fuller modifier family. Step is 1
-  // (not 5 like the tonal sliders) so white balance nudges stay subtle.
-  { action: 'temperature_up', description: 'settings.keybinds.actions.temperature_up', defaultCombo: ['shift', 'Equal'], adjustmentKey: 'temperature', delta: 1, min: -100, max: 100 },
-  { action: 'temperature_down', description: 'settings.keybinds.actions.temperature_down', defaultCombo: ['shift', 'Minus'], adjustmentKey: 'temperature', delta: -1, min: -100, max: 100 },
-  { action: 'tint_up', description: 'settings.keybinds.actions.tint_up', defaultCombo: ['ctrl', 'shift', 'alt', 'Equal'], adjustmentKey: 'tint', delta: 1, min: -100, max: 100 },
-  { action: 'tint_down', description: 'settings.keybinds.actions.tint_down', defaultCombo: ['ctrl', 'shift', 'alt', 'Minus'], adjustmentKey: 'tint', delta: -1, min: -100, max: 100 },
-  // Vignette on Alt + +/-, same +=increase / -=decrease direction as every other
-  // adjustment so muscle memory carries over: Alt+- darkens (more vignette),
-  // Alt++ lightens. Range is the Effects slider's own -100..100.
-  { action: 'vignette_down', description: 'settings.keybinds.actions.vignette_down', defaultCombo: ['alt', 'Minus'], adjustmentKey: 'vignetteAmount', delta: -1, min: -100, max: 100 },
-  { action: 'vignette_up', description: 'settings.keybinds.actions.vignette_up', defaultCombo: ['alt', 'Equal'], adjustmentKey: 'vignetteAmount', delta: 1, min: -100, max: 100 },
+  // Defaults use the hold-a-letter-then-+/- model (e.g. hold E, press + to raise
+  // exposure). The letter names the adjustment; the held leader suppresses its
+  // own single-key action until release, so + never leaks to zoom. All fully
+  // remappable in Settings > Controls.
+  // Exposure (E). Step matches Capture One (0.1 EV). Note: the UI's Exposure
+  // slider writes `brightness`; `exposure` is the EV Shift slider.
+  { action: 'exposure_up', description: 'settings.keybinds.actions.exposure_up', defaultCombo: ['KeyE', 'Equal'], adjustmentKey: 'brightness', delta: 0.1, min: -5, max: 5 },
+  { action: 'exposure_down', description: 'settings.keybinds.actions.exposure_down', defaultCombo: ['KeyE', 'Minus'], adjustmentKey: 'brightness', delta: -0.1, min: -5, max: 5 },
+  // Contrast (C).
+  { action: 'contrast_up', description: 'settings.keybinds.actions.contrast_up', defaultCombo: ['KeyC', 'Equal'], adjustmentKey: 'contrast', delta: 1, min: -100, max: 100 },
+  { action: 'contrast_down', description: 'settings.keybinds.actions.contrast_down', defaultCombo: ['KeyC', 'Minus'], adjustmentKey: 'contrast', delta: -1, min: -100, max: 100 },
+  // Tonal sliders: Highlights (H), Shadows (D), Whites (Z), Blacks (Y). Shadows
+  // is deliberately inverted (D+- raises, D++ lowers) per the author's mapping.
+  { action: 'highlights_up', description: 'settings.keybinds.actions.highlights_up', defaultCombo: ['KeyH', 'Equal'], adjustmentKey: 'highlights', delta: 1, min: -100, max: 100 },
+  { action: 'highlights_down', description: 'settings.keybinds.actions.highlights_down', defaultCombo: ['KeyH', 'Minus'], adjustmentKey: 'highlights', delta: -1, min: -100, max: 100 },
+  { action: 'shadows_up', description: 'settings.keybinds.actions.shadows_up', defaultCombo: ['KeyD', 'Minus'], adjustmentKey: 'shadows', delta: 1, min: -100, max: 100 },
+  { action: 'shadows_down', description: 'settings.keybinds.actions.shadows_down', defaultCombo: ['KeyD', 'Equal'], adjustmentKey: 'shadows', delta: -1, min: -100, max: 100 },
+  { action: 'whites_up', description: 'settings.keybinds.actions.whites_up', defaultCombo: ['KeyZ', 'Equal'], adjustmentKey: 'whites', delta: 1, min: -100, max: 100 },
+  { action: 'whites_down', description: 'settings.keybinds.actions.whites_down', defaultCombo: ['KeyZ', 'Minus'], adjustmentKey: 'whites', delta: -1, min: -100, max: 100 },
+  { action: 'blacks_up', description: 'settings.keybinds.actions.blacks_up', defaultCombo: ['KeyY', 'Equal'], adjustmentKey: 'blacks', delta: 1, min: -100, max: 100 },
+  { action: 'blacks_down', description: 'settings.keybinds.actions.blacks_down', defaultCombo: ['KeyY', 'Minus'], adjustmentKey: 'blacks', delta: -1, min: -100, max: 100 },
+  // Saturation (S), Vibrance (B).
+  { action: 'saturation_up', description: 'settings.keybinds.actions.saturation_up', defaultCombo: ['KeyS', 'Equal'], adjustmentKey: 'saturation', delta: 1, min: -100, max: 100 },
+  { action: 'saturation_down', description: 'settings.keybinds.actions.saturation_down', defaultCombo: ['KeyS', 'Minus'], adjustmentKey: 'saturation', delta: -1, min: -100, max: 100 },
+  { action: 'vibrance_up', description: 'settings.keybinds.actions.vibrance_up', defaultCombo: ['KeyB', 'Equal'], adjustmentKey: 'vibrance', delta: 1, min: -100, max: 100 },
+  { action: 'vibrance_down', description: 'settings.keybinds.actions.vibrance_down', defaultCombo: ['KeyB', 'Minus'], adjustmentKey: 'vibrance', delta: -1, min: -100, max: 100 },
+  // White balance: Temperature (W, for Warmth), Tint (T). Step 1 for subtle nudges.
+  { action: 'temperature_up', description: 'settings.keybinds.actions.temperature_up', defaultCombo: ['KeyW', 'Equal'], adjustmentKey: 'temperature', delta: 1, min: -100, max: 100 },
+  { action: 'temperature_down', description: 'settings.keybinds.actions.temperature_down', defaultCombo: ['KeyW', 'Minus'], adjustmentKey: 'temperature', delta: -1, min: -100, max: 100 },
+  { action: 'tint_up', description: 'settings.keybinds.actions.tint_up', defaultCombo: ['KeyT', 'Equal'], adjustmentKey: 'tint', delta: 1, min: -100, max: 100 },
+  { action: 'tint_down', description: 'settings.keybinds.actions.tint_down', defaultCombo: ['KeyT', 'Minus'], adjustmentKey: 'tint', delta: -1, min: -100, max: 100 },
+  // Vignette (V). Range is the Effects slider's own -100..100.
+  { action: 'vignette_down', description: 'settings.keybinds.actions.vignette_down', defaultCombo: ['KeyV', 'Minus'], adjustmentKey: 'vignetteAmount', delta: -1, min: -100, max: 100 },
+  { action: 'vignette_up', description: 'settings.keybinds.actions.vignette_up', defaultCombo: ['KeyV', 'Equal'], adjustmentKey: 'vignetteAmount', delta: 1, min: -100, max: 100 },
 ];
 
 // Effective step magnitude for an adjustment nudge, honoring a user override
