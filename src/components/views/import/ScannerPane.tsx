@@ -190,15 +190,6 @@ export default function ScannerPane() {
             <p className="text-sm">Run a preview to check framing, or scan directly.</p>
           </div>
         )}
-        {s.sessionScans.length > 0 && (
-          <div className="shrink-0 w-full mt-4 flex flex-wrap gap-2 justify-center">
-            {s.sessionScans.map((name) => (
-              <span key={name} className="text-xs px-2 py-1 rounded bg-surface/60 text-text-secondary">
-                {name}
-              </span>
-            ))}
-          </div>
-        )}
       </div>
 
       <div className="w-80 shrink-0 border-l border-surface p-5 flex flex-col gap-5 overflow-y-auto">
