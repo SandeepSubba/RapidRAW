@@ -1418,7 +1418,7 @@
       "notAssigned": "Not assigned",
       "optimization": "Input Device Optimization",
       "optimizationDesc": "Choose the primary input device you use to pan and zoom the canvas.",
-      "pressKey": "Press a key... (Esc to clear)",
+      "pressKey": "Press a key, or hold one and press another — e.g. hold E, press + (Esc to clear)",
       "resetDefaults": "Reset All to Defaults",
       "speed": "Speed",
       "step": "Step",

@@ -36,6 +36,11 @@ export const useKeyboardShortcuts = ({
     sortedListRef.current = sortedImageList;
   }, [sortedImageList]);
 
+  // Held leader keys must survive this hook's frequent effect re-runs (a nudge
+  // re-renders and rebuilds the listener); a closure-local map would reset
+  // mid-hold and let + leak through to zoom.
+  const heldLeadersRef = useRef(new Map<string, { used: boolean; event: KeyboardEvent }>());
+
   useEffect(() => {
     const getStoreState = () => ({
       editor: useEditorStore.getState(),
@@ -46,15 +51,29 @@ export const useKeyboardShortcuts = ({
     });
 
     const comboMap = new Map<string, string>();
+    // Held-chord bindings: a keybind whose first element is a non-modifier key,
+    // e.g. ['KeyE','Equal'] = hold E, then press +. Keyed leaderCode -> (restKey
+    // -> action). Empty unless the user records a hold-then-key shortcut.
+    const leaderChords = new Map<string, Map<string, string>>();
+    const MODS = ['ctrl', 'shift', 'alt'];
     const keybinds = useSettingsStore.getState().appSettings?.keybinds;
 
     for (const def of KEYBIND_DEFINITIONS) {
       const userCombo = keybinds?.[def.action];
       const effective = userCombo && userCombo.length > 0 ? userCombo : def.defaultCombo;
-      if (effective) {
+      if (!effective) continue;
+      if (effective.length >= 2 && !MODS.includes(effective[0])) {
+        const leader = effective[0];
+        if (!leaderChords.has(leader)) leaderChords.set(leader, new Map());
+        leaderChords.get(leader)!.set(effective.slice(1).join('+'), def.action);
+      } else {
         comboMap.set(effective.join('+'), def.action);
       }
     }
+
+    // Leader keys currently held down. `used` marks that a chord already fired,
+    // so the leader's own tap action isn't triggered when it's released.
+    const heldLeaders = heldLeadersRef.current;
 
     const actions: Record<string, any> = {
       open_image: {
@@ -609,9 +628,33 @@ export const useKeyboardShortcuts = ({
         }
       }
 
-      const normalized = normalizeCombo(event, state.settings.osPlatform);
-      const action = comboMap.get(normalized.join('+'));
+      const nkey = normalizeCombo(event, state.settings.osPlatform).join('+');
 
+      // Held-chord: a leader key is down and this press completes a chord (hold
+      // E, press +). Fires the chord and blocks the plain key (so + won't zoom).
+      // Held +/- auto-repeat keeps nudging.
+      for (const [leader, info] of heldLeaders) {
+        if (leader === event.code) continue;
+        const chordAction = leaderChords.get(leader)?.get(nkey);
+        const chordHandler = chordAction ? actions[chordAction] : null;
+        if (chordHandler && (!chordHandler.shouldFire || chordHandler.shouldFire(state))) {
+          event.preventDefault();
+          chordHandler.execute(event, state);
+          info.used = true;
+          return;
+        }
+      }
+
+      // This key starts a chord: suppress its own single action while held (its
+      // tap action fires on release instead). Only arm when a chord here could
+      // actually fire, so non-editor single keys stay instant.
+      const table = leaderChords.get(event.code);
+      if (table && [...table.values()].some((a) => !actions[a]?.shouldFire || actions[a].shouldFire(state))) {
+        if (!heldLeaders.has(event.code)) heldLeaders.set(event.code, { used: false, event });
+        return;
+      }
+
+      const action = comboMap.get(nkey);
       if (action) {
         const handler = actions[action];
         if (handler && (!handler.shouldFire || handler.shouldFire(state))) {
@@ -621,9 +664,28 @@ export const useKeyboardShortcuts = ({
       }
     };
 
+    // Release: if a leader was held but no chord fired, run its tap action.
+    const handleKeyUp = (event: KeyboardEvent) => {
+      const info = heldLeaders.get(event.code);
+      if (!info) return;
+      heldLeaders.delete(event.code);
+      if (info.used) return;
+      const active = document.activeElement?.tagName;
+      const st = getStoreState();
+      if (st.ui.isSettingsOpen || active === 'INPUT' || active === 'TEXTAREA') return;
+      const action = comboMap.get(event.code);
+      const handler = action ? actions[action] : null;
+      if (handler && (!handler.shouldFire || handler.shouldFire(st))) handler.execute(info.event, st);
+    };
+    const handleBlur = () => heldLeaders.clear();
+
     window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('blur', handleBlur);
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('blur', handleBlur);
     };
   }, [
     handleBackToLibrary,

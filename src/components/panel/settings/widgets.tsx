@@ -64,24 +64,49 @@ export const KeybindRow = ({
   const { t } = useTranslation();
   const recording = recordingAction === def.action;
 
+  // Records a single chord, or a held chord: hold a letter and press another key
+  // (hold E, press + -> ['KeyE','Equal']). A lone letter commits on release as a
+  // single key; holding it and pressing a second key commits the pair.
   useEffect(() => {
     if (!recording) return;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onSave(def.action, []);
-        onStartRecording('');
+    const held: string[] = [];
+    let pendingLeader: string | null = null;
+    let done = false;
+    const commit = (combo: string[]) => {
+      if (done) return;
+      done = true;
+      onSave(def.action, combo);
+      onStartRecording('');
+    };
+    const onDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') return commit([]);
+      e.preventDefault();
+      if (e.repeat || /^(Control|Shift|Alt|Meta)/.test(e.code)) return;
+      const others = [...held];
+      held.push(e.code);
+      const parts = normalizeCombo(e, osPlatform);
+      if (others.length > 0) return commit([...others, ...parts]); // held chord
+      if (parts.length === 1 && /^Key[A-Z]$/.test(e.code)) {
+        pendingLeader = e.code; // lone letter — could be tapped or held as a leader
         return;
       }
-      e.preventDefault();
-      const parts = normalizeCombo(e, osPlatform);
-      if (parts.length > 0 && !['ctrl', 'shift', 'alt'].includes(parts[parts.length - 1])) {
-        onSave(def.action, parts);
-        onStartRecording('');
+      commit(parts); // modifier combo or non-letter single key
+    };
+    const onUp = (e: KeyboardEvent) => {
+      const i = held.indexOf(e.code);
+      if (i >= 0) held.splice(i, 1);
+      if (pendingLeader === e.code) {
+        commit([e.code]); // tapped a letter → single key
+        pendingLeader = null;
       }
     };
-    window.addEventListener('keydown', handler, { capture: true });
-    return () => window.removeEventListener('keydown', handler, { capture: true });
-  }, [recording, def.action, onSave, onStartRecording]);
+    window.addEventListener('keydown', onDown, { capture: true });
+    window.addEventListener('keyup', onUp, { capture: true });
+    return () => {
+      window.removeEventListener('keydown', onDown, { capture: true });
+      window.removeEventListener('keyup', onUp, { capture: true });
+    };
+  }, [recording, def.action, onSave, onStartRecording, osPlatform]);
 
   // Local text state for the step field so partial input (e.g. "0.") doesn't get
   // clobbered by the committed value while typing; commit valid positives only.
