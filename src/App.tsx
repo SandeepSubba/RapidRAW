@@ -25,6 +25,7 @@ import { useLibraryStore } from './store/useLibraryStore';
 import { useEditorStore } from './store/useEditorStore';
 import { useProcessStore } from './store/useProcessStore';
 import { useTetherStore } from './store/useTetherStore';
+import { useScannerStore } from './store/useScannerStore';
 import LiveViewOverlay from './components/panel/library/LiveViewOverlay';
 import { useShallow } from 'zustand/react/shallow';
 
@@ -550,17 +551,37 @@ function App() {
     const unlistenLost = listen('tether-camera-lost', () => {
       useTetherStore.getState().setTether({ camera: null, liveView: false });
     });
-    // Scanned frames land in the current library folder; refresh so they're
-    // there when the scan view closes. No auto-select — that would eject the
-    // user from the scan pane between frames of a roll.
-    const unlistenScan = listen('scan-complete', () => {
+    // Scan state lives on these app-level listeners, not the scan pane's, so a
+    // scan keeps running and lands in the library after the user navigates away
+    // — and returning to the pane never shows a stale "Scanning…". No
+    // auto-select: that would eject the user from the pane between roll frames.
+    const unlistenScanProgress = listen<{ percent: number }>('scan-progress', (e: any) => {
+      useScannerStore.getState().setScanner({ progress: e.payload.percent });
+    });
+    const unlistenScan = listen<{ fileName: string }>('scan-complete', (e: any) => {
+      useScannerStore.getState().setScanner((st) => ({
+        scanning: 'idle',
+        progress: 0,
+        frameCount: st.frameCount + 1,
+        sessionScans: [...st.sessionScans, e.payload.fileName],
+      }));
+      toast.success(`Scanned ${e.payload.fileName}`);
       tetherHandlersRef.current.handleLibraryRefresh();
+    });
+    const unlistenScanError = listen<{ message: string }>('scan-error', (e: any) => {
+      useScannerStore.getState().setScanner({ scanning: 'idle', progress: 0, error: e.payload.message });
+    });
+    const unlistenScanCancelled = listen('scan-cancelled', () => {
+      useScannerStore.getState().setScanner({ scanning: 'idle', progress: 0 });
     });
     return () => {
       clearTimeout(selectTimeout);
       unlisten.then((f) => f());
       unlistenLost.then((f) => f());
+      unlistenScanProgress.then((f) => f());
       unlistenScan.then((f) => f());
+      unlistenScanError.then((f) => f());
+      unlistenScanCancelled.then((f) => f());
     };
   }, []);
 

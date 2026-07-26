@@ -1,12 +1,11 @@
-import { useEffect, useRef } from 'react';
+import { useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
 import { Film, Loader2, RefreshCw, RotateCw, X } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { Invokes } from '../../ui/AppProperties';
 import { useImportStore } from '../../../store/useImportStore';
 import { useLibraryStore } from '../../../store/useLibraryStore';
-import { useScannerStore, FilmType } from '../../../store/useScannerStore';
+import { useScannerStore, FilmType, ScannerCaps } from '../../../store/useScannerStore';
 import Button from '../../ui/Button';
 import Slider from '../../ui/Slider';
 
@@ -15,67 +14,57 @@ const FILM_TYPES: { id: FilmType; label: string }[] = [
   { id: 'bw', label: 'B&W negative' },
   { id: 'e6', label: 'Slide (E-6)' },
 ];
-const RESOLUTIONS = [900, 1800, 3600, 7200];
+const FALLBACK_RESOLUTIONS = [900, 1800, 3600, 7200];
 
 type PreviewResult = { data: string; crop: [number, number, number, number] | null };
 
 export function detectScanner() {
   const { setScanner } = useScannerStore.getState();
   setScanner({ detect: 'detecting' });
-  invoke<{ scanimageInstalled: boolean; device: { name: string; model: string } | null }>(Invokes.ScanDetectScanner)
+  invoke<{ scanimageInstalled: boolean; device: { name: string; model: string } | null; caps: ScannerCaps | null }>(
+    Invokes.ScanDetectScanner,
+  )
     .then((res) => {
-      if (!res.scanimageInstalled) setScanner({ detect: 'no-scanimage', device: null });
-      else if (!res.device) setScanner({ detect: 'no-scanner', device: null });
-      else setScanner({ detect: 'ready', device: res.device });
+      if (!res.scanimageInstalled) setScanner({ detect: 'no-scanimage', device: null, caps: null });
+      else if (!res.device) setScanner({ detect: 'no-scanner', device: null, caps: null });
+      else {
+        // Snap the chosen resolution to something this scanner actually offers.
+        const st = useScannerStore.getState();
+        const res_list = res.caps?.resolutions ?? [];
+        const dpi = res_list.length && !res_list.includes(st.dpi) ? res.caps!.defaultResolution : st.dpi;
+        setScanner({ detect: 'ready', device: res.device, caps: res.caps, dpi });
+      }
     })
     .catch((e) => {
       toast.error(`Scanner detection failed: ${e}`);
-      useScannerStore.getState().setScanner({ detect: 'no-scanner', device: null });
+      useScannerStore.getState().setScanner({ detect: 'no-scanner', device: null, caps: null });
     });
+}
+
+// A low-but-not-lowest resolution for framing previews; the true minimum often
+// carries decimation noise the negative stretch amplifies.
+function previewDpi(caps: ScannerCaps | null): number {
+  const r = caps?.resolutions ?? [];
+  if (!r.length) return 1800;
+  return r.find((x) => x >= 1500) ?? r[r.length - 1];
 }
 
 export default function ScannerPane() {
   const s = useScannerStore();
   const destinationFolder = useImportStore((st) => st.destinationFolder);
   const currentFolderPath = useLibraryStore((st) => st.currentFolderPath);
-  const lastScanRef = useRef<string | null>(null);
   const rerenderTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Scans land in the open library folder (albums are virtual — not writable);
   // an earlier import-flow destination, if set, wins.
   const libraryFolder = currentFolderPath && !currentFolderPath.startsWith('Album: ') ? currentFolderPath : null;
   const effectiveDest = destinationFolder || libraryFolder;
-
-  useEffect(() => {
-    const unlistens = [
-      listen<{ percent: number }>('scan-progress', (e) => {
-        useScannerStore.getState().setScanner({ progress: e.payload.percent });
-      }),
-      listen<{ path: string; fileName: string }>('scan-complete', (e) => {
-        lastScanRef.current = e.payload.fileName;
-        useScannerStore.getState().setScanner((st) => ({
-          scanning: 'idle',
-          progress: 0,
-          frameCount: st.frameCount + 1,
-          sessionScans: [...st.sessionScans, e.payload.fileName],
-        }));
-        toast.success(`Scanned ${e.payload.fileName}`);
-      }),
-      listen<{ message: string }>('scan-error', (e) => {
-        useScannerStore.getState().setScanner({ scanning: 'idle', progress: 0, error: e.payload.message });
-      }),
-      listen('scan-cancelled', () => {
-        useScannerStore.getState().setScanner({ scanning: 'idle', progress: 0 });
-      }),
-    ];
-    return () => {
-      unlistens.forEach((u) => u.then((f) => f()));
-      if (useScannerStore.getState().scanning !== 'idle') {
-        invoke(Invokes.ScanCancel).catch(() => {});
-      }
-    };
-  }, []);
+  // Scan lifecycle listeners live in App.tsx so a scan keeps running and lands
+  // in the library after this pane closes; the pane just reads store state.
 
   const busy = s.scanning !== 'idle';
+  const resolutions = s.caps?.resolutions?.length ? s.caps.resolutions : FALLBACK_RESOLUTIONS;
+  const hasIR = !s.caps || !!s.caps.sourceInfrared; // fallback (no caps) assumes the 7600i has IR
+  const scanDepth = Math.min(16, s.caps?.maxDepth ?? 16);
 
   const handlePreview = async () => {
     if (!s.device || busy) return;
@@ -87,6 +76,9 @@ export default function ScannerPane() {
         contrast: s.contrast,
         rotationSteps: s.rotationSteps,
         autoCrop: s.autoCrop,
+        sourceVisible: s.caps?.sourceVisible ?? '',
+        previewDpi: previewDpi(s.caps),
+        scanDepth,
       });
       s.setScanner({ previewData: res.data, cropRect: res.crop, scanning: 'idle', progress: 0 });
     } catch (e) {
@@ -151,9 +143,12 @@ export default function ScannerPane() {
         contrast: s.contrast,
         rotationSteps: s.rotationSteps,
         samples: s.samples,
-        irClean: s.irClean,
+        irClean: s.irClean && hasIR,
         autoCrop: s.autoCrop,
         bitDepth: s.bitDepth,
+        scanDepth,
+        sourceVisible: s.caps?.sourceVisible ?? '',
+        sourceInfrared: s.caps?.sourceInfrared ?? null,
         scannerModel: s.device?.model ?? '',
         destFolder: dest,
         fileName,
@@ -253,7 +248,7 @@ export default function ScannerPane() {
             Resolution
           </p>
           <div className="flex gap-1.5">
-            {RESOLUTIONS.map((r) => (
+            {resolutions.map((r) => (
               <button
                 key={r}
                 disabled={busy}
@@ -300,7 +295,7 @@ export default function ScannerPane() {
           </div>
         </div>
 
-        {s.filmType !== 'bw' && (
+        {s.filmType !== 'bw' && hasIR && (
           <div>
             <p
               className="text-xs text-text-secondary mb-2"
@@ -387,7 +382,7 @@ export default function ScannerPane() {
           </div>
         ) : (
           <div className="flex flex-col gap-2">
-            {lastScanRef.current && (
+            {s.sessionScans.length > 0 && (
               <p className="text-xs text-accent">Advance the holder to the next frame, then Scan.</p>
             )}
             <Button onClick={handlePreview} disabled={!s.device} className="w-full">

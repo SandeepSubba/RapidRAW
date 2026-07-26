@@ -1,7 +1,7 @@
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
@@ -37,16 +37,32 @@ pub struct PreviewResult {
     pub crop: Option<[f32; 4]>,
 }
 
+// What the DETECTED scanner actually supports, parsed from `scanimage -A` so the
+// UI offers real options instead of the 7600i's hardcoded ones. None when the
+// device couldn't be queried (found but won't open).
+#[derive(Serialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ScannerCaps {
+    pub source_visible: String,          // the transparency source to scan through
+    pub source_infrared: Option<String>, // present only if the device exposes IR
+    pub resolutions: Vec<u32>,
+    pub default_resolution: u32,
+    pub max_depth: u32,
+    pub has_transparency: bool,          // false = document scanner, no film support
+}
+
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ScanDetectResult {
     pub scanimage_installed: bool,
     pub device: Option<ScannerDevice>,
+    pub caps: Option<ScannerCaps>,
 }
 
-// Finder-launched apps don't inherit the brew PATH.
+// Finder-launched apps don't inherit the brew PATH; Linux keeps scanimage in
+// /usr/bin (native SANE home), which a minimal desktop-launcher PATH may miss.
 fn scanimage_bin() -> PathBuf {
-    for p in ["/opt/homebrew/bin/scanimage", "/usr/local/bin/scanimage"] {
+    for p in ["/opt/homebrew/bin/scanimage", "/usr/local/bin/scanimage", "/usr/bin/scanimage"] {
         if Path::new(p).exists() {
             return PathBuf::from(p);
         }
@@ -54,44 +70,137 @@ fn scanimage_bin() -> PathBuf {
     PathBuf::from("scanimage")
 }
 
+// Stop scanimage gracefully: SIGTERM first so it releases the USB interface,
+// escalating to SIGKILL only if it ignores that for ~2s. A hard SIGKILL mid-
+// transfer leaves the genesys device wedged until a physical re-plug (learned
+// the hard way). Falls back to a plain kill on non-Unix.
+fn terminate_child(child: &mut Child) {
+    #[cfg(unix)]
+    {
+        unsafe { libc::kill(child.id() as libc::pid_t, libc::SIGTERM) };
+        for _ in 0..20 {
+            match child.try_wait() {
+                Ok(Some(_)) => return,
+                Ok(None) => std::thread::sleep(std::time::Duration::from_millis(100)),
+                Err(_) => break,
+            }
+        }
+    }
+    let _ = child.kill();
+}
+
+// A film source name is any transparency/film adapter (backend-specific wording).
+fn is_film_source(s: &str) -> bool {
+    let t = s.to_lowercase();
+    ["transparency", "tpu", "film", "slide", "positive", "negative"].iter().any(|k| t.contains(k))
+}
+
+// Parse the `scanimage -A` option dump into the capabilities the UI needs.
+fn parse_caps(text: &str) -> ScannerCaps {
+    let mut caps = ScannerCaps { max_depth: 8, ..Default::default() };
+    // Value list sits between "--<opt> " and the " [default]" marker.
+    let values = |line: &str, opt: &str| -> Option<String> {
+        line.trim().strip_prefix(opt)?.split(" [").next().map(|s| s.trim().to_string())
+    };
+    for line in text.lines() {
+        if let Some(list) = values(line, "--source ") {
+            let sources: Vec<&str> = list.split('|').map(|s| s.trim()).collect();
+            caps.source_infrared = sources.iter().find(|s| s.to_lowercase().contains("infrared")).map(|s| s.to_string());
+            let non_ir: Vec<&str> = sources.iter().copied().filter(|s| !s.to_lowercase().contains("infrared")).collect();
+            // Prefer a film source; fall back to the first non-IR source so a scan
+            // still attempts (a plain flatbed reports Flatbed here).
+            let visible = non_ir.iter().find(|s| is_film_source(s)).or(non_ir.first());
+            if let Some(v) = visible {
+                caps.source_visible = v.to_string();
+            }
+            caps.has_transparency = caps.source_infrared.is_some() || sources.iter().any(|s| is_film_source(s));
+        } else if let Some(spec) = values(line, "--resolution ") {
+            let default = line.split('[').nth(1).and_then(|d| {
+                d.trim_end_matches(']').trim().trim_end_matches("dpi").trim().parse::<u32>().ok()
+            });
+            let spec = spec.trim_end_matches("dpi");
+            if spec.contains("..") {
+                // Range (e.g. Epson 50..7200): offer common film steps inside it.
+                let bounds: Vec<u32> = spec.split("..").filter_map(|s| {
+                    s.split_whitespace().next().unwrap_or("").trim_end_matches("dpi").parse::<u32>().ok()
+                }).collect();
+                if let [mn, mx] = bounds[..] {
+                    caps.resolutions = [300u32, 600, 1200, 1800, 2400, 3600, 4800, 6400, 7200]
+                        .into_iter().filter(|r| *r >= mn && *r <= mx).collect();
+                    if caps.resolutions.is_empty() {
+                        caps.resolutions = vec![mn, mx];
+                    }
+                }
+            } else {
+                let mut list: Vec<u32> = spec.split('|')
+                    .filter_map(|s| s.trim().trim_end_matches("dpi").trim().parse::<u32>().ok())
+                    .collect();
+                list.sort_unstable();
+                caps.resolutions = list;
+            }
+            caps.default_resolution = default
+                .or_else(|| caps.resolutions.first().copied())
+                .unwrap_or(1800);
+        } else if let Some(spec) = values(line, "--depth ") {
+            if let Some(m) = spec.split('|').filter_map(|s| s.trim().parse::<u32>().ok()).filter(|d| *d <= 16).max() {
+                caps.max_depth = m;
+            }
+        }
+    }
+    caps
+}
+
+// Run a scanimage subcommand, bounded so a wedged USB device can't hang the UI.
+// Returns None if scanimage isn't installed; Some((success, stdout)) otherwise.
+fn run_capture(args: &[&str], timeout_secs: u64) -> Option<(bool, String)> {
+    let mut child = match Command::new(scanimage_bin())
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(_) => return Some((false, String::new())),
+    };
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let mut out = String::new();
+                if let Some(mut o) = child.stdout.take() {
+                    let _ = o.read_to_string(&mut out);
+                }
+                return Some((status.success(), out));
+            }
+            Ok(None) if std::time::Instant::now() > deadline => {
+                terminate_child(&mut child);
+                let _ = child.wait();
+                return Some((false, String::new()));
+            }
+            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(200)),
+            Err(_) => return Some((false, String::new())),
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn scan_detect_scanner() -> Result<ScanDetectResult, String> {
     tauri::async_runtime::spawn_blocking(|| {
-        let mut child = match Command::new(scanimage_bin())
-            .args(["-f", "%d|%v %m%n"])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-        {
-            Ok(c) => c,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                return Ok(ScanDetectResult { scanimage_installed: false, device: None });
-            }
-            Err(e) => return Err(e.to_string()),
+        let Some((_, stdout)) = run_capture(&["-f", "%d|%v %m%n"], 20) else {
+            return Ok(ScanDetectResult { scanimage_installed: false, device: None, caps: None });
         };
-        // The probe blocks indefinitely on a wedged USB device — bound it.
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
-        loop {
-            match child.try_wait() {
-                Ok(Some(_)) => break,
-                Ok(None) if std::time::Instant::now() > deadline => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Ok(ScanDetectResult { scanimage_installed: true, device: None });
-                }
-                Ok(None) => std::thread::sleep(std::time::Duration::from_millis(200)),
-                Err(e) => return Err(e.to_string()),
-            }
-        }
-        let mut stdout = String::new();
-        if let Some(mut out) = child.stdout.take() {
-            let _ = out.read_to_string(&mut stdout);
-        }
         let device = stdout.lines().find_map(|l| {
             let (name, model) = l.split_once('|')?;
             Some(ScannerDevice { name: name.trim().to_string(), model: model.trim().to_string() })
         });
-        Ok(ScanDetectResult { scanimage_installed: true, device })
+        // Query the specific device's real capabilities (also an open test — if
+        // -A fails the device is present but wedged, so caps stays None).
+        let caps = device.as_ref().and_then(|d| {
+            let (ok, out) = run_capture(&["-A", "-d", &d.name], 25)?;
+            (ok && !out.is_empty()).then(|| parse_caps(&out))
+        });
+        Ok(ScanDetectResult { scanimage_installed: true, device, caps })
     })
     .await
     .map_err(|e| e.to_string())?
@@ -111,6 +220,7 @@ fn run_scanimage(
     source: &str,
     mode: &str,
     dpi: u32,
+    depth: u32,
     tmp_out: &Path,
     pass: u32,
     passes: u32,
@@ -122,7 +232,7 @@ fn run_scanimage(
         .args([
             "--source", source,
             "--mode", mode,
-            "--depth", "16",
+            "--depth", &depth.to_string(),
             "--resolution", &dpi.to_string(),
             "--format=tiff",
             "--progress",
@@ -137,25 +247,34 @@ fn run_scanimage(
     cancelled.store(false, Ordering::SeqCst);
     *state_child.lock().unwrap() = Some(child);
 
-    // With the scanner absent or wedged, scanimage can block forever without a
-    // byte of output; kill it if nothing arrives before the deadline (cold-start
-    // lamp warmup + calibration stay well under it).
-    let got_output = Arc::new(AtomicBool::new(false));
+    // Rolling inactivity watchdog: scanimage can wedge with the USB device held
+    // both at startup (never a byte) AND mid-scan (genesys stalls after some
+    // progress). A one-shot first-output check misses the latter and leaves a
+    // zombie holding the scanner, so kill whenever output goes quiet for 120s
+    // (cold-start warmup/calibration and inter-pass gaps stay well under it).
+    let activity = Arc::new(AtomicU64::new(0));
     let timed_out = Arc::new(AtomicBool::new(false));
     {
         let child_slot = state_child.clone();
-        let got_output = got_output.clone();
+        let activity = activity.clone();
         let timed_out = timed_out.clone();
         std::thread::spawn(move || {
-            for _ in 0..24 {
+            let (mut last_seen, mut stale) = (0u64, 0u32);
+            loop {
                 std::thread::sleep(std::time::Duration::from_secs(5));
-                if got_output.load(Ordering::SeqCst) || child_slot.lock().unwrap().is_none() {
+                if child_slot.lock().unwrap().is_none() {
                     return;
                 }
-            }
-            if let Some(c) = child_slot.lock().unwrap().as_mut() {
-                timed_out.store(true, Ordering::SeqCst);
-                let _ = c.kill();
+                let now = activity.load(Ordering::SeqCst);
+                stale = if now == last_seen { stale + 1 } else { 0 };
+                last_seen = now;
+                if stale >= 24 {
+                    if let Some(c) = child_slot.lock().unwrap().as_mut() {
+                        timed_out.store(true, Ordering::SeqCst);
+                        terminate_child(c);
+                    }
+                    return;
+                }
             }
         });
     }
@@ -165,7 +284,6 @@ fn run_scanimage(
     if let Some(stderr) = stderr {
         let mut buf = Vec::new();
         for byte in stderr.bytes().flatten() {
-            got_output.store(true, Ordering::SeqCst);
             if byte != b'\r' && byte != b'\n' {
                 buf.push(byte);
                 continue;
@@ -175,6 +293,7 @@ fn run_scanimage(
             if line.is_empty() {
                 continue;
             }
+            activity.fetch_add(1, Ordering::SeqCst);
             if let Some(pct) = line.strip_prefix("Progress: ").and_then(|p| p.trim_end_matches('%').parse::<f32>().ok()) {
                 // Multi-sample scans report one continuous 0-100 across all passes.
                 let whole = ((pass as f32 * 100.0 + pct) / passes.max(1) as f32) as i32;
@@ -899,21 +1018,25 @@ pub async fn scan_preview(
     contrast: f32,
     rotation_steps: u32,
     auto_crop: bool,
+    source_visible: String,
+    preview_dpi: u32,
+    scan_depth: u32,
     state: tauri::State<'_, ScanState>,
     app_handle: AppHandle,
 ) -> Result<PreviewResult, String> {
     if state.child.lock().unwrap().is_some() {
         return Err("A scan is already running".into());
     }
+    let source = if source_visible.is_empty() { SRC_VISIBLE.to_string() } else { source_visible };
     let child_slot = state.child.clone();
     let cancelled = state.cancelled.clone();
     let tone_slot = state.preview_tone.clone();
     tauri::async_runtime::spawn_blocking(move || {
         // Kept on disk so the exposure/contrast sliders can re-render without rescanning.
         let tmp = preview_tif_path();
-        // 1800 dpi: the 900 dpi mode carries periodic decimation noise that the
-        // negative auto-stretch amplifies into a visible grid.
-        run_scanimage(&child_slot, &cancelled, &app_handle, SRC_VISIBLE, scan_mode(&film_type), 1800, &tmp, 0, 1).map_err(
+        // Frontend picks a low-but-not-lowest resolution: the true minimum often
+        // carries periodic decimation noise the negative auto-stretch amplifies.
+        run_scanimage(&child_slot, &cancelled, &app_handle, &source, scan_mode(&film_type), preview_dpi, scan_depth, &tmp, 0, 1).map_err(
             |e| match e {
                 ScanFail::Cancelled => "cancelled".to_string(),
                 ScanFail::Error(m) => m,
@@ -961,6 +1084,9 @@ pub async fn scan_start(
     ir_clean: bool,
     auto_crop: bool,
     bit_depth: u32,
+    scan_depth: u32,
+    source_visible: String,
+    source_infrared: Option<String>,
     scanner_model: String,
     dest_folder: String,
     file_name: String,
@@ -986,11 +1112,15 @@ pub async fn scan_start(
         // same dir keeps the final rename atomic.
         let tmp = dest.join(".rapidraw-scan.partial");
         let samples = samples.clamp(1, 4);
-        // IR needs dye-based film; silver B&W blocks infrared everywhere.
-        let do_ir = ir_clean && film_type != "bw";
+        // Use the device's real source names (from -A); fall back to the 7600i
+        // constants when caps were unavailable.
+        let source = if source_visible.is_empty() { SRC_VISIBLE.to_string() } else { source_visible };
+        // IR needs dye-based film AND a device that exposes an infrared source;
+        // silver B&W blocks infrared everywhere.
+        let do_ir = ir_clean && film_type != "bw" && source_infrared.is_some();
         let total_passes = samples + do_ir as u32;
         let mut scan_result = if samples == 1 {
-            run_scanimage(&child_slot, &cancelled, &app_handle, SRC_VISIBLE, scan_mode(&film_type), dpi, &tmp, 0, total_passes)
+            run_scanimage(&child_slot, &cancelled, &app_handle, &source, scan_mode(&film_type), dpi, scan_depth, &tmp, 0, total_passes)
         } else {
             let pass_files: Vec<PathBuf> =
                 (0..samples).map(|i| dest.join(format!(".rapidraw-scan.pass{i}"))).collect();
@@ -1001,7 +1131,7 @@ pub async fn scan_start(
                     break;
                 }
                 if let Err(e) = run_scanimage(
-                    &child_slot, &cancelled, &app_handle, SRC_VISIBLE, scan_mode(&film_type), dpi, pass_file,
+                    &child_slot, &cancelled, &app_handle, &source, scan_mode(&film_type), dpi, scan_depth, pass_file,
                     i as u32, total_passes,
                 ) {
                     result = Err(e);
@@ -1019,8 +1149,9 @@ pub async fn scan_start(
         };
         if scan_result.is_ok() && do_ir && !cancelled.load(Ordering::SeqCst) {
             let ir_tmp = dest.join(".rapidraw-scan.ir");
+            let ir_source = source_infrared.as_deref().unwrap_or(SRC_INFRARED);
             match run_scanimage(
-                &child_slot, &cancelled, &app_handle, SRC_INFRARED, scan_mode(&film_type), dpi,
+                &child_slot, &cancelled, &app_handle, ir_source, scan_mode(&film_type), dpi, scan_depth,
                 &ir_tmp, samples, total_passes,
             ) {
                 Ok(()) => match ir_clean_scan(&tmp, &ir_tmp, dpi) {
@@ -1230,6 +1361,42 @@ mod tests {
     }
 
     #[test]
+    fn parse_caps_reads_sources_resolutions_depth() {
+        // Real 7600i -A output.
+        let plustek = "\
+    --mode Color|Gray [Gray]
+    --source Transparency Adapter|Transparency Adapter Infrared [Transparency Adapter]
+    --depth 16 [16]
+    --resolution 7200|3600|1800|900dpi [900]";
+        let c = super::parse_caps(plustek);
+        assert_eq!(c.source_visible, "Transparency Adapter");
+        assert_eq!(c.source_infrared.as_deref(), Some("Transparency Adapter Infrared"));
+        assert_eq!(c.resolutions, vec![900, 1800, 3600, 7200]);
+        assert_eq!(c.default_resolution, 900);
+        assert_eq!(c.max_depth, 16);
+        assert!(c.has_transparency);
+
+        // Epson-style flatbed: range resolution, 8|16 depth, no IR, has a TPU.
+        let epson = "\
+    --mode Color|Gray|Lineart [Color]
+    --source Flatbed|Transparency Unit [Flatbed]
+    --depth 8|16 [8]
+    --resolution 50..6400dpi [50]";
+        let e = super::parse_caps(epson);
+        assert_eq!(e.source_visible, "Transparency Unit"); // film source preferred over Flatbed
+        assert_eq!(e.source_infrared, None);
+        assert!(e.has_transparency);
+        assert_eq!(e.max_depth, 16);
+        assert!(e.resolutions.iter().all(|r| *r >= 50 && *r <= 6400) && e.resolutions.contains(&3600));
+
+        // Plain document scanner: no film support.
+        let doc = "    --source Flatbed|ADF [Flatbed]\n    --resolution 75|150|300|600dpi [75]\n    --depth 8 [8]";
+        let d = super::parse_caps(doc);
+        assert!(!d.has_transparency);
+        assert_eq!(d.max_depth, 8);
+    }
+
+    #[test]
     fn rotate_rect_matches_rotate90_cw() {
         // 100x60 image, rect near top-left. rotate90() is clockwise.
         let (w, h) = (100u32, 60u32);
@@ -1272,7 +1439,7 @@ mod tests {
 pub fn scan_cancel(state: tauri::State<'_, ScanState>) -> Result<(), String> {
     state.cancelled.store(true, Ordering::SeqCst);
     if let Some(child) = state.child.lock().unwrap().as_mut() {
-        let _ = child.kill();
+        terminate_child(child);
     }
     Ok(())
 }
