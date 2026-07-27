@@ -92,6 +92,15 @@ app builds a defect mask and fills it from surrounding clean pixels.
   detected this way — use the editor's heal/clone tool for those. See
   [Limitations](#limitations).
 
+### Film base (eyedropper)
+Colour negatives come out neutral automatically, but dense or faded stocks can
+leave a residual cast. **Sample base** shows the raw orange negative and lets you
+click the clear film edge (the rebate between frames) to pin the mask base point
+exactly, instead of the automatic percentile estimate. The conversion re-renders
+immediately; **✕** returns to automatic. The pinned base is per-roll — it carries
+to the next frames of the same strip (the rebate sits at the same spot), and it
+rides the previewed tone into the scan. Not shown for slide (E-6) film.
+
 ### Exposure & Contrast
 These are convenience offsets on top of the automatic tone. They are written as
 **real editor adjustments** (the editor's Exposure and Contrast sliders), not

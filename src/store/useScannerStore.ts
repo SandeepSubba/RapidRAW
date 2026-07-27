@@ -30,6 +30,10 @@ interface ScannerState {
   bitDepth: number;
   autoCrop: boolean;
   cropRect: [number, number, number, number] | null;
+  // Film-base eyedropper: pinned rebate point (normalized, in the displayed
+  // preview) and whether the next preview click samples it.
+  basePoint: [number, number] | null;
+  eyedropping: boolean;
   exposureOffset: number;
   contrast: number;
   rotationSteps: number;
@@ -56,6 +60,8 @@ export const useScannerStore = create<ScannerState>()(
       bitDepth: 12,
       autoCrop: false,
       cropRect: null,
+      basePoint: null,
+      eyedropping: false,
       exposureOffset: 0,
       contrast: 0,
       rotationSteps: 0,

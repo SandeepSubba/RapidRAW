@@ -1,6 +1,6 @@
 import { useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Film, Loader2, RefreshCw, RotateCw, X } from 'lucide-react';
+import { Film, Loader2, Pipette, RefreshCw, RotateCw, X } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { Invokes } from '../../ui/AppProperties';
 import { useImportStore } from '../../../store/useImportStore';
@@ -79,6 +79,8 @@ export default function ScannerPane() {
         sourceVisible: s.caps?.sourceVisible ?? '',
         previewDpi: previewDpi(s.caps),
         scanDepth,
+        raw: false,
+        basePoint: s.basePoint,
       });
       s.setScanner({ previewData: res.data, cropRect: res.crop, scanning: 'idle', progress: 0 });
     } catch (e) {
@@ -87,7 +89,8 @@ export default function ScannerPane() {
   };
 
   // Re-render the cached preview TIFF on exposure/rotation changes — no rescan.
-  const rerenderPreview = (delay: number) => {
+  // `raw` shows the un-inverted negative so the eyedropper can aim at the rebate.
+  const rerenderPreview = (delay: number, raw = false) => {
     if (rerenderTimer.current) clearTimeout(rerenderTimer.current);
     rerenderTimer.current = setTimeout(async () => {
       try {
@@ -97,13 +100,38 @@ export default function ScannerPane() {
           exposureOffset: st.exposureOffset,
           contrast: st.contrast,
           rotationSteps: st.rotationSteps,
-          autoCrop: st.autoCrop,
+          autoCrop: raw ? false : st.autoCrop,
+          raw,
+          basePoint: st.basePoint,
         });
-        st.setScanner({ previewData: res.data, cropRect: res.crop });
+        st.setScanner({ previewData: res.data, cropRect: raw ? null : res.crop });
       } catch {
         // No cached preview (or a scan is running) — settings still apply to the next scan.
       }
     }, delay);
+  };
+
+  // Eyedropper: arm to show the raw negative, click the orange rebate to pin the
+  // film base, or clear it back to the automatic estimate.
+  const toggleEyedropper = () => {
+    if (!s.previewData || busy) return;
+    const next = !s.eyedropping;
+    s.setScanner({ eyedropping: next });
+    rerenderPreview(0, next);
+  };
+
+  const handlePreviewClick = (e: any) => {
+    if (!s.eyedropping) return;
+    const img = e.currentTarget;
+    const nx = Math.min(1, Math.max(0, e.nativeEvent.offsetX / img.clientWidth));
+    const ny = Math.min(1, Math.max(0, e.nativeEvent.offsetY / img.clientHeight));
+    s.setScanner({ basePoint: [nx, ny], eyedropping: false });
+    rerenderPreview(0, false);
+  };
+
+  const clearBase = () => {
+    s.setScanner({ basePoint: null, eyedropping: false });
+    if (s.previewData) rerenderPreview(0, false);
   };
 
   const handleExposureChange = (value: number) => {
@@ -170,7 +198,12 @@ export default function ScannerPane() {
       <div className="flex-1 flex flex-col items-center justify-center p-6 min-w-0">
         {s.previewData ? (
           <div className="relative max-w-full max-h-full overflow-hidden rounded-md shadow-lg">
-            <img src={s.previewData} alt="Scan preview" className="block max-w-full max-h-full" />
+            <img
+              src={s.previewData}
+              alt="Scan preview"
+              onClick={handlePreviewClick}
+              className={`block max-w-full max-h-full ${s.eyedropping ? 'cursor-crosshair' : ''}`}
+            />
             {s.autoCrop && s.cropRect && (
               <div
                 className="absolute pointer-events-none border border-white/70"
@@ -305,6 +338,35 @@ export default function ScannerPane() {
                   {on ? 'On' : 'Off'}
                 </button>
               ))}
+            </div>
+          </div>
+        )}
+
+        {s.filmType !== 'e6' && (
+          <div>
+            <p className="text-xs text-text-secondary mb-2">Film base</p>
+            <div className="flex gap-2">
+              <button
+                onClick={toggleEyedropper}
+                disabled={busy || !s.previewData}
+                className={`flex-1 flex items-center justify-center gap-2 px-3 py-1.5 rounded-md text-sm transition-colors disabled:opacity-40 ${
+                  s.eyedropping ? 'bg-accent text-button-text' : 'bg-surface/60 hover:bg-surface text-text-primary'
+                }`}
+                data-tooltip="Click the clear orange film edge to neutralise the mask precisely"
+              >
+                <Pipette size={14} />
+                {s.eyedropping ? 'Click the rebate…' : s.basePoint ? 'Base set' : 'Sample base'}
+              </button>
+              {s.basePoint && !s.eyedropping && (
+                <button
+                  onClick={clearBase}
+                  disabled={busy}
+                  className="px-3 py-1.5 rounded-md bg-surface/60 hover:bg-surface text-sm text-text-secondary"
+                  data-tooltip="Back to automatic base"
+                >
+                  <X size={14} />
+                </button>
+              )}
             </div>
           </div>
         )}

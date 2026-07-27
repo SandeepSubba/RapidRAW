@@ -47,6 +47,8 @@ and dated.
 - **Multi-sampling** — averages N passes to cut shadow noise.
 - **Auto-tone** — density-domain inversion with hue-neutral high-dpi handling;
   Exposure/Contrast are written as re-tunable editor adjustments.
+- **Film-base eyedropper** — click the orange rebate on the raw negative to pin
+  the mask base point for stubborn stocks; per-roll, rides the tone into the scan.
 - **Auto crop** — detects the film frame (holder bars, aperture shadow, rebate)
   and writes a non-destructive crop; the preview dims what will be trimmed.
 - **10 / 12 / 16-bit compressed TIFF** — deflate + predictor; 12-bit halves the
