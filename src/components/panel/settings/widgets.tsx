@@ -115,7 +115,14 @@ export const KeybindRow = ({
     setStepText(step != null ? String(step) : '');
   }, [step]);
 
-  const displayCombo = currentCombo !== undefined ? (currentCombo.length ? currentCombo : null) : def.defaultCombo;
+  const displayCombo =
+    currentCombo !== undefined
+      ? currentCombo.length
+        ? currentCombo
+        : null
+      : def.defaultCombo.length
+        ? def.defaultCombo
+        : null;
 
   return (
     <div className="flex justify-between items-center py-2 gap-4">
