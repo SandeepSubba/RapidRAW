@@ -936,6 +936,67 @@ fn preview_tif_path() -> PathBuf {
     std::env::temp_dir().join(format!("rapidraw-scan-preview-{}.tif", std::process::id()))
 }
 
+// Film-base eyedropper: average a small window around a normalized point (in the
+// displayed, oriented preview) and return its per-channel density (-log10),
+// matching analyze_bounds' domain. Pins bounds[c].min to the clicked rebate so a
+// stubborn orange mask neutralises exactly instead of by percentile estimate.
+// The eyedropper's aim view: the raw negative with a display gamma only (no
+// inversion), so the orange rebate is visible to click. The scan is near-linear
+// and dark (median ~0.07); generate_thumbnail_data would show it almost black
+// because the negative conversion is what normally supplies the gamma.
+fn raw_preview_data(tif: &Path, rotation_steps: u32) -> Result<String, String> {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    let img = open_image(tif)?;
+    let img = match rotation_steps % 4 {
+        1 => img.rotate90(),
+        2 => img.rotate180(),
+        3 => img.rotate270(),
+        _ => img,
+    };
+    let mut rgb = img.thumbnail(1200, 1200).to_rgb32f();
+    for p in rgb.pixels_mut() {
+        for c in 0..3 {
+            p[c] = p[c].clamp(0.0, 1.0).powf(1.0 / 2.2);
+        }
+    }
+    let rgb8 = image::DynamicImage::ImageRgb32F(rgb).to_rgb8();
+    let mut jpeg = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 85)
+        .encode_image(&rgb8)
+        .map_err(|e| e.to_string())?;
+    Ok(format!("data:image/jpeg;base64,{}", STANDARD.encode(&jpeg)))
+}
+
+fn sample_base_density(img: &image::DynamicImage, nx: f32, ny: f32, rotation_steps: u32) -> [f32; 3] {
+    let oriented = match rotation_steps % 4 {
+        1 => img.rotate90(),
+        2 => img.rotate180(),
+        3 => img.rotate270(),
+        _ => img.clone(),
+    };
+    let rgb = oriented.to_rgb32f();
+    let (w, h) = rgb.dimensions();
+    if w == 0 || h == 0 {
+        return [0.0; 3];
+    }
+    let cx = (nx.clamp(0.0, 1.0) * (w - 1) as f32) as u32;
+    let cy = (ny.clamp(0.0, 1.0) * (h - 1) as f32) as u32;
+    let rad = ((w.min(h) as f32 * 0.01) as u32).max(2);
+    let (mut sr, mut sg, mut sb, mut n) = (0.0f32, 0.0f32, 0.0f32, 0u32);
+    for y in cy.saturating_sub(rad)..=(cy + rad).min(h - 1) {
+        for x in cx.saturating_sub(rad)..=(cx + rad).min(w - 1) {
+            let p = rgb.get_pixel(x, y).0;
+            sr += p[0];
+            sg += p[1];
+            sb += p[2];
+            n += 1;
+        }
+    }
+    let n = n.max(1) as f32;
+    let dens = |s: f32| -(s / n).clamp(1e-6, 1.0).log10();
+    [dens(sr), dens(sg), dens(sb)]
+}
+
 // Render the (cached) preview TIFF exactly like the library would: bake the
 // same sidecar a real scan gets, then push it through the app's own thumbnail
 // engine (load → negative conversion → GPU pipeline). Preview == library by
@@ -947,6 +1008,8 @@ fn render_preview(
     contrast: f32,
     rotation_steps: u32,
     auto_crop: bool,
+    raw: bool,
+    base_point: Option<(f32, f32)>,
     app_handle: &AppHandle,
     tone_slot: &Arc<Mutex<Option<ToneSolve>>>,
 ) -> Result<PreviewResult, String> {
@@ -956,12 +1019,30 @@ fn render_preview(
     // Fresh sidecar every render — a film-type switch must not inherit stale params.
     let sidecar = crate::exif_processing::get_primary_sidecar_path(tif);
     let _ = std::fs::remove_file(&sidecar);
-    // Loaded once for tone (non-E6) and/or the auto-crop overlay rect.
-    let src = if film_type != "e6" || auto_crop { Some(open_image(tif)?) } else { None };
-    if film_type != "e6" {
+    // `raw` shows the un-inverted negative (gamma-lifted) so the eyedropper can
+    // target the orange rebate; returned directly since it needs no conversion.
+    if raw {
+        *tone_slot.lock().unwrap() = None;
+        return Ok(PreviewResult { data: raw_preview_data(tif, rotation_steps)?, crop: None });
+    }
+    // Loaded for tone (converting negatives) and/or the auto-crop overlay rect.
+    let convert = film_type != "e6";
+    let src = if convert || auto_crop { Some(open_image(tif)?) } else { None };
+    if convert {
         let img = src.as_ref().unwrap();
         let crop = detect_frame_crop(img);
-        let bounds = crate::negative_conversion::analyze_bounds_for(&crop);
+        let mut bounds = crate::negative_conversion::analyze_bounds_for(&crop);
+        if let Some((bx, by)) = base_point {
+            // Pin each channel's base (bounds min) to the sampled rebate; keep the
+            // auto white point but guard the divisor stays positive.
+            let base = sample_base_density(img, bx, by, rotation_steps);
+            for c in 0..3 {
+                bounds[c].min = base[c];
+                if bounds[c].max <= bounds[c].min + 0.05 {
+                    bounds[c].max = bounds[c].min + 0.5;
+                }
+            }
+        }
         let (base_exposure, auto_gain, auto_ev) = auto_tone_for(&crop, bounds, DEFAULT_SCAN_CONTRAST, false);
         *tone_slot.lock().unwrap() = Some((bounds, base_exposure, auto_gain, auto_ev));
         write_scan_sidecar(
@@ -973,6 +1054,7 @@ fn render_preview(
             None,
         )?;
     } else {
+        // Slide (E-6) — positive film, no inversion.
         *tone_slot.lock().unwrap() = None;
         write_scan_sidecar(tif, None, rotation_steps, exposure_offset, contrast, None)?;
     }
@@ -1021,6 +1103,8 @@ pub async fn scan_preview(
     source_visible: String,
     preview_dpi: u32,
     scan_depth: u32,
+    raw: bool,
+    base_point: Option<(f32, f32)>,
     state: tauri::State<'_, ScanState>,
     app_handle: AppHandle,
 ) -> Result<PreviewResult, String> {
@@ -1042,7 +1126,7 @@ pub async fn scan_preview(
                 ScanFail::Error(m) => m,
             },
         )?;
-        render_preview(&tmp, &film_type, exposure_offset, contrast, rotation_steps, auto_crop, &app_handle, &tone_slot)
+        render_preview(&tmp, &film_type, exposure_offset, contrast, rotation_steps, auto_crop, raw, base_point, &app_handle, &tone_slot)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1055,6 +1139,8 @@ pub async fn scan_rerender_preview(
     contrast: f32,
     rotation_steps: u32,
     auto_crop: bool,
+    raw: bool,
+    base_point: Option<(f32, f32)>,
     state: tauri::State<'_, ScanState>,
     app_handle: AppHandle,
 ) -> Result<PreviewResult, String> {
@@ -1067,7 +1153,7 @@ pub async fn scan_rerender_preview(
     }
     let tone_slot = state.preview_tone.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        render_preview(&tif, &film_type, exposure_offset, contrast, rotation_steps, auto_crop, &app_handle, &tone_slot)
+        render_preview(&tif, &film_type, exposure_offset, contrast, rotation_steps, auto_crop, raw, base_point, &app_handle, &tone_slot)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1409,6 +1495,27 @@ mod tests {
         assert_eq!(super::rotate_rect(r, w, h, 3), ((5, 100 - (10 + 20), 8, 20), (60, 100)));
         // 0: identity.
         assert_eq!(super::rotate_rect(r, w, h, 0), (r, (100, 60)));
+    }
+
+    #[test]
+    fn base_sample_reads_density_and_follows_orientation() {
+        use image::{DynamicImage, Rgb, Rgb32FImage};
+        // Left third is a bright "rebate" (v=0.5 -> density ~0.301); rest is dark.
+        let (w, h) = (90u32, 30u32);
+        let mut img = Rgb32FImage::from_pixel(w, h, Rgb([0.05f32, 0.05, 0.05]));
+        for y in 0..h {
+            for x in 0..(w / 3) {
+                img.put_pixel(x, y, Rgb([0.5f32, 0.5, 0.5]));
+            }
+        }
+        let dyn_img = DynamicImage::ImageRgb32F(img);
+        let expect = -0.5f32.log10(); // ~0.301
+        // Rotation 0: the left band sits at x~0.15.
+        let d = super::sample_base_density(&dyn_img, 0.15, 0.5, 0);
+        assert!((d[0] - expect).abs() < 0.02, "density {d:?} != {expect}");
+        // 90 CW moves the left band to the top; the same value now reads at (0.5, 0.1).
+        let d_top = super::sample_base_density(&dyn_img, 0.5, 0.1, 1);
+        assert!((d_top[0] - expect).abs() < 0.05, "rotated band density {d_top:?}");
     }
 
     #[test]

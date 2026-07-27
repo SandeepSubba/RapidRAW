@@ -61,7 +61,7 @@ export const useKeyboardShortcuts = ({
     for (const def of KEYBIND_DEFINITIONS) {
       const userCombo = keybinds?.[def.action];
       const effective = userCombo && userCombo.length > 0 ? userCombo : def.defaultCombo;
-      if (!effective) continue;
+      if (!effective || effective.length === 0) continue;
       if (effective.length >= 2 && !MODS.includes(effective[0])) {
         const leader = effective[0];
         if (!leaderChords.has(leader)) leaderChords.set(leader, new Map());

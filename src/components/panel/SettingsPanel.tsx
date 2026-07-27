@@ -599,7 +599,7 @@ export default function SettingsPanel({
     for (const def of KEYBIND_DEFINITIONS) {
       const userCombo = userKb[def.action];
       const effective = userCombo?.length ? userCombo : userCombo === undefined ? def.defaultCombo : null;
-      if (!effective) continue;
+      if (!effective || !effective.length) continue;
       const key = effective.join('+');
       if (!map.has(key)) map.set(key, new Set());
       map.get(key)!.add(def.action);
