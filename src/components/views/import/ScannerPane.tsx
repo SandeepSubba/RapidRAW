@@ -59,9 +59,11 @@ export default function ScannerPane() {
   const draggingEdge = useRef(false);
   const [filmInfoOpen, setFilmInfoOpen] = useState(false);
 
-  // Drag a crop edge (no handles): map the pointer to normalized coords in the
-  // preview and move just that edge, keeping a 5% minimum size.
-  const applyEdgeDrag = (edge: 'top' | 'right' | 'bottom' | 'left', e: PointerEvent | any) => {
+  // Drag a crop edge or corner (no handles): map the pointer to normalized
+  // coords and move the given edges, keeping a 5% minimum size. A corner passes
+  // its two edges so both dimensions resize at once.
+  type Edge = 'top' | 'right' | 'bottom' | 'left';
+  const applyEdgeDrag = (edges: Edge[], e: PointerEvent | any) => {
     const box = cropBoxRef.current;
     const st = useScannerStore.getState();
     if (!box || !st.cropRect) return;
@@ -70,30 +72,29 @@ export default function ScannerPane() {
     const ny = Math.min(1, Math.max(0, (e.clientY - r.top) / r.height));
     let [x, y, w, h] = st.cropRect;
     const MIN = 0.05;
-    if (edge === 'left') {
+    if (edges.includes('left')) {
       const right = x + w;
       x = Math.min(nx, right - MIN);
       w = right - x;
-    } else if (edge === 'right') {
-      w = Math.max(MIN, nx - x);
-    } else if (edge === 'top') {
+    }
+    if (edges.includes('right')) w = Math.max(MIN, nx - x);
+    if (edges.includes('top')) {
       const bot = y + h;
       y = Math.min(ny, bot - MIN);
       h = bot - y;
-    } else {
-      h = Math.max(MIN, ny - y);
     }
+    if (edges.includes('bottom')) h = Math.max(MIN, ny - y);
     st.setScanner({ cropRect: [x, y, w, h], cropManual: true });
   };
 
-  const edgeHandlers = (edge: 'top' | 'right' | 'bottom' | 'left') => ({
+  const edgeHandlers = (edges: Edge[]) => ({
     onPointerDown: (e: any) => {
       e.preventDefault();
       e.currentTarget.setPointerCapture(e.pointerId);
       draggingEdge.current = true;
     },
     onPointerMove: (e: any) => {
-      if (draggingEdge.current) applyEdgeDrag(edge, e);
+      if (draggingEdge.current) applyEdgeDrag(edges, e);
     },
     onPointerUp: (e: any) => {
       draggingEdge.current = false;
@@ -296,8 +297,29 @@ export default function ScannerPane() {
                         transform: 'translateY(-7px)',
                         cursor: 'ns-resize',
                       };
-                  return <div key={edge} {...edgeHandlers(edge)} className="absolute touch-none" style={style} />;
+                  return <div key={edge} {...edgeHandlers([edge])} className="absolute touch-none" style={style} />;
                 })}
+                {([['top', 'left'], ['top', 'right'], ['bottom', 'left'], ['bottom', 'right']] as Edge[][]).map(
+                  (corner) => {
+                    const [x, y, w, h] = s.cropRect!;
+                    const [vEdge, hEdge] = corner; // vEdge = top/bottom, hEdge = left/right
+                    return (
+                      <div
+                        key={corner.join('-')}
+                        {...edgeHandlers(corner)}
+                        className="absolute touch-none"
+                        style={{
+                          left: `${(hEdge === 'left' ? x : x + w) * 100}%`,
+                          top: `${(vEdge === 'top' ? y : y + h) * 100}%`,
+                          width: 20,
+                          height: 20,
+                          transform: 'translate(-10px, -10px)',
+                          cursor: (vEdge === 'top') === (hEdge === 'left') ? 'nwse-resize' : 'nesw-resize',
+                        }}
+                      />
+                    );
+                  },
+                )}
               </>
             )}
           </div>

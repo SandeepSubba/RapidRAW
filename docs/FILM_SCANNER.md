@@ -124,9 +124,10 @@ Rotate the frame in 90° steps. Saved as a non-destructive orientation adjustmen
 ### Auto crop
 Detects the film-frame edges and trims the holder bars, the aperture-shadow
 border, and the clear film rebate. When on, the preview **dims the area that
-will be trimmed** so you can see the result. **Drag any edge of the dimmed
-region** to adjust the crop by hand (no handles — just grab an edge); the scan
-then uses exactly what you framed. The crop is written as a **normal,
+will be trimmed** so you can see the result. **Drag any edge or corner of the
+dimmed region** to adjust the crop by hand (no handles — just grab an edge to
+move one side, or a corner to resize both at once); the scan then uses exactly
+what you framed. The crop is written as a **normal,
 non-destructive crop adjustment** — the editor's Crop tool can refine or clear
 it, and no pixels are discarded from the TIFF. Frames where no confident frame
 edge is found are left uncropped rather than guessed.
