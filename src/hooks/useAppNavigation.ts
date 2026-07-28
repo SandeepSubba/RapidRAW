@@ -108,7 +108,7 @@ export function useAppNavigation({ clearThumbnailQueue, refs }: AppNavigationPro
   const handleImageSelect = useCallback(
     async (path: string) => {
       const { selectedImage, isSliderDragging, resetHistory, setEditor } = useEditorStore.getState();
-      const { setLibrary } = useLibraryStore.getState();
+      const { setLibrary, multiSelectedPaths } = useLibraryStore.getState();
       const { setUI } = useUIStore.getState();
 
       if (selectedImage?.path === path) return;
@@ -221,9 +221,11 @@ export function useAppNavigation({ clearThumbnailQueue, refs }: AppNavigationPro
 
       isBackendReadyRef.current = true;
 
+      const imageFile = useLibraryStore.getState().imageList.find((img) => img.path === path);
       setEditor({
         selectedImage: {
           exif: null,
+          group_id: imageFile?.group_id ?? null,
           height: 0,
           isRaw: false,
           isReady: false,

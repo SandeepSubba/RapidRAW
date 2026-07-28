@@ -301,7 +301,7 @@ function App() {
     handleRenameAlbumItem,
   } = useLibraryActions(handleImageSelect);
 
-  const sortedImageList = useSortedLibrary();
+  const { displayList: sortedImageList, badges: groupBadgeInfo } = useSortedLibrary();
 
   // Consume "open with file" requests forwarded by a second instance (e.g. the user
   // double-clicks a raw in Finder while the app is already running). The listener in
@@ -813,6 +813,7 @@ function App() {
               ) : (
                 <LibraryView
                   sortedImageList={sortedImageList}
+                  groupBadgeInfo={groupBadgeInfo}
                   thumbnailSize={thumbnailSize}
                   thumbnailAspectRatio={thumbnailAspectRatio}
                   libraryViewMode={libraryViewMode}
@@ -837,9 +838,9 @@ function App() {
                   requestThumbnails={requestThumbnails}
                 />
               )}
-              {isSettingsOpen && appSettings && (
-                <div className="absolute inset-0 z-50 flex bg-bg-secondary">
-                  <div className="w-full h-full flex flex-col p-8 lg:p-16 overflow-y-auto custom-scrollbar">
+              {isSettingsOpen && appSettings && hasRoots && (
+                <div className="absolute inset-0 z-50 flex bg-bg-secondary rounded-lg">
+                  <div className="w-full h-full flex flex-col p-4 lg:p-8 overflow-y-auto custom-scrollbar">
                     <SettingsPanel
                       appSettings={appSettings}
                       onBack={() => setUI({ isSettingsOpen: false })}

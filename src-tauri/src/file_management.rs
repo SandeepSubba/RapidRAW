@@ -261,7 +261,7 @@ impl fmt::Display for ReadFileError {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ImageFile {
-    path: String,
+    pub(crate) path: String,
     modified: u64,
     is_edited: bool,
     is_negative: bool,

@@ -66,13 +66,13 @@
       "whiteBalance": "白平衡"
     },
     "curves": {
+      "channelTitle": "{{channel}} 通道",
       "channels": {
         "blue": "蓝色",
         "green": "绿色",
         "luma": "亮度",
         "red": "红色"
       },
-      "channelTitle": "{{channel}} 通道",
       "copyParametric": "复制 {{channel}} 参数曲线",
       "copyPoint": "复制 {{channel}} 点曲线",
       "curveDataUnavailable": "曲线数据不可用。",
@@ -112,11 +112,18 @@
     },
     "effects": {
       "amount": "数量",
+      "bokehCircular": "圆形",
+      "bokehHexagonal": "六边形",
+      "bokehOctagonal": "八边形",
+      "bokehRing": "气泡（环形）",
+      "bokehShape": "散景形状",
       "creative": "创意",
       "feather": "羽化",
       "glow": "发光",
       "grain": "颗粒",
       "halation": "光晕",
+      "lensBlur": "镜头模糊",
+      "lensDiffusion": "扩散",
       "lightFlares": "光线耀斑",
       "lut": "LUT",
       "midpoint": "中点",
@@ -352,6 +359,7 @@
       "dropzoneText": "拖放到此处以创建新编辑",
       "editSettingsTitle": "编辑设置",
       "editsTitle": "编辑",
+      "generatingDepthMap": "正在计算 AI 深度图...",
       "generativeEditTitle": "生成式编辑",
       "inpaintingTitle": "图像修复",
       "manualCleanupTitle": "手动清理",
@@ -638,8 +646,8 @@
       "organization": {
         "addTagPlaceholder": "添加标签...",
         "colorLabel": "颜色标签",
-        "none": "无",
         "noTags": "无标签",
+        "none": "无",
         "rating": "评分",
         "ratingLabels": "评分与标签",
         "tags": "标签",
@@ -707,6 +715,7 @@
       }
     },
     "toolbar": {
+      "switchToVariant": "Switch to {{label}}",
       "tooltips": {
         "aperture": "光圈",
         "backToLibrary": "返回图库",
@@ -778,16 +787,17 @@
     "status": {
       "cancelExport": "取消导出",
       "cancelled": "导出已取消",
+      "cancelling": "正在取消导出…",
       "estimatedAverageSize": "（平均 {{size}}）",
       "estimatedSize": "预计文件大小：约 {{size}}",
       "estimatedTotalSize": "预计总大小：约 {{size}}",
       "estimatingSize": "正在估算大小...",
-      "exporting": "导出中…",
-      "exportingProgress": "导出中…（{{current}}/{{total}}）",
       "exportMultiple": "导出 {{count}} {{label}}",
       "exportMultiple_one": "导出 {{count}} {{label}}",
       "exportMultiple_other": "导出 {{count}} {{label}}",
       "exportSingle": "导出 {{label}}",
+      "exporting": "导出中…",
+      "exportingProgress": "导出中…（{{current}}/{{total}}）",
       "failed": "导出失败",
       "noImageSelected": "未选择要导出的图像。",
       "noImagesSelected": "未选择图像。",
@@ -832,6 +842,31 @@
         "name": "名称（A-Z）"
       }
     },
+    "culling": {
+      "addTagPlaceholder": "添加标签...",
+      "altCullingPreviewHighRes": "高分辨率筛选预览",
+      "altThumbnailLoading": "缩略图加载中",
+      "aperture": "光圈",
+      "cameraSettings": "相机设置",
+      "clickThumbnailsHint": "在右侧边栏中单击缩略图以将它们添加到比较视图中。",
+      "colorLabel": "颜色标签",
+      "dimensions": "尺寸",
+      "editImage": "编辑图像",
+      "focalLength": "焦距",
+      "iso": "ISO",
+      "metadata": "元数据",
+      "noMetadataAvailable": "无可用元数据",
+      "noTagsAdded": "未添加标签",
+      "none": "无",
+      "rateAndLabel": "评分与标签",
+      "rating": "评分",
+      "selectImagesToCompare": "选择要比较的图像",
+      "shutterSpeed": "快门速度",
+      "syncZoomAndPan": "同步缩放和平移",
+      "tags": "标签",
+      "toggleFit": "切换 1:1 / 适应",
+      "vc": "VC"
+    },
     "filters": {
       "edited": {
         "all": "所有图像",
@@ -853,7 +888,6 @@
       "raw": {
         "all": "所有类型",
         "nonRawOnly": "仅非 RAW",
-        "preferRaw": "优先 RAW",
         "rawOnly": "仅 RAW"
       }
     },
@@ -917,6 +951,12 @@
         "filterByEdited": "按编辑状态过滤",
         "filterByFileType": "按文件类型过滤",
         "filterByRating": "按评分过滤",
+        "groupEditedFiles": "Include edited files in groups",
+        "groupIgnoreMetadata": "Ignore mismatched EXIF dates",
+        "groupOff": "Off",
+        "groupPreferJpeg": "Prefer JPEG",
+        "groupPreferRaw": "Prefer RAW",
+        "groupRawJpeg": "Group RAW + JPEG",
         "metadataAlways": "始终",
         "metadataHover": "悬停时",
         "metadataOff": "关闭",
@@ -1074,6 +1114,9 @@
       "confirm": "确认"
     },
     "copyPaste": {
+      "autoSyncDesc": "自动将调整应用于所有选定的图像。",
+      "autoSyncLabel": "启用自动同步",
+      "autoSyncTitle": "自动同步调整",
       "cancel": "取消",
       "descMerge": "添加您复制的更改，保留其他设置不变。",
       "descReplace": "覆盖所有选中的设置，其余重置为默认值。",
@@ -1128,9 +1171,9 @@
       "applyButton_one": "应用到 1 张图像",
       "applyButton_other": "应用到 {{count}} 张图像",
       "bestImage": "最佳图像",
-      "blurryImagesTab": "模糊图像",
       "blurThreshold": "模糊阈值",
       "blurThresholdDesc": "锐度评分低于此值的图像将被标记。值越高越严格。",
+      "blurryImagesTab": "模糊图像",
       "cancel": "取消",
       "close": "关闭",
       "cullingFailed": "筛选失败",
@@ -1453,6 +1496,7 @@
         "copy_files": "复制选中的文件",
         "cycle_zoom": "循环缩放（适应、2倍适应、100%）",
         "delete_selected": "删除选中的文件",
+        "focus_search": "聚焦搜索框",
         "open_image": "打开选中的图像",
         "open_settings": "打开设置",
         "paste_adjustments": "粘贴复制的调整",
@@ -1561,6 +1605,9 @@
         },
         "title": "生成式 AI"
       },
+      "alwaysDecodeRaw": "始终解码 RAW",
+      "alwaysDecodeRawDesc": "强制对缩略图进行完整的 RAW 解码，而不是使用内置的 JPEG 预览。如果您的缩略图在颜色或对比度上与打开的图像不同，请启用此选项。",
+      "alwaysDecodeRawLabel": "始终为缩略图解码 RAW",
       "backend": "处理后端",
       "backendDesc": "选择图形 API。推荐使用「自动」。在某些系统上可能解决崩溃问题。",
       "backends": {
@@ -1651,8 +1698,8 @@
     "tagging": {
       "addCustomPlaceholder": "添加自定义 AI 标签（逗号分隔）...",
       "addCustomTooltip": "添加 AI 标签",
-      "addShortcutsPlaceholder": "添加快捷方式（逗号分隔）...",
       "addShortcutTooltip": "添加快捷方式",
+      "addShortcutsPlaceholder": "添加快捷方式（逗号分隔）...",
       "aiTagging": "AI 标签",
       "aiTaggingDesc": "使用 AI（CLIP）模型启用自动图像标签。这将下载额外的模型，并在浏览文件夹时影响性能。标签用于搜索文件夹。",
       "amount": "数量",

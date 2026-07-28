@@ -66,13 +66,13 @@
       "whiteBalance": "White Balance"
     },
     "curves": {
+      "channelTitle": "{{channel}} Channel",
       "channels": {
         "blue": "Blue",
         "green": "Green",
         "luma": "Luma",
         "red": "Red"
       },
-      "channelTitle": "{{channel}} Channel",
       "copyParametric": "Copy {{channel}} Parametric Curve",
       "copyPoint": "Copy {{channel}} Point Curve",
       "curveDataUnavailable": "Curve data not available.",
@@ -112,11 +112,18 @@
     },
     "effects": {
       "amount": "Amount",
+      "bokehCircular": "Circular",
+      "bokehHexagonal": "Hexagonal",
+      "bokehOctagonal": "Octagonal",
+      "bokehRing": "Bubble (Ring)",
+      "bokehShape": "Bokeh Shape",
       "creative": "Creative",
       "feather": "Feather",
       "glow": "Glow",
       "grain": "Grain",
       "halation": "Halation",
+      "lensBlur": "Lens Blur",
+      "lensDiffusion": "Diffusion",
       "lightFlares": "Light Flares",
       "lut": "LUT",
       "midpoint": "Midpoint",
@@ -355,6 +362,7 @@
       "dropzoneText": "Drop here to create a new edit",
       "editSettingsTitle": "Edit Settings",
       "editsTitle": "Edits",
+      "generatingDepthMap": "Calculating AI Depth Map...",
       "generativeEditTitle": "Generative Edit",
       "inpaintingTitle": "Inpainting",
       "manualCleanupTitle": "Manual Cleanup",
@@ -659,8 +667,8 @@
       "organization": {
         "addTagPlaceholder": "Add tag...",
         "colorLabel": "Color Label",
-        "none": "None",
         "noTags": "No tags",
+        "none": "None",
         "rating": "Rating",
         "ratingLabels": "Rating & Labels",
         "tags": "Tags",
@@ -763,6 +771,7 @@
       }
     },
     "toolbar": {
+      "switchToVariant": "Switch to {{label}}",
       "tooltips": {
         "aperture": "Aperture",
         "backToLibrary": "Back to Library",
@@ -834,16 +843,17 @@
     "status": {
       "cancelExport": "Cancel Export",
       "cancelled": "Export cancelled",
+      "cancelling": "Cancelling export…",
       "estimatedAverageSize": " ({{size}} avg)",
       "estimatedSize": "Estimated file size: ~{{size}}",
       "estimatedTotalSize": "Estimated total size: ~{{size}}",
       "estimatingSize": "Estimating size...",
-      "exporting": "Exporting…",
-      "exportingProgress": "Exporting… ({{current}}/{{total}})",
       "exportMultiple": "Export {{count}} {{label}}",
       "exportMultiple_one": "Export {{count}} {{label}}",
       "exportMultiple_other": "Export {{count}} {{label}}",
       "exportSingle": "Export {{label}}",
+      "exporting": "Exporting…",
+      "exportingProgress": "Exporting… ({{current}}/{{total}})",
       "failed": "Export failed",
       "noImageSelected": "No image selected for export.",
       "noImagesSelected": "No images selected.",
@@ -888,6 +898,31 @@
         "name": "Name (A-Z)"
       }
     },
+    "culling": {
+      "addTagPlaceholder": "Add tag...",
+      "altCullingPreviewHighRes": "Culling Preview High Res",
+      "altThumbnailLoading": "Thumbnail Loading",
+      "aperture": "Aperture",
+      "cameraSettings": "Camera Settings",
+      "clickThumbnailsHint": "Click thumbnails in the right sidebar to add them to the comparison view.",
+      "colorLabel": "Color Label",
+      "dimensions": "Dimensions",
+      "editImage": "Edit Image",
+      "focalLength": "Focal Length",
+      "iso": "ISO",
+      "metadata": "Metadata",
+      "noMetadataAvailable": "No metadata available",
+      "noTagsAdded": "No tags added",
+      "none": "None",
+      "rateAndLabel": "Rate & Label",
+      "rating": "Rating",
+      "selectImagesToCompare": "Select images to compare",
+      "shutterSpeed": "Shutter Speed",
+      "syncZoomAndPan": "Sync Zoom and Pan",
+      "tags": "Tags",
+      "toggleFit": "Toggle 1:1 / Fit",
+      "vc": "VC"
+    },
     "filters": {
       "edited": {
         "all": "All Images",
@@ -909,7 +944,6 @@
       "raw": {
         "all": "All Types",
         "nonRawOnly": "Non-RAW Only",
-        "preferRaw": "Prefer RAW",
         "rawOnly": "RAW Only"
       }
     },
@@ -973,6 +1007,12 @@
         "filterByEdited": "Filter by Edit Status",
         "filterByFileType": "Filter by File Type",
         "filterByRating": "Filter by Rating",
+        "groupEditedFiles": "Include edited files in groups",
+        "groupIgnoreMetadata": "Ignore mismatched EXIF dates",
+        "groupOff": "Off",
+        "groupPreferJpeg": "Prefer JPEG",
+        "groupPreferRaw": "Prefer RAW",
+        "groupRawJpeg": "Group RAW + JPEG",
         "metadataAlways": "Always",
         "metadataHover": "On Hover",
         "metadataOff": "Off",
@@ -1130,6 +1170,9 @@
       "confirm": "Confirm"
     },
     "copyPaste": {
+      "autoSyncDesc": "Automatically apply adjustments to all selected images.",
+      "autoSyncLabel": "Enable auto-sync",
+      "autoSyncTitle": "Auto-sync adjustments",
       "cancel": "Cancel",
       "descMerge": "Adds your copied changes, leaving other settings untouched.",
       "descReplace": "Overwrites all selected settings, resetting the rest to their defaults.",
@@ -1184,9 +1227,9 @@
       "applyButton_one": "Apply to 1 image",
       "applyButton_other": "Apply to {{count}} images",
       "bestImage": "Best Image",
-      "blurryImagesTab": "Blurry Images",
       "blurThreshold": "Blur Threshold",
       "blurThresholdDesc": "Images with a sharpness score below this value are flagged. Higher is stricter.",
+      "blurryImagesTab": "Blurry Images",
       "cancel": "Cancel",
       "close": "Close",
       "cullingFailed": "Culling Failed",
@@ -1528,6 +1571,7 @@
         "delete_selected": "Delete selected file(s)",
         "exposure_down": "Decrease exposure",
         "exposure_up": "Increase exposure",
+        "focus_search": "Focus search field",
         "open_image": "Open selected image",
         "open_settings": "Open settings",
         "paste_adjustments": "Paste copied adjustments",
@@ -1647,6 +1691,9 @@
         },
         "title": "Generative AI"
       },
+      "alwaysDecodeRaw": "Always Decode RAW",
+      "alwaysDecodeRawDesc": "Force full RAW decoding for thumbnails instead of using embedded JPEG previews. Enable this if your thumbnails look different in color or contrast compared to the opened image.",
+      "alwaysDecodeRawLabel": "Always decode RAW for thumbnails",
       "backend": "Processing Backend",
       "backendDesc": "Select the graphics API. 'Auto' is recommended. May fix crashes on some systems.",
       "backends": {
@@ -1665,7 +1712,7 @@
       "imageCacheDesc": "Maximum number of full-resolution images kept in RAM. Higher values make switching between recently edited images instant, but use significantly more memory.",
       "images": "Images",
       "linuxCompat": "Linux Compatibility Mode",
-      "linuxCompatDesc": "Enable workarounds for common GPU driver and display server issues. Disable this to enable full GPU acceleration.",
+      "linuxCompatDesc": "Force software compositing to work around GPU driver crashes. Nvidia GPUs already get a lighter, non-software-fallback workaround automatically, so only enable this if you still experience crashes on launch or when opening images.",
       "linuxCompatLabel": "Enable Compatibility Mode",
       "livePreviewQuality": "Live Preview Quality",
       "livePreviewQualityDesc": "Controls the resolution and compression of the image while dragging sliders. Lower quality significantly improves responsiveness.",
@@ -1737,8 +1784,8 @@
     "tagging": {
       "addCustomPlaceholder": "Add custom AI tags (comma separated)...",
       "addCustomTooltip": "Add AI tag",
-      "addShortcutsPlaceholder": "Add shortcuts (comma separated)...",
       "addShortcutTooltip": "Add Shortcut",
+      "addShortcutsPlaceholder": "Add shortcuts (comma separated)...",
       "aiTagging": "AI Tagging",
       "aiTaggingDesc": "Enables automatic image tagging using an AI (CLIP) model. This will download an additional model and impact performance while browsing folders. Tags are used for searching a folder.",
       "amount": "Amount",

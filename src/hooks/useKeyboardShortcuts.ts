@@ -381,6 +381,13 @@ export const useKeyboardShortcuts = ({
           }
         },
       },
+      focus_search: {
+        shouldFire: (s: any) => !s.editor.selectedImage,
+        execute: (e: any, s: any) => {
+          e.preventDefault();
+          s.ui.requestSearchFocus();
+        },
+      },
       toggle_crop: {
         shouldFire: (s: any) => !!s.editor.selectedImage,
         execute: (e: any, s: any) => {
