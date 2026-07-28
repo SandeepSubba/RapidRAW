@@ -42,6 +42,14 @@ button stops an in-progress scan.
 The filename prefix for this roll. Frames are numbered `<roll>-NNN.tif`; a
 name collision is suffixed rather than overwritten.
 
+### Film info (optional)
+Shooting metadata for the roll — **film stock, ISO, camera, lens, notes**. It's
+written into the scan's sidecar (shown in the Metadata panel, carried on export)
+and embedded as EXIF tags so other apps read it too: camera → `Make`/`Model`
+(the scanner stays named in `Software`), ISO → `ISOSpeedRatings`, lens →
+`LensModel`, stock → `ImageDescription`, notes → `UserComment`. The fields are
+remembered per roll, so you fill them once.
+
 ### Film type
 - **Color negative (C-41)** — orange-mask neutralised, inverted to positive.
 - **B&W negative** — scanned in grayscale, inverted.
@@ -83,6 +91,9 @@ exposes an infrared source. An extra IR scan sees dust, hair, and surface
 scratches as shadows (film dye is transparent to infrared, defects are not); the
 app builds a defect mask and fills it from surrounding clean pixels.
 
+- A **sensitivity** slider (shown when IR is on) tunes how aggressively defects
+  are caught — higher removes more dust but can start softening fine detail;
+  lower is more conservative. 50 is the neutral default.
 - Not available for silver **B&W** film (the silver image blocks infrared
   everywhere, so there's no clean signal).
 - At 7200 dpi the IR pass is noisier; detection runs on a downsampled frame and
@@ -113,7 +124,9 @@ Rotate the frame in 90° steps. Saved as a non-destructive orientation adjustmen
 ### Auto crop
 Detects the film-frame edges and trims the holder bars, the aperture-shadow
 border, and the clear film rebate. When on, the preview **dims the area that
-will be trimmed** so you can see the result. The crop is written as a **normal,
+will be trimmed** so you can see the result. **Drag any edge of the dimmed
+region** to adjust the crop by hand (no handles — just grab an edge); the scan
+then uses exactly what you framed. The crop is written as a **normal,
 non-destructive crop adjustment** — the editor's Crop tool can refine or clear
 it, and no pixels are discarded from the TIFF. Frames where no confident frame
 edge is found are left uncropped rather than guessed.

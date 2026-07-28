@@ -14,6 +14,30 @@ use crate::tethering::unique_path;
 // re-solving on a fresh pass that can land slightly differently.
 type ToneSolve = ([crate::negative_conversion::ChannelBounds; 3], f32, f32, f32);
 
+// Optional shooting metadata the user enters in the scan pane. scanimage TIFFs
+// carry none, so the library has nothing film-specific to catalogue on. Written
+// to the sidecar (RapidRAW's metadata panel + export) and embedded as EXIF tags.
+#[derive(Clone, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FilmMeta {
+    #[serde(default)]
+    pub film_stock: Option<String>,
+    #[serde(default)]
+    pub iso: Option<u32>,
+    #[serde(default)]
+    pub camera: Option<String>,
+    #[serde(default)]
+    pub lens: Option<String>,
+    #[serde(default)]
+    pub notes: Option<String>,
+}
+
+impl FilmMeta {
+    fn field(o: &Option<String>) -> Option<&str> {
+        o.as_deref().map(str::trim).filter(|s| !s.is_empty())
+    }
+}
+
 #[derive(Default)]
 pub struct ScanState {
     child: Arc<Mutex<Option<Child>>>,
@@ -415,7 +439,10 @@ fn dilate(mask: &mut [bool], w: usize, h: usize, r: usize) {
 
 // Defect mask from the IR gray frame; vis_luma gates out the holder/border,
 // which blocks IR too but isn't film.
-fn ir_defect_mask(ir_gray: &[f32], vis_luma: &[f32], w: usize, h: usize, dpi: u32) -> Vec<bool> {
+// `thr_mult` scales the MAD threshold: lower catches more defects (aggressive,
+// risks softening detail), higher catches only strong ones (conservative). 6.0
+// is the neutral default.
+fn ir_defect_mask(ir_gray: &[f32], vis_luma: &[f32], w: usize, h: usize, dpi: u32, thr_mult: f32) -> Vec<bool> {
     let r = ((12 * dpi) / 1800).clamp(4, 48) as usize;
     let bg = box_blur(ir_gray, w, h, r);
     let resid: Vec<f32> = bg.iter().zip(ir_gray).map(|(b, v)| b - v).collect();
@@ -425,7 +452,7 @@ fn ir_defect_mask(ir_gray: &[f32], vis_luma: &[f32], w: usize, h: usize, dpi: u3
     let mut dev: Vec<f32> = sample.iter().map(|v| (v - med).abs()).collect();
     dev.sort_by(f32::total_cmp);
     let mad = dev[dev.len() / 2];
-    let thr = (6.0 * 1.4826 * mad).max(8.0 / 255.0);
+    let thr = (thr_mult * 1.4826 * mad).max(8.0 / 255.0);
     let mut mask: Vec<bool> = resid
         .iter()
         .zip(vis_luma)
@@ -492,7 +519,11 @@ fn downsample2(src: &[f32], w: usize, h: usize) -> Vec<f32> {
 }
 
 // Run the IR clean on a finished visible scan: returns defect pixel count.
-fn ir_clean_scan(vis_path: &Path, ir_path: &Path, dpi: u32) -> Result<usize, String> {
+// `sensitivity` (0..100, 50 = default) tunes how aggressively defects are caught:
+// higher removes more (lower MAD multiplier), lower is more conservative.
+fn ir_clean_scan(vis_path: &Path, ir_path: &Path, dpi: u32, sensitivity: f32) -> Result<usize, String> {
+    // 50 -> 6.0 (neutral); 0 -> 9.5 (conservative); 100 -> 2.5 (aggressive).
+    let thr_mult = (9.5 - 0.07 * sensitivity.clamp(0.0, 100.0)).clamp(2.5, 9.5);
     let vis = open_image(vis_path)?.to_rgb32f();
     let ir = open_image(ir_path)?.to_rgb32f();
     let (w, h) = vis.dimensions();
@@ -515,6 +546,7 @@ fn ir_clean_scan(vis_path: &Path, ir_path: &Path, dpi: u32) -> Result<usize, Str
             dw,
             dh,
             dpi / 2,
+            thr_mult,
         );
         let mut full = vec![false; w * h];
         for y in 0..dh {
@@ -531,7 +563,7 @@ fn ir_clean_scan(vis_path: &Path, ir_path: &Path, dpi: u32) -> Result<usize, Str
         dilate(&mut full, w, h, 2);
         full
     } else {
-        ir_defect_mask(&ir_gray, &vis_luma, w, h, dpi)
+        ir_defect_mask(&ir_gray, &vis_luma, w, h, dpi, thr_mult)
     };
     let count = mask.iter().filter(|m| **m).count();
     if count == 0 {
@@ -554,7 +586,7 @@ fn ir_clean_scan(vis_path: &Path, ir_path: &Path, dpi: u32) -> Result<usize, Str
 // as real TIFF tags so any application can read them, not just the sidecar.
 // Encodes to memory and renames over the original, so a failure never costs
 // the scan.
-fn compress_scan(path: &Path, keep_bits: u8, scanner_model: &str) -> Result<u64, String> {
+fn compress_scan(path: &Path, keep_bits: u8, scanner_model: &str, meta: &FilmMeta) -> Result<u64, String> {
     use tiff::encoder::{colortype::ColorType, compression::DeflateLevel, Compression, TiffEncoder};
     use tiff::tags::Tag;
 
@@ -568,6 +600,7 @@ fn compress_scan(path: &Path, keep_bits: u8, scanner_model: &str) -> Result<u64,
         data: &[u16],
         date: &str,
         scanner_model: &str,
+        meta: &FilmMeta,
     ) -> Result<(), String> {
         let mut enc = TiffEncoder::new(buf)
             .map_err(|e| e.to_string())?
@@ -580,11 +613,23 @@ fn compress_scan(path: &Path, keep_bits: u8, scanner_model: &str) -> Result<u64,
         // exiftool and most readers accept.
         let _ = d.write_tag(Tag::Unknown(36867), date);
         let _ = d.write_tag(Tag::Software, "RapidRAW film scanner");
-        if let Some((make, model)) = scanner_model.split_once(' ') {
+        // Make/Model = the camera the frame was shot on when given (what readers
+        // expect); otherwise the scanner. The scanner stays named in Software.
+        let device = FilmMeta::field(&meta.camera).unwrap_or(scanner_model);
+        if let Some((make, model)) = device.split_once(' ') {
             let _ = d.write_tag(Tag::Make, make);
             let _ = d.write_tag(Tag::Model, model);
-        } else if !scanner_model.is_empty() {
-            let _ = d.write_tag(Tag::Model, scanner_model);
+        } else if !device.is_empty() {
+            let _ = d.write_tag(Tag::Model, device);
+        }
+        if let Some(iso) = meta.iso {
+            let _ = d.write_tag(Tag::Unknown(34855), iso as u16); // ISOSpeedRatings
+        }
+        if let Some(lens) = FilmMeta::field(&meta.lens) {
+            let _ = d.write_tag(Tag::Unknown(42036), lens); // LensModel
+        }
+        if let Some(stock) = FilmMeta::field(&meta.film_stock) {
+            let _ = d.write_tag(Tag::ImageDescription, stock);
         }
         image.write_data(data).map_err(|e| e.to_string())
     }
@@ -597,7 +642,7 @@ fn compress_scan(path: &Path, keep_bits: u8, scanner_model: &str) -> Result<u64,
             for v in &mut data {
                 *v &= mask;
             }
-            write::<tiff::encoder::colortype::Gray16>(&mut buf, (w, h), &data, &date, scanner_model)?;
+            write::<tiff::encoder::colortype::Gray16>(&mut buf, (w, h), &data, &date, scanner_model, meta)?;
         }
         other => {
             let rgb = other.to_rgb16();
@@ -606,7 +651,7 @@ fn compress_scan(path: &Path, keep_bits: u8, scanner_model: &str) -> Result<u64,
             for v in &mut data {
                 *v &= mask;
             }
-            write::<tiff::encoder::colortype::RGB16>(&mut buf, (w, h), &data, &date, scanner_model)?;
+            write::<tiff::encoder::colortype::RGB16>(&mut buf, (w, h), &data, &date, scanner_model, meta)?;
         }
     }
     let bytes = buf.into_inner();
@@ -884,6 +929,7 @@ fn write_scan_sidecar(
     brightness: f32,
     contrast: f32,
     crop: Option<(u32, u32, u32, u32)>,
+    film_meta: &FilmMeta,
 ) -> Result<(), String> {
     let steps = rotation_steps % 4;
     let sidecar = crate::exif_processing::get_primary_sidecar_path(target);
@@ -899,6 +945,34 @@ fn write_scan_sidecar(
             ("DateTimeOriginal".to_string(), now.clone()),
             ("CreateDate".to_string(), now),
         ]));
+    }
+    // Film metadata into the sidecar's EXIF map — shown in the Metadata panel and
+    // carried on export. Same tag choices as the embedded TIFF: camera → Make/
+    // Model, stock → ImageDescription, notes → UserComment.
+    if let Some(exif) = meta.exif.as_mut() {
+        if let Some(cam) = FilmMeta::field(&film_meta.camera) {
+            match cam.split_once(' ') {
+                Some((make, model)) => {
+                    exif.insert("Make".into(), make.into());
+                    exif.insert("Model".into(), model.into());
+                }
+                None => {
+                    exif.insert("Model".into(), cam.into());
+                }
+            }
+        }
+        if let Some(iso) = film_meta.iso {
+            exif.insert("ISOSpeedRatings".into(), iso.to_string());
+        }
+        if let Some(lens) = FilmMeta::field(&film_meta.lens) {
+            exif.insert("LensModel".into(), lens.into());
+        }
+        if let Some(stock) = FilmMeta::field(&film_meta.film_stock) {
+            exif.insert("ImageDescription".into(), stock.into());
+        }
+        if let Some(notes) = FilmMeta::field(&film_meta.notes) {
+            exif.insert("UserComment".into(), notes.into());
+        }
     }
     if let Some((bounds, exposure, weight)) = negative {
         meta.adjustments["negativeConversion"] = serde_json::json!({
@@ -1052,11 +1126,12 @@ fn render_preview(
             exposure_offset + auto_ev,
             contrast,
             None,
+            &FilmMeta::default(),
         )?;
     } else {
         // Slide (E-6) — positive film, no inversion.
         *tone_slot.lock().unwrap() = None;
-        write_scan_sidecar(tif, None, rotation_steps, exposure_offset, contrast, None)?;
+        write_scan_sidecar(tif, None, rotation_steps, exposure_offset, contrast, None, &FilmMeta::default())?;
     }
 
     // Overlay rect only — the preview image itself stays uncropped so the dimmed
@@ -1168,7 +1243,9 @@ pub async fn scan_start(
     rotation_steps: u32,
     samples: u32,
     ir_clean: bool,
+    ir_sensitivity: f32,
     auto_crop: bool,
+    crop_override: Option<(f32, f32, f32, f32)>,
     bit_depth: u32,
     scan_depth: u32,
     source_visible: String,
@@ -1176,6 +1253,7 @@ pub async fn scan_start(
     scanner_model: String,
     dest_folder: String,
     file_name: String,
+    film_meta: FilmMeta,
     state: tauri::State<'_, ScanState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
@@ -1240,7 +1318,7 @@ pub async fn scan_start(
                 &child_slot, &cancelled, &app_handle, ir_source, scan_mode(&film_type), dpi, scan_depth,
                 &ir_tmp, samples, total_passes,
             ) {
-                Ok(()) => match ir_clean_scan(&tmp, &ir_tmp, dpi) {
+                Ok(()) => match ir_clean_scan(&tmp, &ir_tmp, dpi, ir_sensitivity) {
                     Ok(n) => log::info!("[scan] IR clean filled {n} defect px"),
                     // A failed clean never loses the scan itself.
                     Err(e) => log::warn!("[scan] IR clean skipped: {e}"),
@@ -1252,7 +1330,7 @@ pub async fn scan_start(
         }
         if scan_result.is_ok() && !cancelled.load(Ordering::SeqCst) {
             let keep_bits = if matches!(bit_depth, 10 | 12 | 16) { bit_depth as u8 } else { 12 };
-            match compress_scan(&tmp, keep_bits, &scanner_model) {
+            match compress_scan(&tmp, keep_bits, &scanner_model, &film_meta) {
                 Ok(size) => log::info!("[scan] compressed to {} MB ({keep_bits}-bit)", size / 1_000_000),
                 Err(e) => log::warn!("[scan] compression skipped, keeping raw TIFF: {e}"),
             }
@@ -1270,7 +1348,24 @@ pub async fn scan_start(
                 // Auto-crop frame rect in post-orientation space (opt-in, so the
                 // extra decode only happens when asked). ponytail: separate decode
                 // from the tone one below; fold together only if it ever matters.
-                let crop_rect = if auto_crop {
+                // A crop the user dragged in the preview (normalized, post-orientation
+                // space) wins — the scan matches exactly what they framed. Otherwise
+                // auto-detect the frame when auto-crop is on.
+                let crop_rect = if let Some((cx, cy, cw, ch)) = crop_override {
+                    open_image(&target).ok().map(|img| {
+                        let (ow, oh) = if rotation_steps % 2 == 1 {
+                            (img.height(), img.width())
+                        } else {
+                            (img.width(), img.height())
+                        };
+                        (
+                            (cx.clamp(0.0, 1.0) * ow as f32) as u32,
+                            (cy.clamp(0.0, 1.0) * oh as f32) as u32,
+                            (cw.clamp(0.0, 1.0) * ow as f32).max(1.0) as u32,
+                            (ch.clamp(0.0, 1.0) * oh as f32).max(1.0) as u32,
+                        )
+                    })
+                } else if auto_crop {
                     open_image(&target).ok().and_then(|img| {
                         let (w, h) = (img.width(), img.height());
                         detect_frame_rect(&img, 100, true)
@@ -1303,10 +1398,11 @@ pub async fn scan_start(
                             exposure_offset + ev,
                             contrast,
                             crop_rect,
+                            &film_meta,
                         )
                     })
                 } else {
-                    write_scan_sidecar(&target, None, rotation_steps, exposure_offset, contrast, crop_rect)
+                    write_scan_sidecar(&target, None, rotation_steps, exposure_offset, contrast, crop_rect, &film_meta)
                 };
                 if let Err(e) = result {
                     log::warn!("[scan] sidecar write failed for {path}: {e}");
@@ -1343,7 +1439,7 @@ mod tests {
             }
         }
         let vis_luma = vec![0.5f32; w * h];
-        let mask = ir_defect_mask(&ir, &vis_luma, w, h, 1800);
+        let mask = ir_defect_mask(&ir, &vis_luma, w, h, 1800, 6.0);
         assert!(mask[42 * w + 62], "speck not masked");
         assert!(!mask[10 * w + 10], "clean area masked");
 
@@ -1399,7 +1495,7 @@ mod tests {
         let orig = img.clone();
         img.save_with_format(&p, image::ImageFormat::Tiff).unwrap();
         let raw_size = std::fs::metadata(&p).unwrap().len();
-        super::compress_scan(&p, 12, "PLUSTEK OpticFilm 7600i (v1)").unwrap();
+        super::compress_scan(&p, 12, "PLUSTEK OpticFilm 7600i (v1)", &super::FilmMeta::default()).unwrap();
         assert!(std::fs::metadata(&p).unwrap().len() < raw_size, "no size reduction");
         // Round-trip through the app's own decoder: proves deflate+predictor
         // 16-bit TIFFs stay readable, and only sub-noise bits changed.
@@ -1417,9 +1513,36 @@ mod tests {
 
         // 16-bit mode: bit-exact lossless.
         img.save_with_format(&p, image::ImageFormat::Tiff).unwrap();
-        super::compress_scan(&p, 16, "").unwrap();
+        super::compress_scan(&p, 16, "", &super::FilmMeta::default()).unwrap();
         let back = super::open_image(&p).unwrap().to_rgb16();
         assert_eq!(orig.as_raw(), back.as_raw(), "16-bit mode must be lossless");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn compress_embeds_film_metadata() {
+        let dir = std::env::temp_dir().join(format!("rr-meta-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("frame.tif");
+        image::ImageBuffer::<image::Rgb<u16>, Vec<u16>>::from_pixel(16, 16, image::Rgb([20000u16, 20000, 20000]))
+            .save_with_format(&p, image::ImageFormat::Tiff)
+            .unwrap();
+        let meta = super::FilmMeta {
+            film_stock: Some("Kodak Portra 400".into()),
+            iso: Some(400),
+            camera: Some("Nikon FM2".into()),
+            lens: Some("50mm f/1.8".into()),
+            notes: None,
+        };
+        super::compress_scan(&p, 12, "PLUSTEK OpticFilm 7600i (v1)", &meta).unwrap();
+        let file = std::fs::File::open(&p).unwrap();
+        let exif = exif::Reader::new().read_from_container(&mut std::io::BufReader::new(file)).unwrap();
+        let get = |t| exif.get_field(t, exif::In::PRIMARY).map(|f| f.display_value().to_string());
+        // Camera takes Make/Model over the scanner; stock lands in ImageDescription.
+        assert!(get(exif::Tag::Make).unwrap().contains("Nikon"), "camera make not embedded");
+        assert!(!get(exif::Tag::Make).unwrap().contains("PLUSTEK"), "scanner should not win Make");
+        assert!(get(exif::Tag::Model).unwrap().contains("FM2"), "camera model not embedded");
+        assert!(get(exif::Tag::ImageDescription).unwrap().contains("Portra"), "stock not embedded");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
