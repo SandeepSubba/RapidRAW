@@ -707,12 +707,17 @@ fn detect_frame_crop(img: &image::DynamicImage) -> image::DynamicImage {
     }
 }
 
-// The frame border carries non-image bands the bright-run pass keeps: the dim
-// aperture-shadow sliver between holder and image (renders as a white ring in
-// the positive) and the film rebate (bright base on negatives, black on E-6).
-// Both deviate hard from the frame's median level, while image lines hover
-// around it — trim each side inward to the first K consecutive in-band lines,
-// bounded to 10% per side so a dark or bright image edge can't be eaten.
+// The one non-image band the bright-run pass can't drop is the film rebate: the
+// clear, unexposed base, which is the BRIGHTEST thing on a negative's red
+// channel — brighter than the frame median, and brighter than any real content
+// (dense scene areas like a lit window or a white wall come out DARK/low-red on
+// a negative, so they can never be mistaken for rebate). Holder/aperture bands
+// are dark and already excluded by largest_bright_run's floor. So peel only a
+// bright-extreme band near each edge — trim to just past the deepest bright line
+// within a tight cap (covers the rebate plus its soft falloff toward the holder)
+// — and touch nothing else. A frame whose picture runs to the holder edge has no
+// bright band and is left untrimmed, rather than eaten inward like the old
+// "walk to the first median-typical run" logic did.
 fn trim_edge_bands(means: &[f32], lo: usize, hi: usize) -> (usize, usize) {
     let span = hi - lo;
     if span < 40 {
@@ -721,24 +726,23 @@ fn trim_edge_bands(means: &[f32], lo: usize, hi: usize) -> (usize, usize) {
     let mut sorted: Vec<f32> = means[lo..hi].to_vec();
     sorted.sort_by(f32::total_cmp);
     let median = sorted[sorted.len() / 2];
-    let in_band = |m: f32| m >= 0.75 * median && m <= 1.3 * median;
-    const K: usize = 4;
-    let cap = span / 10;
-    let settle = |idx: &mut dyn Iterator<Item = usize>| -> Option<usize> {
-        let mut streak = 0usize;
+    let bright = |m: f32| m > 1.6 * median;
+    let cap = span / 8; // hard safety ceiling; a real rebate is far thinner
+    // Deepest bright line within `cap` of the edge; trim to just past it (0 = none).
+    let peel = |idx: &mut dyn Iterator<Item = usize>| -> usize {
+        let mut deepest = 0usize;
         for (n, i) in idx.enumerate() {
-            if n >= cap + K {
+            if n >= cap {
                 break;
             }
-            streak = if in_band(means[i]) { streak + 1 } else { 0 };
-            if streak == K {
-                return Some(n + 1 - K);
+            if bright(means[i]) {
+                deepest = n + 1;
             }
         }
-        None
+        deepest
     };
-    let nlo = lo + settle(&mut (lo..hi)).unwrap_or(0);
-    let nhi = hi - settle(&mut (lo..hi).rev()).unwrap_or(0);
+    let nlo = lo + peel(&mut (lo..hi));
+    let nhi = hi - peel(&mut (lo..hi).rev());
     (nlo, nhi)
 }
 
@@ -1547,7 +1551,7 @@ mod tests {
     }
 
     #[test]
-    fn edge_band_trim_removes_shadow_and_rebate() {
+    fn edge_band_trim_removes_bright_rebate_only() {
         // Measured 1800dpi profile shape: holder black, dim aperture-shadow
         // sliver, image plateau ~0.13, bright rebate band near the far edge.
         let mut means = vec![0.13f32; 200];
@@ -1562,7 +1566,10 @@ mod tests {
         means[198] = 0.20;
         means[199] = 0.14;
         let (lo, hi) = super::trim_edge_bands(&means, 0, 200);
-        assert!((4..=6).contains(&lo), "left shadow not trimmed: {lo}");
+        // Bright rebate (0.30-0.34) is peeled; the dark shadow sliver is left to
+        // largest_bright_run's floor upstream — trimming dark bands here would
+        // risk eating dense (low-red) image content on a negative.
+        assert_eq!(lo, 0, "dark side must be left for the bright-run pass: {lo}");
         assert!((188..=192).contains(&hi), "right rebate not trimmed: {hi}");
         // A frame with clean edges is untouched.
         let flat = vec![0.13f32; 200];
@@ -1662,6 +1669,27 @@ mod tests {
         // of both bars and the lamp strip.
         assert!(crop.width() > 180 && crop.width() < 272, "width {}", crop.width());
         assert!(crop.height() > 120 && crop.height() < 186, "height {}", crop.height());
+    }
+
+    #[test]
+    fn trim_bands_peels_rebate_but_spares_content_to_edge() {
+        // A real clear-base rebate (near-max) at the front is peeled; the calm
+        // picture body is not.
+        let mut m = vec![1.0f32; 100];
+        for v in m.iter_mut().take(5) {
+            *v = 2.5;
+        }
+        let (lo, hi) = super::trim_edge_bands(&m, 0, 100);
+        assert_eq!((lo, hi), (5, 100), "rebate should be trimmed, body kept");
+
+        // A picture that runs to the holder edge — a bright window (1.4x) and a
+        // shadow (0.7x) at the edges, nothing extreme — must be left untrimmed.
+        let mut m2 = vec![1.0f32; 100];
+        m2[0] = 1.4;
+        m2[1] = 1.35;
+        m2[98] = 0.7;
+        m2[99] = 0.65;
+        assert_eq!(super::trim_edge_bands(&m2, 0, 100), (0, 100), "content edge must survive");
     }
 }
 
