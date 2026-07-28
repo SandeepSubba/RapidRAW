@@ -43,7 +43,10 @@ and dated.
   availability are read from the scanner via `scanimage -A`, so the UI adapts to
   each device instead of assuming one model.
 - **IR dust & scratch removal** — an infrared pass detects and inpaints dust,
-  hair, and surface scratches (when the scanner exposes an IR source).
+  hair, and surface scratches (when the scanner exposes an IR source), with a
+  **sensitivity slider** to trade defect removal against fine-detail retention.
+- **Film metadata** — per-roll stock / ISO / camera / lens / notes written to the
+  sidecar and embedded as EXIF for cross-app cataloguing.
 - **Multi-sampling** — averages N passes to cut shadow noise.
 - **Auto-tone** — density-domain inversion with hue-neutral high-dpi handling;
   Exposure/Contrast are written as re-tunable editor adjustments.

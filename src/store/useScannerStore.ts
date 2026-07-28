@@ -27,9 +27,11 @@ interface ScannerState {
   dpi: number;
   samples: number;
   irClean: boolean;
+  irSensitivity: number; // 0..100, 50 = default IR dust-removal aggressiveness
   bitDepth: number;
   autoCrop: boolean;
   cropRect: [number, number, number, number] | null;
+  cropManual: boolean; // true once the user drags an edge — stops re-renders re-detecting
   // Film-base eyedropper: pinned rebate point (normalized, in the displayed
   // preview) and whether the next preview click samples it.
   basePoint: [number, number] | null;
@@ -37,6 +39,12 @@ interface ScannerState {
   exposureOffset: number;
   contrast: number;
   rotationSteps: number;
+  // Optional shooting metadata written to the scan's sidecar + EXIF (roll-level).
+  filmStock: string;
+  iso: string;
+  camera: string;
+  lens: string;
+  notes: string;
   prefix: string;
   frameCount: number;
   scanning: ScanActivity;
@@ -57,14 +65,21 @@ export const useScannerStore = create<ScannerState>()(
       dpi: 3600,
       samples: 1,
       irClean: false,
+      irSensitivity: 50,
       bitDepth: 12,
       autoCrop: false,
       cropRect: null,
+      cropManual: false,
       basePoint: null,
       eyedropping: false,
       exposureOffset: 0,
       contrast: 0,
       rotationSteps: 0,
+      filmStock: '',
+      iso: '',
+      camera: '',
+      lens: '',
+      notes: '',
       prefix: 'roll',
       frameCount: 0,
       scanning: 'idle',
@@ -81,11 +96,16 @@ export const useScannerStore = create<ScannerState>()(
         dpi: state.dpi,
         samples: state.samples,
         irClean: state.irClean,
+        irSensitivity: state.irSensitivity,
         bitDepth: state.bitDepth,
         autoCrop: state.autoCrop,
         exposureOffset: state.exposureOffset,
         contrast: state.contrast,
         rotationSteps: state.rotationSteps,
+        filmStock: state.filmStock,
+        iso: state.iso,
+        camera: state.camera,
+        lens: state.lens,
         prefix: state.prefix,
       }),
     },
