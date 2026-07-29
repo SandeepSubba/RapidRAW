@@ -270,7 +270,10 @@ export default function MetadataPanel() {
 
     const cameraGridKeys = ['ExposureTime', 'FNumber', 'PhotographicSensitivity', 'FocalLengthIn35mmFilm'];
     const cameraGridSettings = cameraGridKeys.map((key) => {
-      const value = exif[key];
+      // ISO is tag 34855 — EXIF 2.2 exposes it as ISOSpeedRatings, 2.3 as
+      // PhotographicSensitivity; film scans write ISOSpeedRatings. Read either.
+      const value =
+        key === 'PhotographicSensitivity' ? (exif[key] ?? exif.ISOSpeedRatings ?? exif.ISO) : exif[key];
       const hasValue = value !== undefined && value !== null && value !== '';
 
       const translatedLabel =
