@@ -42,15 +42,20 @@ export function detectScanner() {
     });
 }
 
-// Resolve the filename pattern for a frame. Tokens: {roll} {n} {date}; {n} is the
-// 3-digit frame number, {date} the scan date. Path separators are stripped and a
-// .tif extension appended. Empty result falls back to a sane default.
-function resolveScanName(pattern: string, roll: string, frameNo: number): string {
-  const date = new Date().toISOString().slice(0, 10);
-  const name = (pattern || '{roll}-{n}')
-    .replace(/\{roll\}/g, roll || 'roll')
-    .replace(/\{n\}/g, String(frameNo).padStart(3, '0'))
-    .replace(/\{date\}/g, date)
+// Resolve a frame filename from the pattern, using the same tokens as image
+// export: {sequence} (3-digit frame no.) and {YYYY} {MM} {DD} {hh} {mm} (local
+// scan time). The roll name is just literal text in the pattern. Path separators
+// are stripped and a .tif extension appended; an empty result falls back.
+function resolveScanName(pattern: string, frameNo: number): string {
+  const d = new Date();
+  const p2 = (n: number) => String(n).padStart(2, '0');
+  const name = (pattern || 'roll-{sequence}')
+    .replace(/\{sequence\}/g, String(frameNo).padStart(3, '0'))
+    .replace(/\{YYYY\}/g, String(d.getFullYear()))
+    .replace(/\{MM\}/g, p2(d.getMonth() + 1))
+    .replace(/\{DD\}/g, p2(d.getDate()))
+    .replace(/\{hh\}/g, p2(d.getHours()))
+    .replace(/\{mm\}/g, p2(d.getMinutes()))
     .replace(/[/\\:]/g, '')
     .trim();
   return `${name || 'roll'}.tif`;
@@ -237,7 +242,7 @@ export default function ScannerPane() {
       s.setScanner({ error: 'Open a library folder first — scans land in the current folder.' });
       return;
     }
-    const fileName = resolveScanName(s.namePattern, s.prefix, s.frameCount + 1);
+    const fileName = resolveScanName(s.namePattern, s.frameCount + 1);
     s.setScanner({ scanning: 'scan', progress: 0, error: null });
     try {
       await invoke(Invokes.ScanStart, {
@@ -379,24 +384,17 @@ export default function ScannerPane() {
           <p className="text-xs text-text-secondary mb-2">Roll Name</p>
           <input
             type="text"
-            value={s.prefix}
-            disabled={busy}
-            onChange={(e) => s.setScanner({ prefix: e.target.value.replace(/[/\\:]/g, '') })}
-            className="w-full px-2 py-1.5 text-sm text-text-primary bg-surface/60 border border-surface rounded-md focus:border-accent focus:outline-none"
-          />
-          <input
-            type="text"
             value={s.namePattern}
             disabled={busy}
-            placeholder="{roll}-{n}"
+            placeholder="roll-{sequence}"
             onChange={(e) => s.setScanner({ namePattern: e.target.value })}
-            className="w-full mt-2 px-2 py-1.5 text-sm text-text-primary bg-surface/60 border border-surface rounded-md focus:border-accent focus:outline-none"
+            className="w-full px-2 py-1.5 text-sm text-text-primary bg-surface/60 border border-surface rounded-md focus:border-accent focus:outline-none"
           />
           <p className="text-[10px] text-text-secondary mt-1">
-            Pattern tokens: <span className="font-mono">{'{roll} {n} {date}'}</span>
+            Tokens: <span className="font-mono">{'{sequence} {YYYY} {MM} {DD} {hh} {mm}'}</span>
           </p>
           <p className="text-[10px] text-text-secondary mt-1">
-            Next frame: {resolveScanName(s.namePattern, s.prefix, s.frameCount + 1)}
+            Next frame: {resolveScanName(s.namePattern, s.frameCount + 1)}
           </p>
         </div>
 

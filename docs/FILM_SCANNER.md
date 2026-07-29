@@ -39,12 +39,13 @@ button stops an in-progress scan.
 ## Controls
 
 ### Roll name
-The name for this roll, plus a **filename pattern** for the frames. The pattern
-takes three tokens — `{roll}` (the roll name), `{n}` (the 3-digit frame number),
-and `{date}` (the scan date, `YYYY-MM-DD`) — and defaults to `{roll}-{n}`, so
-frames come out `roll-001.tif`, `roll-002.tif`, … Set it to `{roll}-{date}-{n}`
-for `trip-2026-07-29-001.tif`, or anything else you like; a live preview shows
-the next frame's name. A name collision is suffixed rather than overwritten.
+A single **filename pattern** for the frames, using the same tokens as image
+export: `{sequence}` (the 3-digit frame number) and `{YYYY}` `{MM}` `{DD}` `{hh}`
+`{mm}` (the local scan time). The roll name is just literal text you type in the
+pattern. It defaults to `roll-{sequence}`, so frames come out `roll-001.tif`,
+`roll-002.tif`, … Set it to `trip-{YYYY}{MM}{DD}-{sequence}` for
+`trip-20260729-001.tif`, or anything else; a live preview shows the next frame's
+name. A name collision is suffixed rather than overwritten.
 
 ### Film info (optional)
 Shooting metadata for the roll — **film stock, ISO, camera, lens, notes**. It's
