@@ -46,6 +46,8 @@ interface ScannerState {
   lens: string;
   notes: string;
   prefix: string;
+  // Filename pattern with tokens {roll} {n} {date}; {n} is the padded frame no.
+  namePattern: string;
   frameCount: number;
   scanning: ScanActivity;
   progress: number;
@@ -81,6 +83,7 @@ export const useScannerStore = create<ScannerState>()(
       lens: '',
       notes: '',
       prefix: 'roll',
+      namePattern: '{roll}-{n}',
       frameCount: 0,
       scanning: 'idle',
       progress: 0,
@@ -107,6 +110,7 @@ export const useScannerStore = create<ScannerState>()(
         camera: state.camera,
         lens: state.lens,
         prefix: state.prefix,
+        namePattern: state.namePattern,
       }),
     },
   ),

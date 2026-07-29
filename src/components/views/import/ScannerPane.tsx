@@ -42,6 +42,20 @@ export function detectScanner() {
     });
 }
 
+// Resolve the filename pattern for a frame. Tokens: {roll} {n} {date}; {n} is the
+// 3-digit frame number, {date} the scan date. Path separators are stripped and a
+// .tif extension appended. Empty result falls back to a sane default.
+function resolveScanName(pattern: string, roll: string, frameNo: number): string {
+  const date = new Date().toISOString().slice(0, 10);
+  const name = (pattern || '{roll}-{n}')
+    .replace(/\{roll\}/g, roll || 'roll')
+    .replace(/\{n\}/g, String(frameNo).padStart(3, '0'))
+    .replace(/\{date\}/g, date)
+    .replace(/[/\\:]/g, '')
+    .trim();
+  return `${name || 'roll'}.tif`;
+}
+
 // A low-but-not-lowest resolution for framing previews; the true minimum often
 // carries decimation noise the negative stretch amplifies.
 function previewDpi(caps: ScannerCaps | null): number {
@@ -223,7 +237,7 @@ export default function ScannerPane() {
       s.setScanner({ error: 'Open a library folder first — scans land in the current folder.' });
       return;
     }
-    const fileName = `${s.prefix || 'roll'}-${String(s.frameCount + 1).padStart(3, '0')}.tif`;
+    const fileName = resolveScanName(s.namePattern, s.prefix, s.frameCount + 1);
     s.setScanner({ scanning: 'scan', progress: 0, error: null });
     try {
       await invoke(Invokes.ScanStart, {
@@ -370,8 +384,19 @@ export default function ScannerPane() {
             onChange={(e) => s.setScanner({ prefix: e.target.value.replace(/[/\\:]/g, '') })}
             className="w-full px-2 py-1.5 text-sm text-text-primary bg-surface/60 border border-surface rounded-md focus:border-accent focus:outline-none"
           />
+          <input
+            type="text"
+            value={s.namePattern}
+            disabled={busy}
+            placeholder="{roll}-{n}"
+            onChange={(e) => s.setScanner({ namePattern: e.target.value })}
+            className="w-full mt-2 px-2 py-1.5 text-sm text-text-primary bg-surface/60 border border-surface rounded-md focus:border-accent focus:outline-none"
+          />
           <p className="text-[10px] text-text-secondary mt-1">
-            Next frame: {`${s.prefix || 'roll'}-${String(s.frameCount + 1).padStart(3, '0')}.tif`}
+            Pattern tokens: <span className="font-mono">{'{roll} {n} {date}'}</span>
+          </p>
+          <p className="text-[10px] text-text-secondary mt-1">
+            Next frame: {resolveScanName(s.namePattern, s.prefix, s.frameCount + 1)}
           </p>
         </div>
 

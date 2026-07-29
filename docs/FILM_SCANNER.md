@@ -39,8 +39,12 @@ button stops an in-progress scan.
 ## Controls
 
 ### Roll name
-The filename prefix for this roll. Frames are numbered `<roll>-NNN.tif`; a
-name collision is suffixed rather than overwritten.
+The name for this roll, plus a **filename pattern** for the frames. The pattern
+takes three tokens — `{roll}` (the roll name), `{n}` (the 3-digit frame number),
+and `{date}` (the scan date, `YYYY-MM-DD`) — and defaults to `{roll}-{n}`, so
+frames come out `roll-001.tif`, `roll-002.tif`, … Set it to `{roll}-{date}-{n}`
+for `trip-2026-07-29-001.tif`, or anything else you like; a live preview shows
+the next frame's name. A name collision is suffixed rather than overwritten.
 
 ### Film info (optional)
 Shooting metadata for the roll — **film stock, ISO, camera, lens, notes**. It's
