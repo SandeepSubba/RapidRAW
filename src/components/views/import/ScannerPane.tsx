@@ -151,8 +151,13 @@ export default function ScannerPane() {
           raw,
           basePoint: st.basePoint,
         });
-        // A hand-dragged crop must survive re-renders (exposure/contrast tweaks).
-        st.setScanner({ previewData: res.data, cropRect: raw ? null : st.cropManual ? st.cropRect : res.crop });
+        // A hand-dragged crop must survive re-renders (exposure/contrast tweaks)
+        // AND the raw round-trip of sampling the film base — only an auto crop is
+        // dropped for the raw view, where it can't be re-detected.
+        st.setScanner({
+          previewData: res.data,
+          cropRect: st.cropManual ? st.cropRect : raw ? null : res.crop,
+        });
       } catch {
         // No cached preview (or a scan is running) — settings still apply to the next scan.
       }
@@ -273,7 +278,7 @@ export default function ScannerPane() {
               onClick={handlePreviewClick}
               className={`block max-w-full max-h-full ${s.eyedropping ? 'cursor-crosshair' : ''}`}
             />
-            {s.autoCrop && s.cropRect && (
+            {s.autoCrop && s.cropRect && !s.eyedropping && (
               <>
                 <div
                   className="absolute pointer-events-none border border-white/70"
