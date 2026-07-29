@@ -193,8 +193,16 @@ export default function ScannerPane() {
   };
 
   const handleRotate = () => {
-    // Rotating invalidates a hand-dragged crop's geometry — re-detect.
-    s.setScanner((st) => ({ rotationSteps: (st.rotationSteps + 1) % 4, cropManual: false }));
+    // Carry a hand-dragged crop through the 90° CW turn (normalized rect rotates
+    // [x,y,w,h] -> [1-(y+h), x, h, w]) so it isn't forgotten; auto crops re-detect.
+    s.setScanner((st) => {
+      const next: any = { rotationSteps: (st.rotationSteps + 1) % 4 };
+      if (st.cropManual && st.cropRect) {
+        const [x, y, w, h] = st.cropRect;
+        next.cropRect = [1 - (y + h), x, h, w];
+      }
+      return next;
+    });
     if (s.previewData) rerenderPreview(50);
   };
 
