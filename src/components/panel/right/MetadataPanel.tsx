@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Check, ChevronDown, ChevronRight, Copy, Plus, Star, Tag, X, User } from 'lucide-react';
+import { Camera, Check, ChevronDown, ChevronRight, Copy, Plus, Star, Tag, X, User } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'react-toastify';
 import { useTranslation } from 'react-i18next';
@@ -265,7 +265,7 @@ export default function MetadataPanel() {
     toast.success(t('editor.metadata.author.syncSuccess', { count: targetPaths.length }));
   };
 
-  const { cameraGridSettings, lensSetting, gpsData, otherExifEntries } = useMemo(() => {
+  const { cameraGridSettings, lensSetting, bodySetting, gpsData, otherExifEntries } = useMemo(() => {
     const exif = selectedImage?.exif || {};
 
     const cameraGridKeys = ['ExposureTime', 'FNumber', 'PhotographicSensitivity', 'FocalLengthIn35mmFilm'];
@@ -312,6 +312,18 @@ export default function MetadataPanel() {
             : '-',
     };
 
+    // Camera body: Make + Model, de-duplicated (many bodies repeat the make in
+    // the model, e.g. Model "NIKON D850" — don't render "Nikon NIKON D850").
+    const make = (exif.Make ?? '').toString().trim();
+    const model = (exif.Model ?? '').toString().trim();
+    const bodyValue =
+      model && make && !model.toLowerCase().includes(make.toLowerCase()) ? `${make} ${model}` : model || make;
+    const bodySetting = {
+      key: 'CameraBody',
+      label: t('editor.metadata.camera.body'),
+      value: bodyValue || '-',
+    };
+
     const latStr = exif.GPSLatitude;
     const latRef = exif.GPSLatitudeRef;
     const lonStr = exif.GPSLongitude;
@@ -327,12 +339,12 @@ export default function MetadataPanel() {
       }
     }
 
-    const handledKeys = [...cameraGridKeys, 'LensModel', ...EDITABLE_FIELDS.map((f) => f.key)];
+    const handledKeys = [...cameraGridKeys, 'LensModel', 'Make', 'Model', ...EDITABLE_FIELDS.map((f) => f.key)];
     const otherExifEntries = Object.entries(exif)
       .filter(([key]) => !handledKeys.includes(key))
       .sort(([keyA], [keyB]) => keyA.localeCompare(keyB));
 
-    return { cameraGridSettings, lensSetting, gpsData, otherExifEntries };
+    return { cameraGridSettings, lensSetting, bodySetting, gpsData, otherExifEntries };
   }, [selectedImage?.exif, t]);
 
   const currentColor = useMemo(() => {
@@ -466,6 +478,24 @@ export default function MetadataPanel() {
                 {t('editor.metadata.camera.title')}
               </Text>
               <div className="flex flex-col gap-2">
+                <div
+                  className="flex items-center gap-2 bg-surface border border-surface px-3 py-2 rounded-xl cursor-default"
+                  data-tooltip={bodySetting.label}
+                >
+                  <span className="text-text-secondary opacity-90 flex items-center justify-center shrink-0">
+                    <Camera size={16} />
+                  </span>
+                  <Text
+                    as="span"
+                    variant={TextVariants.small}
+                    weight={TextWeights.medium}
+                    color={TextColors.primary}
+                    className="truncate"
+                  >
+                    {bodySetting.value}
+                  </Text>
+                </div>
+
                 <div className="grid grid-cols-2 gap-2">
                   {cameraGridSettings.map((item: any) => {
                     const Icon = CAMERA_ICONS[item.key];

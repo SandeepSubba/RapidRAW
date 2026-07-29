@@ -631,6 +631,7 @@
       },
       "camera": {
         "aperture": "Aperture",
+        "body": "Camera",
         "focalLength": "Focal Length",
         "iso": "ISO",
         "lens": "Lens",
