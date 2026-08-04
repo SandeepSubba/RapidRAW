@@ -47,6 +47,9 @@ interface LibraryState {
   isViewLoading: boolean;
   libraryScrollTop: number;
   listColumnWidths: ColumnWidths;
+  // Number of thumbnails per row in the current grid layout (1 in list view).
+  // Published by LibraryGrid so keyboard nav can move Up/Down a full row.
+  libraryColumnCount: number;
 
   // Actions
   setLibrary: (updater: Partial<LibraryState> | ((state: LibraryState) => Partial<LibraryState>)) => void;
@@ -81,6 +84,7 @@ export const useLibraryStore = create<LibraryState>((set) => ({
   isTreeLoading: false,
   isViewLoading: false,
   libraryScrollTop: 0,
+  libraryColumnCount: 1,
   listColumnWidths: {
     thumbnail: 4,
     name: 20,

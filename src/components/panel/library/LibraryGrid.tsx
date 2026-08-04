@@ -381,6 +381,14 @@ export default function LibraryGrid(props: any) {
     }
   }, [listHandle, currentFolderPath]);
 
+  // Publish the current column count so keyboard nav can move Up/Down a row.
+  useEffect(() => {
+    const columnCount = gridData?.columnCount ?? 1;
+    if (useLibraryStore.getState().libraryColumnCount !== columnCount) {
+      setLibrary({ libraryColumnCount: columnCount });
+    }
+  }, [gridData?.columnCount, setLibrary]);
+
   const prevActivePath = useRef<string | null>(null);
 
   useEffect(() => {

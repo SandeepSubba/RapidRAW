@@ -575,24 +575,74 @@ export const useKeyboardShortcuts = ({
           !s.editor.selectedImage && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code),
         execute: (e: KeyboardEvent, s: any) => {
           e.preventDefault();
+          const list = sortedListRef.current;
           const isNext = e.code === 'ArrowRight' || e.code === 'ArrowDown';
           const activePath = s.library.libraryActivePath;
-          if (!activePath || sortedListRef.current.length === 0) return;
-          const currentIndex = sortedListRef.current.findIndex((img) => img.path === activePath);
+          if (!activePath || list.length === 0) return;
+          const currentIndex = list.findIndex((img) => img.path === activePath);
           if (currentIndex === -1) return;
+
+          // Shift = range-extend from the anchor; Ctrl/Cmd = grow selection by
+          // the newly focused image. Either way we never wrap around the ends,
+          // so a selection can't jump from the last image to the first.
+          const extend = e.shiftKey || e.ctrlKey || e.metaKey;
           const wrap = s.settings.appSettings?.wrapImageNavigation ?? true;
-          let nextIndex = isNext ? currentIndex + 1 : currentIndex - 1;
-          if (nextIndex >= sortedListRef.current.length) {
-            if (!wrap) return;
-            nextIndex = 0;
+
+          // Up/Down move a whole grid row; Left/Right move one item. Vertical
+          // moves never wrap and clamp at the edges (a no-op past top/bottom).
+          const isVertical = e.code === 'ArrowUp' || e.code === 'ArrowDown';
+          const columnCount = Math.max(1, s.library.libraryColumnCount ?? 1);
+          const step = isVertical ? columnCount : 1;
+
+          let nextIndex = isNext ? currentIndex + step : currentIndex - step;
+          if (isVertical) {
+            if (nextIndex < 0 || nextIndex >= list.length) return;
+          } else {
+            if (nextIndex >= list.length) {
+              if (!wrap || extend) return;
+              nextIndex = 0;
+            }
+            if (nextIndex < 0) {
+              if (!wrap || extend) return;
+              nextIndex = list.length - 1;
+            }
           }
-          if (nextIndex < 0) {
-            if (!wrap) return;
-            nextIndex = sortedListRef.current.length - 1;
-          }
-          const nextImage = sortedListRef.current[nextIndex];
-          if (nextImage) {
-            s.library.setLibrary({ libraryActivePath: nextImage.path, multiSelectedPaths: [nextImage.path] });
+          const nextImage = list[nextIndex];
+          if (!nextImage) return;
+
+          if (e.shiftKey) {
+            const anchorPath = s.library.selectionAnchorPath ?? activePath;
+            const anchorIndex = list.findIndex((img) => img.path === anchorPath);
+            if (anchorIndex === -1) {
+              s.library.setLibrary({
+                libraryActivePath: nextImage.path,
+                multiSelectedPaths: [nextImage.path],
+                selectionAnchorPath: nextImage.path,
+              });
+              return;
+            }
+            const start = Math.min(anchorIndex, nextIndex);
+            const end = Math.max(anchorIndex, nextIndex);
+            const range = list.slice(start, end + 1).map((f) => f.path);
+            s.library.setLibrary({
+              libraryActivePath: nextImage.path,
+              multiSelectedPaths: range,
+              selectionAnchorPath: anchorPath,
+            });
+          } else if (e.ctrlKey || e.metaKey) {
+            const grown = new Set(s.library.multiSelectedPaths);
+            grown.add(nextImage.path);
+            s.library.setLibrary({
+              libraryActivePath: nextImage.path,
+              multiSelectedPaths: Array.from(grown),
+              selectionAnchorPath: nextImage.path,
+            });
+          } else {
+            s.library.setLibrary({
+              libraryActivePath: nextImage.path,
+              multiSelectedPaths: [nextImage.path],
+              selectionAnchorPath: nextImage.path,
+            });
           }
         },
       },
