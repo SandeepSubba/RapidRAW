@@ -83,6 +83,7 @@ export enum Invokes {
   GetSupportedFileTypes = 'get_supported_file_types',
   HandleExportPresetsToFile = 'handle_export_presets_to_file',
   HandleImportPresetsFromFile = 'handle_import_presets_from_file',
+  HandleImportPresetsFromFiles = 'handle_import_presets_from_files',
   HandleImportLegacyPresetsFromFile = 'handle_import_legacy_presets_from_file',
   ImportFiles = 'import_files',
   InvokeGenerativeReplace = 'invoke_generative_replace',
@@ -152,7 +153,10 @@ export enum Panel {
   Masks = 'masks',
   Metadata = 'metadata',
   Presets = 'presets',
+  FolderTree = 'folderTree',
 }
+
+export type PanelRegion = 'leftTop' | 'leftBottom' | 'rightTop' | 'rightBottom';
 
 export enum RawStatus {
   All = 'all',
@@ -186,6 +190,16 @@ export enum Theme {
 export enum ThumbnailAspectRatio {
   Cover = 'cover',
   Contain = 'contain',
+}
+
+export interface WorkspaceState {
+  leftPanelWidth: number;
+  rightPanelWidth: number;
+  leftTopHeight: number;
+  rightTopHeight: number;
+  panelLayout: Record<PanelRegion, Panel[]>;
+  activePanels: Record<PanelRegion, Panel | null>;
+  panelSwitcherPlacement: Record<PanelRegion, 'left' | 'right' | 'top' | 'bottom'>;
 }
 
 export type GroupPreference = 'jpeg' | 'raw';
@@ -253,6 +267,7 @@ export interface AppSettings {
   groupEditedFiles?: boolean;
   groupPreferredType?: GroupPreference; // legacy
   alwaysDecodeRawThumbnails?: boolean;
+  workspace?: WorkspaceState;
 }
 
 export interface BrushSettings {
@@ -383,8 +398,9 @@ export interface TransformState {
 }
 
 export interface UiVisibility {
-  folderTree: boolean;
   filmstrip: boolean;
+  leftPanel: boolean;
+  rightPanel: boolean;
 }
 
 export interface WaveformData {

@@ -616,7 +616,7 @@ export default function CropPanel() {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="p-4 flex justify-between items-center shrink-0 border-b border-surface">
+      <div className="p-3 flex justify-between items-center shrink-0 border-b border-surface">
         <Text variant={TextVariants.title}>{t('editor.crop.title')}</Text>
         <div className="flex items-center gap-2">
           {/* Crop is opt-in: entering this panel no longer auto-activates the crop
@@ -640,7 +640,7 @@ export default function CropPanel() {
         </div>
       </div>
 
-      <div className="grow overflow-y-auto p-4 space-y-8">
+      <div className="grow overflow-y-auto p-3 space-y-8">
         {selectedImage ? (
           <>
             <div className="space-y-4">
@@ -968,14 +968,16 @@ export default function CropPanel() {
             </div>
           </>
         ) : (
-          <Text
-            variant={TextVariants.heading}
-            color={TextColors.secondary}
-            weight={TextWeights.normal}
-            className="text-center mt-4"
-          >
-            {t('editor.ai.noImageSelected')}
-          </Text>
+          <div className="flex items-center justify-center h-full">
+            <Text
+              variant={TextVariants.heading}
+              color={TextColors.secondary}
+              weight={TextWeights.normal}
+              className="text-center"
+            >
+              {t('editor.ai.noImageSelected')}
+            </Text>
+          </div>
         )}
       </div>
 

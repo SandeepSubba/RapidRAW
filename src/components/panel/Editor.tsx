@@ -82,7 +82,7 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
   const appSettings = useSettingsStore((s) => s.appSettings);
   const osPlatform = useSettingsStore((s) => s.osPlatform);
   const isFullScreen = useUIStore((s) => s.isFullScreen);
-  const activeRightPanel = useUIStore((s) => s.activeRightPanel);
+  const activePanel = useUIStore((s) => s.activePanel);
   const isInstantTransition = useUIStore((s) => s.isInstantTransition);
   const setUI = useUIStore((s) => s.setUI);
   const isLoading = useLibraryStore((s) => s.isViewLoading);
@@ -293,7 +293,7 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
     [setAdjustments],
   );
 
-  const handleWbPicked = useCallback(() => { }, []);
+  const handleWbPicked = useCallback(() => {}, []);
 
   useEffect(() => {
     if (isFullScreen) {
@@ -306,9 +306,9 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
     }
   }, [isFullScreen]);
 
-  const isCropping = activeRightPanel === Panel.Crop;
-  const isMasking = activeRightPanel === Panel.Masks;
-  const isAiEditing = activeRightPanel === Panel.Ai;
+  const isCropping = activePanel === Panel.Crop;
+  const isMasking = activePanel === Panel.Masks;
+  const isAiEditing = activePanel === Panel.Ai;
 
   // Crop is opt-in: turn it off when leaving the crop panel or switching images,
   // so it never activates by itself (fork behaviour). Opening the panel is left
@@ -1143,6 +1143,7 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
     bgPrimary: [24 / 255, 24 / 255, 24 / 255, 1.0],
     bgSecondary: [35 / 255, 35 / 255, 35 / 255, 1.0],
   });
+  const syncWgpuRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     const rootStyle = getComputedStyle(document.documentElement);
@@ -1173,8 +1174,31 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
   ]);
 
   useEffect(() => {
+    syncWgpuRef.current();
+  }, [
+    appSettings?.useWgpuRenderer,
+    selectedImage?.isReady,
+    hasRenderedFirstFrame,
+    isCropping,
+    uncroppedAdjustedPreviewUrl,
+    showOriginal,
+    appSettings?.theme,
+    finalPreviewUrl,
+    transformState,
+    imageRenderSize,
+  ]);
+
+  useEffect(() => {
     let isEffectActive = true;
     let isInvoking = false;
+
+    const scheduleSync = () => {
+      if (!isEffectActive || wgpuSyncRef.current !== null) return;
+      wgpuSyncRef.current = requestAnimationFrame(() => {
+        wgpuSyncRef.current = null;
+        syncWgpu();
+      });
+    };
 
     const syncWgpu = () => {
       if (!isEffectActive) return;
@@ -1183,21 +1207,11 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
       const container = imageContainerRef.current;
 
       if (!container) {
-        if (isEffectActive) {
-          wgpuSyncRef.current = requestAnimationFrame(syncWgpu);
-        }
+        scheduleSync();
         return;
       }
 
       const currentRect = container.getBoundingClientRect();
-
-      if (currentRect.width < 10 || currentRect.height < 10) {
-        if (isEffectActive) {
-          wgpuSyncRef.current = requestAnimationFrame(syncWgpu);
-        }
-        return;
-      }
-
       const dpr = window.devicePixelRatio || 1;
       const windowWidth = Math.max(window.innerWidth * dpr, 1);
       const windowHeight = Math.max(window.innerHeight * dpr, 1);
@@ -1207,8 +1221,17 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
       const clipY = (currentRect.top - OVERLAP) * dpr;
       const clipW = Math.max((currentRect.width + OVERLAP * 2) * dpr, 1);
       const clipH = Math.max((currentRect.height + OVERLAP * 2) * dpr, 1);
+      const irs = imageRenderSizeRef.current;
 
-      if (state.useWgpuRenderer === false || !state.isReady || !state.hasRenderedFirstFrame) {
+      if (
+        currentRect.width < 10 ||
+        currentRect.height < 10 ||
+        state.useWgpuRenderer === false ||
+        !state.isReady ||
+        !state.hasRenderedFirstFrame ||
+        irs.width === 0 ||
+        irs.height === 0
+      ) {
         const hiddenTransform = `${windowWidth},${windowHeight},-999999,-999999,1,1,${clipX},${clipY},${clipW},${clipH},${state.bgPrimary?.join(',')},${state.bgSecondary?.join(',')}`;
 
         if (lastWgpuTransformRef.current !== hiddenTransform && !isInvoking) {
@@ -1231,13 +1254,11 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
               pixelated: false,
             },
           })
-            .catch(() => { })
+            .catch(() => {})
             .finally(() => {
               isInvoking = false;
+              scheduleSync();
             });
-        }
-        if (isEffectActive) {
-          wgpuSyncRef.current = requestAnimationFrame(syncWgpu);
         }
         return;
       }
@@ -1249,7 +1270,6 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
       const cw = currentRect.width;
       const ch = currentRect.height;
 
-      const irs = imageRenderSizeRef.current;
       const offsetX = irs.width > 0 ? irs.offsetX : 0;
       const offsetY = irs.height > 0 ? irs.offsetY : 0;
       const baseW = irs.width > 0 ? irs.width : cw;
@@ -1304,29 +1324,37 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
           .catch((err) => console.warn('WGPU Sync Error:', err))
           .finally(() => {
             isInvoking = false;
+            scheduleSync();
           });
-      }
-
-      if (isEffectActive) {
-        wgpuSyncRef.current = requestAnimationFrame(syncWgpu);
       }
     };
 
-    wgpuSyncRef.current = requestAnimationFrame(syncWgpu);
+    syncWgpuRef.current = scheduleSync;
+    syncWgpu();
+
+    const container = imageContainerRef.current;
+    const resizeObserver = new ResizeObserver(scheduleSync);
+    if (container) {
+      resizeObserver.observe(container);
+    }
+    window.addEventListener('resize', scheduleSync);
 
     return () => {
       isEffectActive = false;
       if (wgpuSyncRef.current !== null) {
         cancelAnimationFrame(wgpuSyncRef.current);
+        wgpuSyncRef.current = null;
       }
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', scheduleSync);
     };
   }, []);
 
   const overlayTriggerHash = useMemo(() => {
     let activeMaskDef = null;
-    if (activeRightPanel === Panel.Masks && activeMaskContainerId) {
+    if (activePanel === Panel.Masks && activeMaskContainerId) {
       activeMaskDef = adjustments.masks?.find((c: MaskContainer) => c.id === activeMaskContainerId);
-    } else if (activeRightPanel === Panel.Ai && activeAiPatchContainerId) {
+    } else if (activePanel === Panel.Ai && activeAiPatchContainerId) {
       activeMaskDef = adjustments.aiPatches?.find((p: AiPatch) => p.id === activeAiPatchContainerId);
     }
 
@@ -1390,7 +1418,7 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
       renderSize: { w: imageRenderSize.width, h: imageRenderSize.height },
     });
   }, [
-    activeRightPanel,
+    activePanel,
     activeMaskContainerId,
     activeAiPatchContainerId,
     adjustments,
@@ -1401,7 +1429,7 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
   useEffect(() => {
     let maskDefForOverlay = null;
 
-    if (activeRightPanel === Panel.Masks && activeMaskContainerId) {
+    if (activePanel === Panel.Masks && activeMaskContainerId) {
       const activeMask = adjustments.masks?.find((c: MaskContainer) => c.id === activeMaskContainerId);
       if (activeMask) {
         maskDefForOverlay = {
@@ -1409,7 +1437,7 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
           adjustments: {},
         };
       }
-    } else if (activeRightPanel === Panel.Ai && activeAiPatchContainerId) {
+    } else if (activePanel === Panel.Ai && activeAiPatchContainerId) {
       const activePatch = adjustments.aiPatches?.find((p: AiPatch) => p.id === activeAiPatchContainerId);
       if (activePatch) {
         maskDefForOverlay = {
@@ -1425,7 +1453,7 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
   }, [
     overlayTriggerHash,
     requestMaskOverlay,
-    activeRightPanel,
+    activePanel,
     activeMaskContainerId,
     activeAiPatchContainerId,
     imageRenderSize,

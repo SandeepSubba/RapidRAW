@@ -100,6 +100,12 @@ export const KEYBIND_DEFINITIONS: KeybindDefinition[] = [
     section: 'library',
   },
   {
+    action: 'copy_image_path',
+    description: 'settings.keybinds.actions.copy_image_path',
+    defaultCombo: ['ctrl', 'KeyL'],
+    section: 'library',
+  },
+  {
     action: 'select_all',
     description: 'settings.keybinds.actions.select_all',
     defaultCombo: ['ctrl', 'KeyA'],
@@ -257,6 +263,12 @@ export const KEYBIND_DEFINITIONS: KeybindDefinition[] = [
     section: 'panels',
   },
   {
+    action: 'toggle_folder_tree',
+    description: 'settings.keybinds.actions.toggle_folder_tree',
+    defaultCombo: ['KeyL'],
+    section: 'panels',
+  },
+  {
     action: 'toggle_analytics',
     description: 'settings.keybinds.actions.toggle_analytics',
     defaultCombo: ['KeyA'],
@@ -266,6 +278,24 @@ export const KEYBIND_DEFINITIONS: KeybindDefinition[] = [
     action: 'toggle_export',
     description: 'settings.keybinds.actions.toggle_export',
     defaultCombo: ['KeyE'],
+    section: 'panels',
+  },
+  {
+    action: 'toggle_left_panel',
+    description: 'settings.keybinds.actions.toggle_left_panel',
+    defaultCombo: ['ctrl', 'shift', 'KeyB'],
+    section: 'panels',
+  },
+  {
+    action: 'toggle_right_panel',
+    description: 'settings.keybinds.actions.toggle_right_panel',
+    defaultCombo: ['ctrl', 'KeyB'],
+    section: 'panels',
+  },
+  {
+    action: 'toggle_bottom_panel',
+    description: 'settings.keybinds.actions.toggle_bottom_panel',
+    defaultCombo: ['ctrl', 'KeyJ'],
     section: 'panels',
   },
   {

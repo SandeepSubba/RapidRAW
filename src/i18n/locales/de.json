@@ -519,6 +519,9 @@
       "exporting": "Exportieren…",
       "savesTo": "Externe Bearbeitung — speichert in"
     },
+    "layout": {
+      "split": "Teilen"
+    },
     "masks": {
       "actions": {
         "addNewComponent": "Neue Komponente hinzufügen",
@@ -597,6 +600,7 @@
         "select": "Auswählen",
         "selectPresetTooltip": "Eine Vorgabe zum Anwenden auswählen"
       },
+      "toggleAnalyticsInAdjustments": "Analyseanzeige im Anpassungen-Panel umschalten",
       "toggleAnalyticsTooltip": "Analyseanzeige umschalten",
       "tooltips": {
         "addToCurrent": "{{name}} zur aktuellen Maske hinzufügen oder neu erstellen (Rechtsklick)",
@@ -913,6 +917,7 @@
         "modified": "Änderungsdatum",
         "name": "Alphabetisch"
       },
+      "sourcesTitle": "Quellen",
       "tooltips": {
         "clearSearch": "Suche löschen",
         "collapse": "Zuklappen",
@@ -1496,6 +1501,7 @@
         "color_label_yellow": "Farbmarkierung: Gelb",
         "copy_adjustments": "Ausgewählte Anpassungen kopieren",
         "copy_files": "Ausgewählte Datei(en) kopieren",
+        "copy_image_path": "Pfad des/der ausgewählten Bilder kopieren",
         "cycle_zoom": "Zoom durchwechseln (Einpassen, 2x Einpassen, 100%)",
         "delete_selected": "Ausgewählte Datei(en) löschen",
         "focus_search": "Suchfeld fokussieren",
@@ -1519,14 +1525,18 @@
         "toggle_adjustments": "Anpassungen-Panel ein-/ausblenden",
         "toggle_ai": "KI-Panel ein-/ausblenden",
         "toggle_analytics": "Analyseanzeige ein-/ausblenden",
+        "toggle_bottom_panel": "Filmstreifen ein-/ausblenden",
         "toggle_crop": "Zuschnitt / Gerade ausrichten umschalten",
         "toggle_crop_panel": "Zuschneiden-Panel ein-/ausblenden",
         "toggle_export": "Exportieren-Panel ein-/ausblenden",
+        "toggle_folder_tree": "Ordnerstruktur-Panel ein-/ausblenden",
         "toggle_fullscreen": "Vollbild umschalten",
+        "toggle_left_panel": "Linkes Panel ein-/ausblenden",
         "toggle_library_exif": "EXIF-Überlagerung ein-/ausblenden",
         "toggle_masks": "Maskieren-Panel ein-/ausblenden",
         "toggle_metadata": "Metadaten-Panel ein-/ausblenden",
         "toggle_presets": "Vorgaben-Panel ein-/ausblenden",
+        "toggle_right_panel": "Rechtes Panel ein-/ausblenden",
         "undo": "Bearbeitung rückgängig machen",
         "zoom_100": "Auf 100% zoomen",
         "zoom_fit": "Auf Fenstergröße einpassen",
@@ -1757,10 +1767,14 @@
       "imagesSelected": "{{current}} von {{total}} Bildern ausgewählt",
       "tooltips": {
         "collapseFilmstrip": "Filmstreifen minimieren",
+        "collapseLeft": "Linkes Panel einklappen",
+        "collapseRight": "Rechtes Panel einklappen",
         "copyPasteSettings": "Einstellungen kopieren & einfügen",
         "copySettings": "Einstellungen kopieren",
         "customZoom": "Klicken, um benutzerdefinierten Zoom-Prozentsatz einzugeben",
         "expandFilmstrip": "Filmstreifen erweitern",
+        "expandLeft": "Linkes Panel ausklappen",
+        "expandRight": "Rechtes Panel ausklappen",
         "export": "Exportieren",
         "pasteSettings": "Einstellungen einfügen",
         "quickFilter": "Schnellfilter",

@@ -559,6 +559,9 @@
       "exporting": "Eksportowanie…",
       "savesTo": "Zewnętrzna edycja — zapisuje do"
     },
+    "layout": {
+      "split": "Podziel"
+    },
     "masks": {
       "actions": {
         "addNewComponent": "Dodaj nowy komponent",
@@ -639,6 +642,7 @@
         "select": "Wybierz",
         "selectPresetTooltip": "Wybierz preset do zastosowania"
       },
+      "toggleAnalyticsInAdjustments": "Przełącz analizę w panelu Dopasowania",
       "toggleAnalyticsTooltip": "Przełącz widok analityki",
       "tooltips": {
         "addToCurrent": "Dodaj {{name}} do bieżącej maski lub utwórz nową (Prawy przycisk)",
@@ -959,6 +963,7 @@
         "modified": "Data modyfikacji",
         "name": "Alfabetycznie"
       },
+      "sourcesTitle": "Źródła",
       "tooltips": {
         "clearSearch": "Wyczyść wyszukiwanie",
         "collapse": "Zwiń",
@@ -1562,6 +1567,7 @@
         "color_label_yellow": "Etykieta koloru: Żółty",
         "copy_adjustments": "Kopiuj wybrane ustawienia",
         "copy_files": "Skopiuj wybrane pliki",
+        "copy_image_path": "Kopiuj ścieżkę wybranych zdjęć",
         "cycle_zoom": "Przełącz przybliżenie (Dopasuj, 2x Dopasuj, 100%)",
         "delete_selected": "Usuń wybrane pliki",
         "focus_search": "Przejdź do pola wyszukiwania",
@@ -1585,14 +1591,18 @@
         "toggle_adjustments": "Przełącz panel Ustawienia",
         "toggle_ai": "Przełącz panel AI",
         "toggle_analytics": "Przełącz wyświetlanie analityki",
+        "toggle_bottom_panel": "Przełącz pasek z klatkami",
         "toggle_crop": "Przełącz Kadrowanie / Prostowanie",
         "toggle_crop_panel": "Przełącz panel Kadrowanie",
         "toggle_export": "Przełącz panel Eksport",
+        "toggle_folder_tree": "Przełącz panel drzewa folderów",
         "toggle_fullscreen": "Przełącz tryb pełnoekranowy",
+        "toggle_left_panel": "Przełącz lewy panel",
         "toggle_library_exif": "Przełącz nakładkę EXIF",
         "toggle_masks": "Przełącz panel Maski",
         "toggle_metadata": "Przełącz panel Metadane",
         "toggle_presets": "Przełącz panel Presety",
+        "toggle_right_panel": "Przełącz prawy panel",
         "undo": "Cofnij korektę",
         "zoom_100": "Powiększ do 100%",
         "zoom_fit": "Dopasuj do ekranu",
@@ -1823,10 +1833,14 @@
       "imagesSelected": "Zaznaczono {{current}} z {{total}} obrazów",
       "tooltips": {
         "collapseFilmstrip": "Zwiń pasek z klatkami",
+        "collapseLeft": "Zwiń lewy panel",
+        "collapseRight": "Zwiń prawy panel",
         "copyPasteSettings": "Kopiuj i Wklej Ustawienia",
         "copySettings": "Kopiuj Ustawienia",
         "customZoom": "Kliknij, aby wpisać niestandardowy procent przybliżenia",
         "expandFilmstrip": "Rozwiń pasek z klatkami",
+        "expandLeft": "Rozwiń lewy panel",
+        "expandRight": "Rozwiń prawy panel",
         "export": "Eksport",
         "pasteSettings": "Wklej Ustawienia",
         "quickFilter": "Szybki filtr",

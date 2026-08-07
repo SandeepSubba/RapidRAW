@@ -517,6 +517,9 @@
       "exporting": "내보내는 중…",
       "savesTo": "외부 편집 — 저장 위치:"
     },
+    "layout": {
+      "split": "분할"
+    },
     "masks": {
       "actions": {
         "addNewComponent": "새 구성 요소 추가",
@@ -595,6 +598,7 @@
         "select": "선택",
         "selectPresetTooltip": "적용할 프리셋 선택"
       },
+      "toggleAnalyticsInAdjustments": "조정 패널에서 분석 토글",
       "toggleAnalyticsTooltip": "분석 표시 전환",
       "tooltips": {
         "addToCurrent": "{{name}}을(를) 현재 마스크에 추가하거나 새로 만들기 (우클릭)",
@@ -911,6 +915,7 @@
         "modified": "수정일",
         "name": "알파벳순"
       },
+      "sourcesTitle": "소스",
       "tooltips": {
         "clearSearch": "검색 지우기",
         "collapse": "접기",
@@ -1494,6 +1499,7 @@
         "color_label_yellow": "색상 레이블: 노랑",
         "copy_adjustments": "선택한 조정값 복사",
         "copy_files": "선택한 파일 복사",
+        "copy_image_path": "선택한 이미지의 경로 복사",
         "cycle_zoom": "확대/축소 순환 (맞춤, 2배 맞춤, 100%)",
         "delete_selected": "선택한 파일 삭제",
         "focus_search": "검색창에 포커스",
@@ -1517,14 +1523,18 @@
         "toggle_adjustments": "조정 패널 전환",
         "toggle_ai": "AI 패널 전환",
         "toggle_analytics": "분석 표시 전환",
+        "toggle_bottom_panel": "필름스트립 토글",
         "toggle_crop": "자르기 / 수평 맞추기 전환",
         "toggle_crop_panel": "자르기 패널 전환",
         "toggle_export": "내보내기 패널 전환",
+        "toggle_folder_tree": "폴더 트리 패널 토글",
         "toggle_fullscreen": "전체 화면 전환",
+        "toggle_left_panel": "왼쪽 패널 토글",
         "toggle_library_exif": "EXIF 오버레이 전환",
         "toggle_masks": "마스크 패널 전환",
         "toggle_metadata": "메타데이터 패널 전환",
         "toggle_presets": "프리셋 패널 전환",
+        "toggle_right_panel": "오른쪽 패널 토글",
         "undo": "조정 실행 취소",
         "zoom_100": "100%로 확대/축소",
         "zoom_fit": "맞춤으로 확대/축소",
@@ -1755,10 +1765,14 @@
       "imagesSelected": "이미지 {{total}}개 중 {{current}}개 선택됨",
       "tooltips": {
         "collapseFilmstrip": "필름스트립 접기",
+        "collapseLeft": "왼쪽 패널 접기",
+        "collapseRight": "오른쪽 패널 접기",
         "copyPasteSettings": "설정 복사 및 붙여넣기",
         "copySettings": "설정 복사",
         "customZoom": "클릭하여 사용자 지정 확대/축소 비율 입력",
         "expandFilmstrip": "필름스트립 펼치기",
+        "expandLeft": "왼쪽 패널 펼치기",
+        "expandRight": "오른쪽 패널 펼치기",
         "export": "내보내기",
         "pasteSettings": "설정 붙여넣기",
         "quickFilter": "빠른 필터",
