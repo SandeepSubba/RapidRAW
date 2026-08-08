@@ -726,6 +726,12 @@ export const useKeyboardShortcuts = ({
               multiSelectedPaths: [nextImage.path],
               selectionAnchorPath: nextImage.path,
             });
+            // Actually load the frame: panels (Metadata, histogram) read the editor
+            // store's selectedImage, so moving the library focus alone leaves them
+            // showing the previous image. Not done for shift/ctrl — those are
+            // selection-building gestures, and handleImageSelect resets the
+            // range anchor.
+            handleImageSelect(nextImage.path, false);
           }
         },
       },
