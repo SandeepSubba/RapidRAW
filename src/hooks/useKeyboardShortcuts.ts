@@ -793,8 +793,10 @@ export const useKeyboardShortcuts = ({
 
       // This key starts a chord: suppress its own single action while held (its
       // tap action fires on release instead). Only arm when a chord here could
-      // actually fire, so non-editor single keys stay instant.
-      const table = leaderChords.get(event.code);
+      // actually fire, so non-editor single keys stay instant. A modifier means
+      // it's a combo, not a leader hold — otherwise binding a chord on KeyC
+      // would swallow ⌘C/Ctrl+C before the combo lookup ever runs.
+      const table = event.ctrlKey || event.metaKey || event.altKey ? null : leaderChords.get(event.code);
       if (table && [...table.values()].some((a) => !actions[a]?.shouldFire || actions[a].shouldFire(state))) {
         if (!heldLeaders.has(event.code)) heldLeaders.set(event.code, { used: false, event });
         return;
