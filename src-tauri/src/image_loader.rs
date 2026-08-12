@@ -871,6 +871,19 @@ pub async fn load_image(
             ));
         }
 
+        // Serialise decodes: one in-flight full-res decode at a time, so a burst
+        // of navigation can't stack up hundreds of MB per queued image.
+        let _decode_permit = state
+            .decode_permit
+            .acquire()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        // Superseded while queueing? Drop out before touching the file.
+        if state.load_image_generation.load(Ordering::SeqCst) != my_generation {
+            return Err("Load cancelled".to_string());
+        }
+
         let (pristine_img, exif_data_loaded, is_fallback) =
                 tokio::task::spawn_blocking(move || {
                     if generation_tracker.load(Ordering::SeqCst) != my_generation {
