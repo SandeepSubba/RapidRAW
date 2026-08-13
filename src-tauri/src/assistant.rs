@@ -10,6 +10,8 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::io::Write as _;
+use std::process::{Command, Stdio};
 use tauri::AppHandle;
 
 use crate::app_settings;
@@ -91,6 +93,7 @@ fn default_endpoint(provider: &str) -> &'static str {
     match provider {
         "openai" => "https://api.openai.com/v1",
         "anthropic" => "https://api.anthropic.com/v1",
+        "claudecode" => "claude", // path to the Claude Code CLI binary (on PATH)
         _ => "http://localhost:1234/v1", // lmstudio
     }
 }
@@ -99,6 +102,7 @@ fn default_model(provider: &str) -> &'static str {
     match provider {
         "openai" => "gpt-4o-mini",
         "anthropic" => "claude-opus-5",
+        "claudecode" => "claude-sonnet-5",
         _ => "local-model", // lmstudio uses whatever model is loaded
     }
 }
@@ -420,6 +424,136 @@ fn apply_edits_tool() -> Value {
     })
 }
 
+// Flatten a conversation (plus any image file references) into a single prompt
+// for the Claude Code CLI, which we drive over stdin.
+fn build_cli_prompt(messages: &[ChatMessage], image_files: &[String]) -> String {
+    let mut s = String::new();
+    for m in messages {
+        let role = if normalize_role(&m.role) == "assistant" { "Assistant" } else { "User" };
+        s.push_str(role);
+        s.push_str(": ");
+        s.push_str(&m.content);
+        s.push_str("\n\n");
+    }
+    if !image_files.is_empty() {
+        s.push_str("Read the following image file(s) in the current directory and base your answer on what you actually see in them:\n");
+        for f in image_files {
+            s.push_str("- ");
+            s.push_str(f);
+            s.push('\n');
+        }
+        s.push('\n');
+    }
+    s.push_str("Respond now as the RapidRAW assistant with the single required JSON object and nothing else.");
+    s
+}
+
+// Use the user's logged-in Claude Code CLI (subscription auth) instead of an API
+// key. We write any attached images to a temp dir, run `claude -p` there (so it
+// won't pick up a project CLAUDE.md), let it Read the images, and take the JSON
+// out of the CLI's result envelope.
+async fn call_claude_code(
+    binary: &str,
+    model: &str,
+    system: &str,
+    messages: &[ChatMessage],
+    images: &[ImageAttachment],
+) -> Result<String, String> {
+    let binary = binary.trim().to_string();
+    let binary = if binary.is_empty() { "claude".to_string() } else { binary };
+    let model = model.to_string();
+    let system = system.to_string();
+    let messages: Vec<ChatMessage> = messages
+        .iter()
+        .map(|m| ChatMessage { role: m.role.clone(), content: m.content.clone() })
+        .collect();
+    let images = images.to_vec();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        use base64::Engine as _;
+
+        // Unique temp working dir; also the CWD so no project CLAUDE.md is loaded.
+        let dir = std::env::temp_dir().join(format!(
+            "rapidraw-cc-{}-{}",
+            std::process::id(),
+            messages.len()
+        ));
+        std::fs::create_dir_all(&dir).map_err(|e| format!("Couldn't create temp dir: {}", e))?;
+
+        let mut image_files = Vec::new();
+        for (i, img) in images.iter().enumerate() {
+            let ext = if img.media_type.contains("png") { "png" } else { "jpg" };
+            let fname = format!("image_{}.{}", i, ext);
+            if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(&img.data) {
+                if std::fs::write(dir.join(&fname), &bytes).is_ok() {
+                    image_files.push(fname);
+                }
+            }
+        }
+
+        let prompt = build_cli_prompt(&messages, &image_files);
+
+        let mut cmd = Command::new(&binary);
+        cmd.current_dir(&dir)
+            .arg("-p")
+            .arg("--output-format")
+            .arg("json")
+            .arg("--model")
+            .arg(&model)
+            .arg("--append-system-prompt")
+            .arg(&system)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        // Only the Read tool is ever needed (to look at the images); nothing can
+        // write, run bash, or edit.
+        if !image_files.is_empty() {
+            cmd.arg("--allowedTools").arg("Read");
+        }
+
+        let mut child = cmd.spawn().map_err(|e| {
+            format!(
+                "Couldn't launch Claude Code ('{}'): {}. Make sure Claude Code is installed and logged in, or set the binary path in Settings.",
+                binary, e
+            )
+        })?;
+
+        if let Some(mut stdin) = child.stdin.take() {
+            let _ = stdin.write_all(prompt.as_bytes());
+            // stdin dropped here → closed, so the CLI stops waiting for input.
+        }
+
+        let output = child
+            .wait_with_output()
+            .map_err(|e| format!("Claude Code failed: {}", e))?;
+        let _ = std::fs::remove_dir_all(&dir);
+
+        if !output.status.success() {
+            let err = String::from_utf8_lossy(&output.stderr);
+            let out = String::from_utf8_lossy(&output.stdout);
+            let detail = if !err.trim().is_empty() { err } else { out };
+            return Err(format!("Claude Code error: {}", truncate(detail.trim(), 400)));
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let v: Value = serde_json::from_str(stdout.trim())
+            .map_err(|e| format!("Unexpected Claude Code output: {} — {}", e, truncate(&stdout, 300)))?;
+        if v["is_error"].as_bool().unwrap_or(false) {
+            let msg = v["result"]
+                .as_str()
+                .or_else(|| v["api_error_status"].as_str())
+                .unwrap_or("unknown error");
+            return Err(format!("Claude Code: {}", msg));
+        }
+        v["result"]
+            .as_str()
+            .map(|s| s.to_string())
+            .ok_or_else(|| "Claude Code returned no result".to_string())
+    })
+    .await
+    .map_err(|e| format!("Task failed: {}", e))?
+}
+
 struct ResolvedConfig {
     provider: String,
     endpoint: String,
@@ -454,6 +588,15 @@ fn resolve_config(app_handle: &AppHandle) -> Result<ResolvedConfig, String> {
 }
 
 async fn fetch_models(provider: &str, endpoint: &str, api_key: &str) -> Result<Vec<String>, String> {
+    // Claude Code has no /models endpoint; offer the current Claude models.
+    if provider == "claudecode" {
+        return Ok(vec![
+            "claude-opus-5".to_string(),
+            "claude-sonnet-5".to_string(),
+            "claude-haiku-4-5".to_string(),
+            "claude-opus-4-8".to_string(),
+        ]);
+    }
     let url = models_url(endpoint);
     let client = reqwest::Client::new();
     let mut req = client.get(&url);
@@ -498,6 +641,25 @@ pub async fn assistant_list_models(app_handle: AppHandle) -> Result<Vec<String>,
 #[tauri::command]
 pub async fn assistant_test_connection(app_handle: AppHandle) -> Result<String, String> {
     let cfg = resolve_config(&app_handle)?;
+
+    // For Claude Code, actually run the CLI once so we confirm it's installed and
+    // logged in (fetch_models is just a static list for it).
+    if cfg.provider == "claudecode" {
+        let ping = vec![ChatMessage {
+            role: "user".to_string(),
+            content: "ping".to_string(),
+        }];
+        call_claude_code(
+            &cfg.endpoint,
+            &cfg.model,
+            "Reply with ONLY {\"reply\":\"ok\"}",
+            &ping,
+            &[],
+        )
+        .await?;
+        return Ok("Connected to Claude Code (using your Claude subscription)".to_string());
+    }
+
     let models = fetch_models(&cfg.provider, &cfg.endpoint, &cfg.api_key).await?;
     let label = match cfg.provider.as_str() {
         "openai" => "OpenAI",
@@ -537,6 +699,7 @@ pub async fn assistant_chat(
 
     let content = match cfg.provider.as_str() {
         "anthropic" => call_anthropic(&cfg.endpoint, &cfg.api_key, &model, &system, &messages, &images).await?,
+        "claudecode" => call_claude_code(&cfg.endpoint, &model, &system, &messages, &images).await?,
         "openai" => {
             call_openai_compatible(&cfg.endpoint, &cfg.api_key, &model, &system, &messages, &images, "OpenAI").await?
         }

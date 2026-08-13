@@ -246,7 +246,14 @@ export default function AssistantPanel() {
   const appSettings = useSettingsStore((s) => s.appSettings);
   const handleSettingsChange = useSettingsStore((s) => s.handleSettingsChange);
   const provider = appSettings?.assistantProvider || 'lmstudio';
-  const providerLabel = provider === 'openai' ? 'OpenAI' : provider === 'anthropic' ? 'Anthropic' : 'LM Studio';
+  const providerLabel =
+    provider === 'openai'
+      ? 'OpenAI'
+      : provider === 'anthropic'
+        ? 'Anthropic'
+        : provider === 'claudecode'
+          ? 'Claude Code'
+          : 'LM Studio';
   const selectedModel = appSettings?.assistantModel || '';
 
   const { setAdjustments } = useEditorActions();

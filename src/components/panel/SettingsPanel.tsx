@@ -1770,18 +1770,28 @@ export default function SettingsPanel({
                         options={[
                           { label: 'LM Studio (local)', value: 'lmstudio' },
                           { label: 'OpenAI', value: 'openai' },
-                          { label: 'Anthropic (Claude)', value: 'anthropic' },
+                          { label: 'Anthropic (Claude API key)', value: 'anthropic' },
+                          { label: 'Claude Code (your subscription)', value: 'claudecode' },
                         ]}
                         value={appSettings?.assistantProvider || 'lmstudio'}
                         triggerClassName="bg-bg-primary"
                       />
                     </SettingItem>
 
+                    {appSettings?.assistantProvider === 'claudecode' && (
+                      <Text variant={TextVariants.small} color={TextColors.secondary} className="-mt-2">
+                        {t(
+                          'settings.assistant.claudeCodeHint',
+                          'Uses the Claude Code CLI you’re already logged into — your Claude subscription pays, no API key needed. Requires Claude Code installed and signed in (the same one you use in VS Code).',
+                        )}
+                      </Text>
+                    )}
+
                     <SettingItem
                       label={t('settings.assistant.endpoint', 'Endpoint URL')}
                       description={t(
                         'settings.assistant.endpointDesc',
-                        'Optional. Leave blank for the provider default (LM Studio: http://localhost:1234/v1).',
+                        'Optional. Leave blank for the provider default. For Claude Code, this is the CLI path (default: claude).',
                       )}
                     >
                       <Input
