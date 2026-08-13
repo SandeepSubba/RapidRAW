@@ -37,6 +37,7 @@ pub struct AssistantResponse {
     pub tags: Option<Value>,
     pub rating: Option<Value>,
     pub color_label: Option<Value>,
+    pub filename: Option<Value>,
     pub provider: String,
     pub model: String,
 }
@@ -70,13 +71,14 @@ You may also organize the image:
 - tags: {"add": ["keyword", ...], "remove": ["keyword", ...]} — keyword/tag labels to add or remove
 - rating: an integer 0-5 (star rating; 0 clears it)
 - colorLabel: one of "red", "yellow", "green", "blue", "purple", or "none" (to clear)
+- filename: a new file name for the image, WITHOUT the extension (the extension is kept automatically). This renames the actual file on disk. Use only characters valid in a filename.
 
-You have permission to edit ALL of the above. Whatever the user asks to store (a code, a note, keywords), pick the field they name; if they don't name one, choose the most fitting field (e.g. keywords -> tags, a title/code -> title).
+You have permission to edit ALL of the above, including renaming the file. Whatever the user asks to store (a code, a note, keywords), pick the field they name; if they don't name one, choose the most fitting field (e.g. keywords -> tags, a title/code -> title, "rename the file to X" -> filename).
 
 Rules:
 - ALWAYS respond with a single JSON object and NOTHING else, no markdown, no code fences:
-  {"reply": "<short friendly message>", "adjustments": {<only fields you change>}, "metadata": {<only text fields you change>}, "tags": {"add": [...], "remove": [...]}, "rating": <0-5>, "colorLabel": "<color>"}
-- Set any field you are NOT changing to null (adjustments, metadata, tags, rating, colorLabel).
+  {"reply": "<short friendly message>", "adjustments": {<only fields you change>}, "metadata": {<only text fields you change>}, "tags": {"add": [...], "remove": [...]}, "rating": <0-5>, "colorLabel": "<color>", "filename": "<new name without extension>"}
+- Set any field you are NOT changing to null (adjustments, metadata, tags, rating, colorLabel, filename).
 - Use exactly the lowercase keys listed above (e.g. "title", not "Title").
 - Only include fields you actually want to change; use absolute values within the ranges above.
 - Take the current adjustments and current metadata (provided below) into account so your changes are sensible.
@@ -155,6 +157,7 @@ struct Parsed {
     tags: Option<Value>,
     rating: Option<Value>,
     color_label: Option<Value>,
+    filename: Option<Value>,
 }
 
 fn extract(v: &Value, original: &str) -> Parsed {
@@ -176,6 +179,11 @@ fn extract(v: &Value, original: &str) -> Parsed {
             .or_else(|| v.get("color"))
             .cloned()
             .filter(|c| c.is_string()),
+        filename: v
+            .get("filename")
+            .or_else(|| v.get("fileName"))
+            .cloned()
+            .filter(|f| f.is_string()),
     }
 }
 
@@ -477,6 +485,7 @@ pub async fn assistant_chat(
         tags: parsed.tags,
         rating: parsed.rating,
         color_label: parsed.color_label,
+        filename: parsed.filename,
         provider: cfg.provider,
         model,
     })

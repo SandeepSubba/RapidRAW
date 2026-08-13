@@ -4,6 +4,7 @@ import { toast } from 'react-toastify';
 import { useLibraryStore } from '../store/useLibraryStore';
 import { useEditorStore } from '../store/useEditorStore';
 import { useUIStore } from '../store/useUIStore';
+import { useProcessStore } from '../store/useProcessStore';
 import { Invokes, ImageFile, AlbumItem, Album, AlbumGroup } from '../components/ui/AppProperties';
 import { globalImageCache } from '../utils/ImageLRUCache';
 import { useSettingsStore } from '../store/useSettingsStore';
@@ -152,6 +153,67 @@ export function useLibraryActions(handleImageSelect?: (path: string, openInEdito
       });
     } catch (err) {
       toast.error(`Failed to update metadata: ${err}`);
+    }
+  }, []);
+
+  // Rename a single image's file on disk to `newName` (no extension — it's kept),
+  // then reflect the new path across the path-keyed stores in place so the grid,
+  // filmstrip, selection, and open editor all follow without a full folder reload.
+  const handleRenameToName = useCallback(async (path: string, newName: string): Promise<string | null> => {
+    const cleanName = (newName || '')
+      .trim()
+      .replace(/\.[^.]*$/, '') // drop any extension the model included
+      .replace(/[\\/:*?"<>|]/g, '') // strip characters illegal in filenames
+      .trim();
+    if (!cleanName) {
+      toast.error('The assistant proposed an invalid file name.');
+      return null;
+    }
+    const physicalPath = path.split('?vc=')[0];
+    try {
+      const newPaths: Array<string> = await invoke(Invokes.RenameFiles, {
+        nameTemplate: cleanName,
+        paths: [physicalPath],
+      });
+      const newPath = newPaths?.[0];
+      if (!newPath || newPath === physicalPath) return newPath || null;
+
+      const matches = (p: string | null | undefined) => !!p && p.split('?vc=')[0] === physicalPath;
+      const remap = (p: string) => (matches(p) ? newPath : p);
+
+      const { setLibrary } = useLibraryStore.getState();
+      setLibrary((state) => {
+        const imageRatings = { ...state.imageRatings };
+        if (imageRatings[physicalPath] !== undefined) {
+          imageRatings[newPath] = imageRatings[physicalPath];
+          delete imageRatings[physicalPath];
+        }
+        return {
+          imageList: state.imageList.map((img) => (matches(img.path) ? { ...img, path: newPath } : img)),
+          imageRatings,
+          libraryActivePath: matches(state.libraryActivePath) ? newPath : state.libraryActivePath,
+          multiSelectedPaths: state.multiSelectedPaths.map(remap),
+          selectionAnchorPath: matches(state.selectionAnchorPath) ? newPath : state.selectionAnchorPath,
+        };
+      });
+
+      const { selectedImage, setEditor } = useEditorStore.getState();
+      if (matches(selectedImage?.path)) {
+        setEditor({ selectedImage: { ...selectedImage!, path: newPath } });
+      }
+
+      // Carry over the cached thumbnail and edit-state so nothing flashes blank.
+      const { thumbnails, setProcess } = useProcessStore.getState();
+      if (thumbnails[physicalPath]) {
+        setProcess({ thumbnails: { ...thumbnails, [newPath]: thumbnails[physicalPath] } });
+      }
+      const cached = globalImageCache.get(physicalPath);
+      if (cached) globalImageCache.set(newPath, cached);
+
+      return newPath;
+    } catch (err) {
+      toast.error(`Failed to rename file: ${err}`);
+      return null;
     }
   }, []);
 
@@ -454,6 +516,7 @@ export function useLibraryActions(handleImageSelect?: (path: string, openInEdito
     handleSetColorLabel,
     handleTagsChanged,
     handleUpdateExif,
+    handleRenameToName,
     handleClearSelection,
     handleLibraryImageSingleClick,
     handleImageClick,

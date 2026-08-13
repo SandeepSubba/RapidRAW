@@ -236,7 +236,8 @@ export default function AssistantPanel() {
   const selectedModel = appSettings?.assistantModel || '';
 
   const { setAdjustments } = useEditorActions();
-  const { handleUpdateExif, handleRate, handleSetColorLabel, handleTagsChanged } = useLibraryActions();
+  const { handleUpdateExif, handleRate, handleSetColorLabel, handleTagsChanged, handleRenameToName } =
+    useLibraryActions();
   const selectedImage = useEditorStore((s) => s.selectedImage);
 
   useEffect(() => {
@@ -395,6 +396,14 @@ export default function AssistantPanel() {
             orgParts.push(`label ${c}`);
           }
         }
+
+        if (typeof response?.filename === 'string' && response.filename.trim()) {
+          const newPath = await handleRenameToName(path, response.filename);
+          if (newPath) {
+            const newName = newPath.split(/[\\/]/).pop() || response.filename;
+            orgParts.push(`renamed to ${newName}`);
+          }
+        }
       }
       const appliedOrganization = orgParts.length ? orgParts.join(' · ') : null;
 
@@ -435,6 +444,7 @@ export default function AssistantPanel() {
     handleRate,
     handleSetColorLabel,
     handleTagsChanged,
+    handleRenameToName,
     selectedModel,
     t,
   ]);
