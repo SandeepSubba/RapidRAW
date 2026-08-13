@@ -84,6 +84,7 @@ Rules:
 - Take the current adjustments and current metadata (provided below) into account so your changes are sensible.
 - If an image is attached, look at it and base your edits on what you see.
 - When the user asks you to read/OCR text from the image and store it (e.g. "read the code on the label and write it to the title", or "put it on the tags"), extract the exact text, apply any requested transformation, and put the result in the field they named.
+- CRITICAL: Describing a change in "reply" does NOTHING. A change is applied ONLY if you put it in its structured field (metadata, tags, rating, colorLabel, filename, adjustments). Never say you changed something without also filling the matching field in the SAME response. If the user says "do the same" or refers to an earlier workflow, re-emit all the fields now.
 - Keep "reply" concise and say what you changed."#;
 
 fn default_endpoint(provider: &str) -> &'static str {
@@ -307,11 +308,15 @@ async fn call_anthropic(
             json!({ "role": role, "content": anthropic_content(&m.content, images, attach) })
         })
         .collect();
+    // Force a structured tool call so the model can't just narrate ("I set the
+    // title…") without emitting the fields we actually apply.
     let body = json!({
         "model": model,
         "max_tokens": 1024,
         "system": system,
         "messages": msgs,
+        "tools": [apply_edits_tool()],
+        "tool_choice": { "type": "tool", "name": "apply_edits" },
     });
 
     let client = reqwest::Client::new();
@@ -330,9 +335,20 @@ async fn call_anthropic(
         return Err(format!("Anthropic error {}: {}", status, truncate(&text, 500)));
     }
     let v: Value = serde_json::from_str(&text).map_err(|e| format!("Bad JSON from Anthropic: {}", e))?;
-    // Concatenate every text block. Newer models can emit a non-text block first
-    // (e.g. a thinking block), so we must not assume content[0] is the answer.
     if let Some(blocks) = v["content"].as_array() {
+        // Preferred path: the forced tool call carries the structured fields in its
+        // `input`. Serialize it back to JSON so the shared parser can read it.
+        if let Some(input) = blocks
+            .iter()
+            .find(|b| b["type"] == "tool_use" && b["name"] == "apply_edits")
+            .map(|b| &b["input"])
+        {
+            if let Ok(s) = serde_json::to_string(input) {
+                return Ok(s);
+            }
+        }
+        // Fallback: concatenate any text blocks (newer models can emit a non-text
+        // block first, so we don't assume content[0] is the answer).
         let joined: String = blocks
             .iter()
             .filter(|b| b["type"] == "text")
@@ -343,13 +359,51 @@ async fn call_anthropic(
             return Ok(joined);
         }
     }
-    // No text came back — surface why (stop_reason + a snippet) instead of a bare message.
+    // No content came back — surface why (stop_reason + a snippet) instead of a bare message.
     let stop = v["stop_reason"].as_str().unwrap_or("unknown");
     Err(format!(
-        "Anthropic returned no text content (stop_reason: {}). Response: {}",
+        "Anthropic returned no content (stop_reason: {}). Response: {}",
         stop,
         truncate(&text, 400)
     ))
+}
+
+// The schema the model is forced to fill. Optional fields are simply omitted when
+// there's no change; `extract()` treats a missing field as "no change".
+fn apply_edits_tool() -> Value {
+    json!({
+        "name": "apply_edits",
+        "description": "Reply to the user and apply any requested edits to the currently open image. Populate a field ONLY when you want to change it; describing a change in `reply` without filling its field does nothing.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "reply": { "type": "string", "description": "Short, friendly message to show the user." },
+                "adjustments": { "type": "object", "description": "Develop-slider changes, absolute values (e.g. {\"exposure\": 0.3, \"contrast\": 10})." },
+                "metadata": {
+                    "type": "object",
+                    "description": "Text metadata to write.",
+                    "properties": {
+                        "title": { "type": "string" },
+                        "author": { "type": "string" },
+                        "copyright": { "type": "string" },
+                        "comments": { "type": "string" }
+                    }
+                },
+                "tags": {
+                    "type": "object",
+                    "description": "Keyword tags to add/remove.",
+                    "properties": {
+                        "add": { "type": "array", "items": { "type": "string" } },
+                        "remove": { "type": "array", "items": { "type": "string" } }
+                    }
+                },
+                "rating": { "type": "integer", "minimum": 0, "maximum": 5, "description": "Star rating; 0 clears." },
+                "colorLabel": { "type": "string", "enum": ["red", "yellow", "green", "blue", "purple", "none"] },
+                "filename": { "type": "string", "description": "New file name WITHOUT extension (renames the file on disk)." }
+            },
+            "required": ["reply"]
+        }
+    })
 }
 
 struct ResolvedConfig {
