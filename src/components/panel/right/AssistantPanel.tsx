@@ -17,6 +17,7 @@ import {
   Pencil,
   Check,
   Layers,
+  Square,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'react-toastify';
@@ -202,6 +203,9 @@ export default function AssistantPanel() {
   const [modelsError, setModelsError] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Set by the Stop button; checked between batch images and before applying a
+  // single response so an in-flight run can be abandoned.
+  const cancelRef = useRef(false);
 
   const conversations = useAssistantStore((s) => s.conversations);
   const activeId = useAssistantStore((s) => s.activeId);
@@ -357,6 +361,7 @@ export default function AssistantPanel() {
   const send = useCallback(async () => {
     const text = input.trim();
     if ((!text && attachments.length === 0) || isLoading) return;
+    cancelRef.current = false;
 
     const { selectedImage: currentImage, adjustments, finalPreviewUrl, uncroppedAdjustedPreviewUrl } =
       useEditorStore.getState();
@@ -405,6 +410,7 @@ export default function AssistantPanel() {
 
         let done = 0;
         for (const path of paths) {
+          if (cancelRef.current) break;
           const name = (path.split(/[\\/]/).pop() || path).split('?vc=')[0];
           try {
             const prepared: any = await invoke(Invokes.AssistantPrepareImage, { path, maxDim: 2000 });
@@ -415,6 +421,7 @@ export default function AssistantPanel() {
               images: [{ mediaType: prepared.mediaType, data: prepared.data }],
               model: selectedModel || null,
             });
+            if (cancelRef.current) break;
             const { metaPatch, org } = await applyMetaOrg(response, path);
             done += 1;
             addMessage({
@@ -433,7 +440,20 @@ export default function AssistantPanel() {
             });
           }
         }
-        toast.success(t('editor.assistant.batchDoneToast', 'Processed {{done}}/{{total}} images', { done, total: paths.length }));
+        if (cancelRef.current) {
+          addMessage({
+            id: nextMessageId(),
+            role: 'assistant',
+            content: t('editor.assistant.stopped', 'Stopped — processed {{done}} of {{total}}.', {
+              done,
+              total: paths.length,
+            }),
+          });
+        } else {
+          toast.success(
+            t('editor.assistant.batchDoneToast', 'Processed {{done}}/{{total}} images', { done, total: paths.length }),
+          );
+        }
         return;
       }
 
@@ -449,6 +469,11 @@ export default function AssistantPanel() {
         images,
         model: selectedModel || null,
       });
+
+      if (cancelRef.current) {
+        addMessage({ id: nextMessageId(), role: 'assistant', content: t('editor.assistant.stoppedShort', 'Stopped.') });
+        return;
+      }
 
       const patch = currentImage ? sanitizePatch(response?.adjustments) : {};
       const hasPatch = Object.keys(patch).length > 0;
@@ -491,6 +516,10 @@ export default function AssistantPanel() {
       setLoading(false);
     }
   }, [input, attachments, isLoading, addMessage, setLoading, setAdjustments, applyMetaOrg, selectedModel, t]);
+
+  const stop = useCallback(() => {
+    cancelRef.current = true;
+  }, []);
 
   const handleKeyDown = (e: any) => {
     e.stopPropagation();
@@ -804,15 +833,26 @@ export default function AssistantPanel() {
             rows={2}
             className="grow resize-none rounded-lg bg-bg-primary border border-border-color px-3 py-2 text-sm text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent custom-scrollbar"
           />
-          <button
-            type="button"
-            onClick={send}
-            disabled={isLoading || (!input.trim() && attachments.length === 0)}
-            title={t('editor.assistant.send', 'Send')}
-            className="p-2.5 rounded-lg bg-accent text-button-text disabled:opacity-40 disabled:cursor-not-allowed hover:brightness-110 transition-all shrink-0"
-          >
-            {isLoading ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
-          </button>
+          {isLoading ? (
+            <button
+              type="button"
+              onClick={stop}
+              title={t('editor.assistant.stop', 'Stop')}
+              className="p-2.5 rounded-lg bg-surface text-text-primary border border-border-color hover:text-red-400 hover:border-red-400/50 transition-all shrink-0"
+            >
+              <Square size={16} className="fill-current" />
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={send}
+              disabled={!input.trim() && attachments.length === 0}
+              title={t('editor.assistant.send', 'Send')}
+              className="p-2.5 rounded-lg bg-accent text-button-text disabled:opacity-40 disabled:cursor-not-allowed hover:brightness-110 transition-all shrink-0"
+            >
+              <Send size={16} />
+            </button>
+          )}
         </div>
       </div>
     </div>
