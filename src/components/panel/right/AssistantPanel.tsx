@@ -1,6 +1,22 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Bot, Send, Trash2, Loader2, AlertTriangle, Sparkles, Paperclip, X, RefreshCw, Tag } from 'lucide-react';
+import {
+  Bot,
+  Send,
+  Trash2,
+  Loader2,
+  AlertTriangle,
+  Sparkles,
+  Paperclip,
+  X,
+  RefreshCw,
+  Tag,
+  MessageSquarePlus,
+  History,
+  MessageSquare,
+  Pencil,
+  Check,
+} from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'react-toastify';
 import clsx from 'clsx';
@@ -186,11 +202,32 @@ export default function AssistantPanel() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const messages = useAssistantStore((s) => s.messages);
+  const conversations = useAssistantStore((s) => s.conversations);
+  const activeId = useAssistantStore((s) => s.activeId);
   const isLoading = useAssistantStore((s) => s.isLoading);
   const addMessage = useAssistantStore((s) => s.addMessage);
   const setLoading = useAssistantStore((s) => s.setLoading);
-  const clear = useAssistantStore((s) => s.clear);
+  const newConversation = useAssistantStore((s) => s.newConversation);
+  const selectConversation = useAssistantStore((s) => s.selectConversation);
+  const renameConversation = useAssistantStore((s) => s.renameConversation);
+  const deleteConversation = useAssistantStore((s) => s.deleteConversation);
+  const clearActive = useAssistantStore((s) => s.clearActive);
+
+  const activeConversation = conversations.find((c) => c.id === activeId) || null;
+  const messages = activeConversation?.messages ?? [];
+
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+
+  const startRename = (c: { id: string; title: string }) => {
+    setRenamingId(c.id);
+    setRenameValue(c.title);
+  };
+  const commitRename = () => {
+    if (renamingId) renameConversation(renamingId, renameValue);
+    setRenamingId(null);
+  };
 
   const appSettings = useSettingsStore((s) => s.appSettings);
   const handleSettingsChange = useSettingsStore((s) => s.handleSettingsChange);
@@ -276,7 +313,9 @@ export default function AssistantPanel() {
     setAttachments([]);
     setLoading(true);
 
-    const history = [...useAssistantStore.getState().messages].map((m) => ({
+    const st = useAssistantStore.getState();
+    const activeMessages = st.conversations.find((c) => c.id === st.activeId)?.messages ?? [];
+    const history = activeMessages.map((m) => ({
       role: m.role,
       content: m.content,
     }));
@@ -416,17 +455,124 @@ export default function AssistantPanel() {
     <div className="flex flex-col h-full">
       <div className="p-3 flex justify-between items-center shrink-0 border-b border-surface gap-2">
         <Text variant={TextVariants.title}>{t('editor.assistant.title', 'Assistant')}</Text>
-        {messages.length > 0 && (
+        <div className="flex items-center gap-1">
           <button
             type="button"
-            onClick={clear}
-            title={t('editor.assistant.clear', 'Clear conversation')}
+            onClick={() => {
+              newConversation();
+              setHistoryOpen(false);
+            }}
+            title={t('editor.assistant.newChat', 'New chat')}
             className="p-1.5 rounded-md hover:bg-surface text-text-secondary hover:text-text-primary transition-colors"
           >
-            <Trash2 size={16} />
+            <MessageSquarePlus size={16} />
           </button>
-        )}
+          <button
+            type="button"
+            onClick={() => setHistoryOpen((v) => !v)}
+            title={t('editor.assistant.history', 'Chat history')}
+            className={clsx(
+              'p-1.5 rounded-md hover:bg-surface transition-colors',
+              historyOpen ? 'text-accent' : 'text-text-secondary hover:text-text-primary',
+            )}
+          >
+            <History size={16} />
+          </button>
+          {messages.length > 0 && (
+            <button
+              type="button"
+              onClick={clearActive}
+              title={t('editor.assistant.clear', 'Clear conversation')}
+              className="p-1.5 rounded-md hover:bg-surface text-text-secondary hover:text-text-primary transition-colors"
+            >
+              <Trash2 size={16} />
+            </button>
+          )}
+        </div>
       </div>
+
+      {historyOpen && (
+        <div className="shrink-0 border-b border-surface max-h-64 overflow-y-auto custom-scrollbar">
+          {conversations.length === 0 ? (
+            <div className="px-3 py-3">
+              <Text color={TextColors.secondary} className="text-xs">
+                {t('editor.assistant.noHistory', 'No conversations yet.')}
+              </Text>
+            </div>
+          ) : (
+            conversations.map((c) => (
+              <div
+                key={c.id}
+                onClick={() => {
+                  if (renamingId !== c.id) {
+                    selectConversation(c.id);
+                    setHistoryOpen(false);
+                  }
+                }}
+                className={clsx(
+                  'group flex items-center gap-2 px-3 py-2 cursor-pointer transition-colors',
+                  c.id === activeId ? 'bg-surface' : 'hover:bg-surface/60',
+                )}
+              >
+                {renamingId === c.id ? (
+                  <>
+                    <input
+                      autoFocus
+                      value={renameValue}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      onClick={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => {
+                        e.stopPropagation();
+                        if (e.key === 'Enter') commitRename();
+                        if (e.key === 'Escape') setRenamingId(null);
+                      }}
+                      className="grow min-w-0 rounded-sm bg-bg-primary border border-accent px-1.5 py-0.5 text-xs text-text-primary focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        commitRename();
+                      }}
+                      title={t('editor.assistant.saveName', 'Save')}
+                      className="p-1 rounded-sm text-text-secondary hover:text-accent shrink-0"
+                    >
+                      <Check size={13} />
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <MessageSquare size={13} className="shrink-0 text-text-secondary" />
+                    <span className="grow truncate text-xs text-text-primary">{c.title}</span>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        startRename(c);
+                      }}
+                      title={t('editor.assistant.rename', 'Rename')}
+                      className="p-1 rounded-sm text-text-secondary hover:text-text-primary shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <Pencil size={12} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        deleteConversation(c.id);
+                      }}
+                      title={t('editor.assistant.delete', 'Delete')}
+                      className="p-1 rounded-sm text-text-secondary hover:text-red-400 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </>
+                )}
+              </div>
+            ))
+          )}
+        </div>
+      )}
 
       {/* Model picker */}
       <div className="px-3 py-2 flex items-center gap-2 shrink-0 border-b border-surface">
