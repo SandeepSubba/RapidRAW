@@ -34,6 +34,7 @@ export enum Invokes {
   ApplyAdjustments = 'apply_adjustments',
   AssistantChat = 'assistant_chat',
   AssistantListModels = 'assistant_list_models',
+  AssistantPrepareImage = 'assistant_prepare_image',
   AssistantTestConnection = 'assistant_test_connection',
   ApplyAdjustmentsToPaths = 'apply_adjustments_to_paths',
   ApplyOrientationToPaths = 'apply_orientation_to_paths',

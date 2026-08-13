@@ -239,6 +239,11 @@ export default function AssistantPanel() {
   const { handleUpdateExif, handleRate, handleSetColorLabel, handleTagsChanged, handleRenameToName } =
     useLibraryActions();
   const selectedImage = useEditorStore((s) => s.selectedImage);
+  const multiSelectedPaths = useLibraryStore((s) => s.multiSelectedPaths);
+  const selectedCount = multiSelectedPaths.length;
+  // When several library images are selected, default to applying edits to all of
+  // them (each OCR'd individually), matching how the Metadata panel batches.
+  const [applyToSelected, setApplyToSelected] = useState(true);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -288,26 +293,90 @@ export default function AssistantPanel() {
     [addFiles],
   );
 
+  // Apply a model response's metadata + organization (tags/rating/color/rename)
+  // to one image path. Returns a summary so the chat can show what changed.
+  const applyMetaOrg = useCallback(
+    async (response: any, path: string): Promise<{ metaPatch: Record<string, string> | null; org: string | null }> => {
+      const metaPatch = sanitizeMetadata(response?.metadata);
+      const hasMeta = Object.keys(metaPatch).length > 0;
+      if (hasMeta) await handleUpdateExif([path], metaPatch);
+
+      const orgParts: Array<string> = [];
+
+      const { add, remove } = normalizeTags(response?.tags);
+      if (add.length || remove.length) {
+        const img = useLibraryStore.getState().imageList.find((i) => i.path === path);
+        let tagObjs = (img?.tags || [])
+          .filter((tg: string) => !tg.startsWith('color:'))
+          .map((tg: string) => ({ tag: tg.startsWith('user:') ? tg.slice(5) : tg, isUser: tg.startsWith('user:') }));
+        for (const tag of add) {
+          if (!tagObjs.some((o) => o.tag === tag)) {
+            await invoke(Invokes.AddTagForPaths, { paths: [path], tag: `user:${tag}` });
+            tagObjs.push({ tag, isUser: true });
+          }
+        }
+        for (const tag of remove) {
+          const existing = tagObjs.find((o) => o.tag === tag);
+          if (existing) {
+            await invoke(Invokes.RemoveTagForPaths, { paths: [path], tag: existing.isUser ? `user:${tag}` : tag });
+            tagObjs = tagObjs.filter((o) => o.tag !== tag);
+          }
+        }
+        handleTagsChanged([path], tagObjs);
+        if (add.length) orgParts.push(`tags +${add.join(', +')}`);
+        if (remove.length) orgParts.push(`tags -${remove.join(', -')}`);
+      }
+
+      if (typeof response?.rating === 'number') {
+        const r = Math.max(0, Math.min(5, Math.round(response.rating)));
+        handleRate(r, [path]);
+        orgParts.push(r === 0 ? 'rating cleared' : `rating ${r}★`);
+      }
+
+      if (typeof response?.colorLabel === 'string') {
+        const c = response.colorLabel.trim().toLowerCase();
+        if (c === 'none' || c === 'null' || c === '') {
+          handleSetColorLabel(null, [path]);
+          orgParts.push('label cleared');
+        } else if (VALID_COLORS.has(c)) {
+          const curTags = useLibraryStore.getState().imageList.find((i) => i.path === path)?.tags || [];
+          const curColor = curTags.find((tg: string) => tg.startsWith('color:'))?.slice(6) || null;
+          if (curColor !== c) handleSetColorLabel(c, [path]);
+          orgParts.push(`label ${c}`);
+        }
+      }
+
+      if (typeof response?.filename === 'string' && response.filename.trim()) {
+        const newPath = await handleRenameToName(path, response.filename);
+        if (newPath) orgParts.push(`renamed to ${newPath.split(/[\\/]/).pop() || response.filename}`);
+      }
+
+      return { metaPatch: hasMeta ? metaPatch : null, org: orgParts.length ? orgParts.join(' · ') : null };
+    },
+    [handleUpdateExif, handleRate, handleSetColorLabel, handleTagsChanged, handleRenameToName],
+  );
+
   const send = useCallback(async () => {
     const text = input.trim();
     if ((!text && attachments.length === 0) || isLoading) return;
 
     const { selectedImage: currentImage, adjustments, finalPreviewUrl, uncroppedAdjustedPreviewUrl } =
       useEditorStore.getState();
+    const { multiSelectedPaths: selectedPaths, imageList } = useLibraryStore.getState();
     const outgoing = [...attachments];
-    // With no manual attachment, let the assistant see the image open in the
-    // viewer so "what's in this photo", OCR, etc. work on the current image.
-    // Fall back through every preview URL we might have — the processed preview
-    // (best quality) can be null on some render paths, so drop to the uncropped
-    // preview and finally the thumbnail, whichever is actually populated.
+
+    // Batch mode: several library images selected and no manual attachment — OCR
+    // and apply to each of them individually.
+    const doBatch = applyToSelected && outgoing.length === 0 && selectedPaths.length > 1;
+
     const viewerUrl = finalPreviewUrl || uncroppedAdjustedPreviewUrl || currentImage?.thumbnailUrl || null;
-    const willAttachViewer = outgoing.length === 0 && !!currentImage && !!viewerUrl;
+    const willAttachViewer = !doBatch && outgoing.length === 0 && !!currentImage && !!viewerUrl;
 
     const userMessage: AssistantMessage = {
       id: nextMessageId(),
       role: 'user',
       content: text || t('editor.assistant.imageOnly', '(image)'),
-      imageCount: outgoing.length + (willAttachViewer ? 1 : 0),
+      imageCount: doBatch ? selectedPaths.length : outgoing.length + (willAttachViewer ? 1 : 0),
     };
     addMessage(userMessage);
     setInput('');
@@ -322,6 +391,53 @@ export default function AssistantPanel() {
     }));
 
     try {
+      if (doBatch) {
+        const paths = [...selectedPaths];
+        // Nudge the model to act on the attached image only, so it OCRs each
+        // image's own label instead of reusing values from earlier ones.
+        const batchHistory = history.map((m, i) =>
+          i === history.length - 1 && m.role === 'user'
+            ? {
+                ...m,
+                content: `${m.content}\n\nApply the workflow to the ATTACHED image only. Read/OCR its own label; do not reuse values from other images.`,
+              }
+            : m,
+        );
+
+        let done = 0;
+        for (const path of paths) {
+          const name = (path.split(/[\\/]/).pop() || path).split('?vc=')[0];
+          try {
+            const prepared: any = await invoke(Invokes.AssistantPrepareImage, { path, maxDim: 2000 });
+            const response: any = await invoke(Invokes.AssistantChat, {
+              messages: batchHistory,
+              adjustments: null,
+              currentMetadata: readCurrentMetadata(imageList.find((i) => i.path === path)?.exif || {}),
+              images: [{ mediaType: prepared.mediaType, data: prepared.data }],
+              model: selectedModel || null,
+            });
+            const { metaPatch, org } = await applyMetaOrg(response, path);
+            done += 1;
+            addMessage({
+              id: nextMessageId(),
+              role: 'assistant',
+              content: `${name}: ${response?.reply || 'done'}`,
+              appliedMetadata: metaPatch,
+              appliedOrganization: org,
+            });
+          } catch (err: any) {
+            addMessage({
+              id: nextMessageId(),
+              role: 'assistant',
+              content: `${name}: ${typeof err === 'string' ? err : err?.message || String(err)}`,
+              isError: true,
+            });
+          }
+        }
+        toast.success(t('editor.assistant.batchDoneToast', 'Processed {{done}}/{{total}} images', { done, total: paths.length }));
+        return;
+      }
+
       let images = outgoing.map((a) => ({ mediaType: a.mediaType, data: a.data }));
       if (willAttachViewer && viewerUrl) {
         const viewer = await blobUrlToImage(viewerUrl);
@@ -341,75 +457,17 @@ export default function AssistantPanel() {
         setAdjustments((prev: any) => ({ ...prev, ...patch }));
       }
 
-      const metaPatch = currentImage ? sanitizeMetadata(response?.metadata) : {};
-      const hasMeta = Object.keys(metaPatch).length > 0;
-      if (hasMeta && currentImage) {
-        await handleUpdateExif([currentImage.path], metaPatch);
-      }
-
-      // Organization edits: tags / rating / color label.
-      const orgParts: Array<string> = [];
+      let metaPatch: Record<string, string> | null = null;
+      let appliedOrganization: string | null = null;
       if (currentImage) {
-        const path = currentImage.path;
-
-        const { add, remove } = normalizeTags(response?.tags);
-        if (add.length || remove.length) {
-          const img = useLibraryStore.getState().imageList.find((i) => i.path === path);
-          let tagObjs = (img?.tags || [])
-            .filter((tg: string) => !tg.startsWith('color:'))
-            .map((tg: string) => ({ tag: tg.startsWith('user:') ? tg.slice(5) : tg, isUser: tg.startsWith('user:') }));
-          for (const tag of add) {
-            if (!tagObjs.some((o) => o.tag === tag)) {
-              await invoke(Invokes.AddTagForPaths, { paths: [path], tag: `user:${tag}` });
-              tagObjs.push({ tag, isUser: true });
-            }
-          }
-          for (const tag of remove) {
-            const existing = tagObjs.find((o) => o.tag === tag);
-            if (existing) {
-              await invoke(Invokes.RemoveTagForPaths, { paths: [path], tag: existing.isUser ? `user:${tag}` : tag });
-              tagObjs = tagObjs.filter((o) => o.tag !== tag);
-            }
-          }
-          handleTagsChanged([path], tagObjs);
-          if (add.length) orgParts.push(`tags +${add.join(', +')}`);
-          if (remove.length) orgParts.push(`tags -${remove.join(', -')}`);
-        }
-
-        if (typeof response?.rating === 'number') {
-          const r = Math.max(0, Math.min(5, Math.round(response.rating)));
-          handleRate(r, [path]);
-          orgParts.push(r === 0 ? 'rating cleared' : `rating ${r}★`);
-        }
-
-        if (typeof response?.colorLabel === 'string') {
-          const c = response.colorLabel.trim().toLowerCase();
-          if (c === 'none' || c === 'null' || c === '') {
-            handleSetColorLabel(null, [path]);
-            orgParts.push('label cleared');
-          } else if (VALID_COLORS.has(c)) {
-            // handleSetColorLabel toggles off if the image already has this color,
-            // so only call it when the color actually differs (the model means "set").
-            const curTags = useLibraryStore.getState().imageList.find((i) => i.path === path)?.tags || [];
-            const curColor = curTags.find((tg: string) => tg.startsWith('color:'))?.slice(6) || null;
-            if (curColor !== c) handleSetColorLabel(c, [path]);
-            orgParts.push(`label ${c}`);
-          }
-        }
-
-        if (typeof response?.filename === 'string' && response.filename.trim()) {
-          const newPath = await handleRenameToName(path, response.filename);
-          if (newPath) {
-            const newName = newPath.split(/[\\/]/).pop() || response.filename;
-            orgParts.push(`renamed to ${newName}`);
-          }
-        }
+        const res = await applyMetaOrg(response, currentImage.path);
+        metaPatch = res.metaPatch;
+        appliedOrganization = res.org;
       }
-      const appliedOrganization = orgParts.length ? orgParts.join(' · ') : null;
 
-      if (hasMeta || appliedOrganization) {
+      if (metaPatch || appliedOrganization) {
         const summary = [
-          ...Object.entries(metaPatch).map(([k, v]) => `${EXIF_TO_FRIENDLY[k] || k}: ${v || '(cleared)'}`),
+          ...Object.entries(metaPatch || {}).map(([k, v]) => `${EXIF_TO_FRIENDLY[k] || k}: ${v || '(cleared)'}`),
           ...(appliedOrganization ? [appliedOrganization] : []),
         ].join(' · ');
         toast.success(t('editor.assistant.appliedToast', 'Updated {{summary}}', { summary }));
@@ -420,7 +478,7 @@ export default function AssistantPanel() {
         role: 'assistant',
         content: response?.reply || t('editor.assistant.emptyReply', 'Done.'),
         appliedAdjustments: hasPatch ? patch : null,
-        appliedMetadata: hasMeta ? metaPatch : null,
+        appliedMetadata: metaPatch,
         appliedOrganization,
       });
     } catch (err: any) {
@@ -433,21 +491,7 @@ export default function AssistantPanel() {
     } finally {
       setLoading(false);
     }
-  }, [
-    input,
-    attachments,
-    isLoading,
-    addMessage,
-    setLoading,
-    setAdjustments,
-    handleUpdateExif,
-    handleRate,
-    handleSetColorLabel,
-    handleTagsChanged,
-    handleRenameToName,
-    selectedModel,
-    t,
-  ]);
+  }, [input, attachments, isLoading, applyToSelected, addMessage, setLoading, setAdjustments, applyMetaOrg, selectedModel, t]);
 
   const handleKeyDown = (e: any) => {
     e.stopPropagation();
@@ -697,7 +741,28 @@ export default function AssistantPanel() {
       </div>
 
       <div className="p-3 border-t border-surface shrink-0">
-        {!selectedImage && (
+        {selectedCount > 1 && attachments.length === 0 && (
+          <button
+            type="button"
+            onClick={() => setApplyToSelected((v) => !v)}
+            className="w-full flex items-center gap-2 mb-2 px-2 py-1.5 rounded-md bg-surface/60 hover:bg-surface transition-colors text-left"
+            title={t('editor.assistant.batchTooltip', 'Read and apply to each selected image individually')}
+          >
+            <span
+              className={clsx(
+                'w-4 h-4 rounded-sm border flex items-center justify-center shrink-0',
+                applyToSelected ? 'bg-accent border-accent text-button-text' : 'border-border-color',
+              )}
+            >
+              {applyToSelected && <Check size={12} />}
+            </span>
+            <Text color={TextColors.secondary} className="text-xs">
+              {t('editor.assistant.applyToSelected', 'Apply to all {{count}} selected images', { count: selectedCount })}
+            </Text>
+          </button>
+        )}
+
+        {!selectedImage && selectedCount <= 1 && (
           <Text color={TextColors.secondary} className="text-xs mb-2">
             {t('editor.assistant.noImage', 'Open an image to let the assistant apply edits.')}
           </Text>

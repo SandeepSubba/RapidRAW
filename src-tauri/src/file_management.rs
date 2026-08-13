@@ -1116,6 +1116,33 @@ fn generate_single_thumbnail_and_cache(
     None
 }
 
+/// Decode any supported image (RAW or not) at `path` to a base64 JPEG sized for
+/// the AI assistant to read (OCR/vision). Reuses the thumbnail decode/encode path
+/// but at a much larger dimension than grid thumbnails so small labels stay legible.
+#[tauri::command]
+pub async fn assistant_prepare_image(
+    path: String,
+    max_dim: Option<u32>,
+    app_handle: AppHandle,
+) -> Result<crate::assistant::ImageAttachment, String> {
+    use base64::Engine as _;
+    let max_dim = max_dim.unwrap_or(2000).clamp(256, 4000);
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app_handle.state::<AppState>();
+        let gpu_context = gpu_processing::get_or_init_gpu_context(&state, &app_handle).ok();
+        let image = generate_thumbnail_data(&path, gpu_context.as_ref(), None, &app_handle)
+            .map_err(|e| format!("Failed to decode image: {}", e))?;
+        let jpeg = encode_thumbnail(&image, max_dim).map_err(|e| format!("Failed to encode image: {}", e))?;
+        let data = base64::engine::general_purpose::STANDARD.encode(&jpeg);
+        Ok(crate::assistant::ImageAttachment {
+            media_type: "image/jpeg".to_string(),
+            data,
+        })
+    })
+    .await
+    .map_err(|e| format!("Task failed: {}", e))?
+}
+
 pub fn start_thumbnail_workers(app_handle: tauri::AppHandle) {
     let state = app_handle.state::<crate::AppState>();
     let manager = state.thumbnail_manager.clone();
