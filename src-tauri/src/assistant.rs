@@ -116,6 +116,20 @@ fn models_url(base: &str) -> String {
     format!("{}/models", base.trim().trim_end_matches('/'))
 }
 
+// Turn a provider's error response into a readable message. OpenAI and Anthropic
+// both nest a human message at error.message; fall back to the raw body.
+fn provider_error(label: &str, status: reqwest::StatusCode, body: &str) -> String {
+    if let Ok(v) = serde_json::from_str::<Value>(body) {
+        if let Some(msg) = v["error"]["message"]
+            .as_str()
+            .or_else(|| v["message"].as_str())
+        {
+            return format!("{}: {}", label, msg);
+        }
+    }
+    format!("{} error {}: {}", label, status, truncate(body, 400))
+}
+
 fn normalize_role(role: &str) -> &str {
     if role == "assistant" {
         "assistant"
@@ -277,7 +291,7 @@ async fn call_openai_compatible(
     let status = resp.status();
     let text = resp.text().await.map_err(|e| e.to_string())?;
     if !status.is_success() {
-        return Err(format!("{} error {}: {}", provider_label, status, truncate(&text, 500)));
+        return Err(provider_error(provider_label, status, &text));
     }
     let v: Value = serde_json::from_str(&text).map_err(|e| format!("Bad JSON from {}: {}", provider_label, e))?;
     v["choices"][0]["message"]["content"]
@@ -332,7 +346,7 @@ async fn call_anthropic(
     let status = resp.status();
     let text = resp.text().await.map_err(|e| e.to_string())?;
     if !status.is_success() {
-        return Err(format!("Anthropic error {}: {}", status, truncate(&text, 500)));
+        return Err(provider_error("Anthropic", status, &text));
     }
     let v: Value = serde_json::from_str(&text).map_err(|e| format!("Bad JSON from Anthropic: {}", e))?;
     if let Some(blocks) = v["content"].as_array() {
@@ -460,7 +474,7 @@ async fn fetch_models(provider: &str, endpoint: &str, api_key: &str) -> Result<V
     let status = resp.status();
     let text = resp.text().await.map_err(|e| e.to_string())?;
     if !status.is_success() {
-        return Err(format!("Error {}: {}", status, truncate(&text, 400)));
+        return Err(provider_error("Provider", status, &text));
     }
     let v: Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
     let mut models: Vec<String> = v["data"]
