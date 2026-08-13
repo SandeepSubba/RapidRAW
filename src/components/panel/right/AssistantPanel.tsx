@@ -213,11 +213,16 @@ export default function AssistantPanel() {
     const text = input.trim();
     if ((!text && attachments.length === 0) || isLoading) return;
 
-    const { selectedImage: currentImage, adjustments, finalPreviewUrl } = useEditorStore.getState();
+    const { selectedImage: currentImage, adjustments, finalPreviewUrl, uncroppedAdjustedPreviewUrl } =
+      useEditorStore.getState();
     const outgoing = [...attachments];
     // With no manual attachment, let the assistant see the image open in the
     // viewer so "what's in this photo", OCR, etc. work on the current image.
-    const willAttachViewer = outgoing.length === 0 && !!currentImage && !!finalPreviewUrl;
+    // Fall back through every preview URL we might have — the processed preview
+    // (best quality) can be null on some render paths, so drop to the uncropped
+    // preview and finally the thumbnail, whichever is actually populated.
+    const viewerUrl = finalPreviewUrl || uncroppedAdjustedPreviewUrl || currentImage?.thumbnailUrl || null;
+    const willAttachViewer = outgoing.length === 0 && !!currentImage && !!viewerUrl;
 
     const userMessage: AssistantMessage = {
       id: nextMessageId(),
@@ -237,8 +242,8 @@ export default function AssistantPanel() {
 
     try {
       let images = outgoing.map((a) => ({ mediaType: a.mediaType, data: a.data }));
-      if (willAttachViewer && finalPreviewUrl) {
-        const viewer = await blobUrlToImage(finalPreviewUrl);
+      if (willAttachViewer && viewerUrl) {
+        const viewer = await blobUrlToImage(viewerUrl);
         if (viewer) images = [viewer];
       }
       const response: any = await invoke(Invokes.AssistantChat, {
@@ -369,7 +374,7 @@ export default function AssistantPanel() {
           <div key={m.id} className={clsx('flex', m.role === 'user' ? 'justify-end' : 'justify-start')}>
             <div
               className={clsx(
-                'max-w-[85%] rounded-xl px-3 py-2 text-sm whitespace-pre-wrap break-words',
+                'max-w-[85%] rounded-xl px-3 py-2 text-sm whitespace-pre-wrap break-words select-text cursor-text',
                 m.role === 'user' && 'bg-accent text-button-text',
                 m.role === 'assistant' && !m.isError && 'bg-surface text-text-primary',
                 m.isError && 'bg-surface border border-red-500/50 text-text-primary',
