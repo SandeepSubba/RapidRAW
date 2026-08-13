@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Bot, Send, Trash2, Loader2, AlertTriangle, Sparkles, Paperclip, X, RefreshCw } from 'lucide-react';
+import { Bot, Send, Trash2, Loader2, AlertTriangle, Sparkles, Paperclip, X, RefreshCw, Tag } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import clsx from 'clsx';
 import { Invokes } from '../../ui/AppProperties';
@@ -10,6 +10,7 @@ import { useEditorStore } from '../../../store/useEditorStore';
 import { useSettingsStore } from '../../../store/useSettingsStore';
 import { useAssistantStore, nextMessageId, AssistantMessage } from '../../../store/useAssistantStore';
 import { useEditorActions } from '../../../hooks/useEditorActions';
+import { useLibraryActions } from '../../../hooks/useLibraryActions';
 
 // The develop-slider fields the assistant is allowed to set, with their valid
 // ranges. Values coming back from the model are clamped to these before we
@@ -37,6 +38,48 @@ interface Attachment {
   dataUrl: string;
   mediaType: string;
   data: string; // base64 without the data: prefix
+}
+
+// The text metadata fields the assistant may write, mapped from the friendly
+// names it uses in its JSON to the EXIF keys the backend/metadata panel expect.
+const METADATA_FIELDS: Record<string, string> = {
+  title: 'ImageDescription',
+  author: 'Artist',
+  copyright: 'Copyright',
+  comments: 'UserComment',
+};
+const EXIF_TO_FRIENDLY: Record<string, string> = Object.fromEntries(
+  Object.entries(METADATA_FIELDS).map(([friendly, exifKey]) => [exifKey, friendly]),
+);
+
+// Accept either friendly names (title/author/…) or raw EXIF keys, keep only the
+// whitelisted metadata fields, and coerce every value to a string.
+function sanitizeMetadata(raw: any): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!raw || typeof raw !== 'object') return out;
+  for (const [key, value] of Object.entries(raw)) {
+    const exifKey = METADATA_FIELDS[key] || (EXIF_TO_FRIENDLY[key] ? key : null);
+    if (!exifKey || value == null) continue;
+    out[exifKey] = String(value).trim();
+  }
+  return out;
+}
+
+// The current text metadata of the open image, as friendly names, so the model
+// can make sensible partial edits (e.g. append to an existing copyright).
+function readCurrentMetadata(exif: any): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [friendly, exifKey] of Object.entries(METADATA_FIELDS)) {
+    const clean = (exif?.[exifKey] ?? '').toString().replace(/^"|"$/g, '').trim();
+    if (clean && clean.toLowerCase() !== 'default') out[friendly] = clean;
+  }
+  return out;
+}
+
+function formatMetadata(patch: Record<string, string>): string {
+  return Object.entries(patch)
+    .map(([k, v]) => `${EXIF_TO_FRIENDLY[k] || k}: ${v || '(cleared)'}`)
+    .join(', ');
 }
 
 function sanitizePatch(raw: any): Record<string, number> {
@@ -115,6 +158,7 @@ export default function AssistantPanel() {
   const selectedModel = appSettings?.assistantModel || '';
 
   const { setAdjustments } = useEditorActions();
+  const { handleUpdateExif } = useLibraryActions();
   const selectedImage = useEditorStore((s) => s.selectedImage);
 
   useEffect(() => {
@@ -200,6 +244,7 @@ export default function AssistantPanel() {
       const response: any = await invoke(Invokes.AssistantChat, {
         messages: history,
         adjustments: currentImage ? adjustments : null,
+        currentMetadata: currentImage ? readCurrentMetadata(currentImage.exif) : null,
         images,
         model: selectedModel || null,
       });
@@ -210,11 +255,18 @@ export default function AssistantPanel() {
         setAdjustments((prev: any) => ({ ...prev, ...patch }));
       }
 
+      const metaPatch = currentImage ? sanitizeMetadata(response?.metadata) : {};
+      const hasMeta = Object.keys(metaPatch).length > 0;
+      if (hasMeta && currentImage) {
+        await handleUpdateExif([currentImage.path], metaPatch);
+      }
+
       addMessage({
         id: nextMessageId(),
         role: 'assistant',
         content: response?.reply || t('editor.assistant.emptyReply', 'Done.'),
         appliedAdjustments: hasPatch ? patch : null,
+        appliedMetadata: hasMeta ? metaPatch : null,
       });
     } catch (err: any) {
       addMessage({
@@ -226,7 +278,7 @@ export default function AssistantPanel() {
     } finally {
       setLoading(false);
     }
-  }, [input, attachments, isLoading, addMessage, setLoading, setAdjustments, selectedModel, t]);
+  }, [input, attachments, isLoading, addMessage, setLoading, setAdjustments, handleUpdateExif, selectedModel, t]);
 
   const handleKeyDown = (e: any) => {
     e.stopPropagation();
@@ -340,6 +392,12 @@ export default function AssistantPanel() {
                 <div className="mt-2 pt-2 border-t border-border-color/40 flex items-start gap-1.5 text-xs text-text-secondary">
                   <Sparkles size={13} className="mt-0.5 shrink-0 text-accent" />
                   <span>{formatPatch(m.appliedAdjustments)}</span>
+                </div>
+              )}
+              {m.appliedMetadata && (
+                <div className="mt-2 pt-2 border-t border-border-color/40 flex items-start gap-1.5 text-xs text-text-secondary">
+                  <Tag size={13} className="mt-0.5 shrink-0 text-accent" />
+                  <span>{formatMetadata(m.appliedMetadata)}</span>
                 </div>
               )}
             </div>

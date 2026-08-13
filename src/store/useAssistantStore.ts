@@ -6,6 +6,8 @@ export interface AssistantMessage {
   content: string;
   // Adjustments that were actually applied to the image for this message (if any).
   appliedAdjustments?: Record<string, number> | null;
+  // Text metadata fields (EXIF keys) that were written for this message (if any).
+  appliedMetadata?: Record<string, string> | null;
   // How many images were attached to this (user) message.
   imageCount?: number;
   isError?: boolean;

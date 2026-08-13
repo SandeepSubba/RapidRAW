@@ -33,11 +33,12 @@ pub struct ImageAttachment {
 pub struct AssistantResponse {
     pub reply: String,
     pub adjustments: Option<Value>,
+    pub metadata: Option<Value>,
     pub provider: String,
     pub model: String,
 }
 
-const SYSTEM_PROMPT: &str = r#"You are the editing assistant inside RapidRAW, a RAW photo editor. You help the user by chatting and, when they ask for edits, by adjusting the develop sliders of the currently open image.
+const SYSTEM_PROMPT: &str = r#"You are the editing assistant inside RapidRAW, a RAW photo editor. You help the user by chatting and, when they ask, by (a) adjusting the develop sliders and (b) writing text metadata fields of the currently open image.
 
 You may set these numeric adjustment fields. Values are ABSOLUTE (the final slider value, not a delta):
 - exposure: -5..5 (overall brightness / exposure in stops)
@@ -56,13 +57,20 @@ You may set these numeric adjustment fields. Values are ABSOLUTE (the final slid
 - structure: -100..100
 - sharpness: -100..100
 
+You may also set these TEXT metadata fields (string values, written to the image's metadata):
+- title (the image title / description)
+- author (the creator / artist)
+- copyright
+- comments
+
 Rules:
 - ALWAYS respond with a single JSON object and NOTHING else, no markdown, no code fences:
-  {"reply": "<short friendly message>", "adjustments": {<only fields you change>}}
-- If the user is only chatting or no image is open, set "adjustments" to null.
+  {"reply": "<short friendly message>", "adjustments": {<only fields you change>}, "metadata": {<only text fields you change>}}
+- If the user is only chatting or no image is open, set "adjustments" and "metadata" to null.
 - Only include fields you actually want to change; use absolute values within the ranges above.
-- Take the current adjustments (provided below) into account so your changes are sensible.
+- Take the current adjustments and current metadata (provided below) into account so your changes are sensible.
 - If an image is attached, look at it and base your edits on what you see.
+- When the user asks you to read/OCR text from the image and store it in a metadata field (e.g. "read the code on the label and write it to the title"), extract the exact text, apply any requested transformation, and put the result in the correct "metadata" field.
 - Keep "reply" concise and say what you changed."#;
 
 fn default_endpoint(provider: &str) -> &'static str {
@@ -120,21 +128,26 @@ fn strip_code_fences(s: &str) -> String {
     t.to_string()
 }
 
-fn extract(v: &Value, original: &str) -> (String, Option<Value>) {
+fn non_empty_object(v: Option<&Value>) -> Option<Value> {
+    v.cloned().and_then(|a| match a {
+        Value::Null => None,
+        Value::Object(ref m) if m.is_empty() => None,
+        other => Some(other),
+    })
+}
+
+fn extract(v: &Value, original: &str) -> (String, Option<Value>, Option<Value>) {
     let reply = v
         .get("reply")
         .and_then(|r| r.as_str())
         .map(|s| s.to_string())
         .unwrap_or_else(|| original.to_string());
-    let adjustments = v.get("adjustments").cloned().and_then(|a| match a {
-        Value::Null => None,
-        Value::Object(ref m) if m.is_empty() => None,
-        other => Some(other),
-    });
-    (reply, adjustments)
+    let adjustments = non_empty_object(v.get("adjustments"));
+    let metadata = non_empty_object(v.get("metadata"));
+    (reply, adjustments, metadata)
 }
 
-fn parse_assistant_content(content: &str) -> (String, Option<Value>) {
+fn parse_assistant_content(content: &str) -> (String, Option<Value>, Option<Value>) {
     let cleaned = strip_code_fences(content);
     if let Ok(v) = serde_json::from_str::<Value>(&cleaned) {
         return extract(&v, content);
@@ -147,7 +160,7 @@ fn parse_assistant_content(content: &str) -> (String, Option<Value>) {
             }
         }
     }
-    (content.trim().to_string(), None)
+    (content.trim().to_string(), None, None)
 }
 
 // Build the OpenAI-compatible content for one message. Plain string unless this
@@ -387,6 +400,7 @@ pub async fn assistant_test_connection(app_handle: AppHandle) -> Result<String, 
 pub async fn assistant_chat(
     messages: Vec<ChatMessage>,
     adjustments: Option<Value>,
+    current_metadata: Option<Value>,
     images: Option<Vec<ImageAttachment>>,
     model: Option<String>,
     app_handle: AppHandle,
@@ -397,11 +411,18 @@ pub async fn assistant_chat(
         .unwrap_or(cfg.model);
     let images = images.unwrap_or_default();
 
-    let context = match &adjustments {
+    let adj_context = match &adjustments {
         Some(a) => serde_json::to_string(a).unwrap_or_else(|_| "unavailable".to_string()),
         None => "none (no image is currently open, so you cannot apply edits)".to_string(),
     };
-    let system = format!("{}\n\nCurrent adjustments JSON:\n{}", SYSTEM_PROMPT, context);
+    let meta_context = match &current_metadata {
+        Some(m) => serde_json::to_string(m).unwrap_or_else(|_| "unavailable".to_string()),
+        None => "none".to_string(),
+    };
+    let system = format!(
+        "{}\n\nCurrent adjustments JSON:\n{}\n\nCurrent metadata JSON:\n{}",
+        SYSTEM_PROMPT, adj_context, meta_context
+    );
 
     let content = match cfg.provider.as_str() {
         "anthropic" => call_anthropic(&cfg.endpoint, &cfg.api_key, &model, &system, &messages, &images).await?,
@@ -413,10 +434,11 @@ pub async fn assistant_chat(
         }
     };
 
-    let (reply, adjustments) = parse_assistant_content(&content);
+    let (reply, adjustments, metadata) = parse_assistant_content(&content);
     Ok(AssistantResponse {
         reply,
         adjustments,
+        metadata,
         provider: cfg.provider,
         model,
     })
