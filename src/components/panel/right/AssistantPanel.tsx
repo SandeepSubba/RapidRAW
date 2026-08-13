@@ -2,11 +2,13 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Bot, Send, Trash2, Loader2, AlertTriangle, Sparkles, Paperclip, X, RefreshCw, Tag } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { toast } from 'react-toastify';
 import clsx from 'clsx';
 import { Invokes } from '../../ui/AppProperties';
 import Text from '../../ui/Text';
 import { TextColors, TextVariants } from '../../../types/typography';
 import { useEditorStore } from '../../../store/useEditorStore';
+import { useLibraryStore } from '../../../store/useLibraryStore';
 import { useSettingsStore } from '../../../store/useSettingsStore';
 import { useAssistantStore, nextMessageId, AssistantMessage } from '../../../store/useAssistantStore';
 import { useEditorActions } from '../../../hooks/useEditorActions';
@@ -52,17 +54,56 @@ const EXIF_TO_FRIENDLY: Record<string, string> = Object.fromEntries(
   Object.entries(METADATA_FIELDS).map(([friendly, exifKey]) => [exifKey, friendly]),
 );
 
-// Accept either friendly names (title/author/…) or raw EXIF keys, keep only the
-// whitelisted metadata fields, and coerce every value to a string.
+// The model doesn't always use the exact lowercase keys, so map a range of
+// spellings/synonyms (case- and separator-insensitive) onto the EXIF keys.
+// Without this, a returned {"Title": "..."} would be silently dropped.
+const METADATA_ALIASES: Record<string, string> = {
+  title: 'ImageDescription',
+  imagetitle: 'ImageDescription',
+  description: 'ImageDescription',
+  imagedescription: 'ImageDescription',
+  caption: 'ImageDescription',
+  author: 'Artist',
+  artist: 'Artist',
+  creator: 'Artist',
+  copyright: 'Copyright',
+  rights: 'Copyright',
+  comments: 'UserComment',
+  comment: 'UserComment',
+  usercomment: 'UserComment',
+  notes: 'UserComment',
+  note: 'UserComment',
+};
+
+function metaKeyToExif(key: string): string | null {
+  const norm = key.toLowerCase().replace(/[\s_-]/g, '');
+  if (METADATA_ALIASES[norm]) return METADATA_ALIASES[norm];
+  if (EXIF_TO_FRIENDLY[key]) return key; // a raw EXIF key passed straight through
+  return null;
+}
+
+// Keep only the whitelisted metadata fields and coerce every value to a string.
 function sanitizeMetadata(raw: any): Record<string, string> {
   const out: Record<string, string> = {};
   if (!raw || typeof raw !== 'object') return out;
   for (const [key, value] of Object.entries(raw)) {
-    const exifKey = METADATA_FIELDS[key] || (EXIF_TO_FRIENDLY[key] ? key : null);
+    const exifKey = metaKeyToExif(key);
     if (!exifKey || value == null) continue;
     out[exifKey] = String(value).trim();
   }
   return out;
+}
+
+const VALID_COLORS = new Set(['red', 'yellow', 'green', 'blue', 'purple']);
+
+// Normalize the model's tags field (either an array of adds, or {add,remove})
+// into clean, lowercased add/remove lists.
+function normalizeTags(raw: any): { add: Array<string>; remove: Array<string> } {
+  const clean = (arr: any): Array<string> =>
+    (Array.isArray(arr) ? arr : []).map((t) => String(t).trim().toLowerCase()).filter(Boolean);
+  if (Array.isArray(raw)) return { add: clean(raw), remove: [] };
+  if (raw && typeof raw === 'object') return { add: clean(raw.add), remove: clean(raw.remove) };
+  return { add: [], remove: [] };
 }
 
 // The current text metadata of the open image, as friendly names, so the model
@@ -158,7 +199,7 @@ export default function AssistantPanel() {
   const selectedModel = appSettings?.assistantModel || '';
 
   const { setAdjustments } = useEditorActions();
-  const { handleUpdateExif } = useLibraryActions();
+  const { handleUpdateExif, handleRate, handleSetColorLabel, handleTagsChanged } = useLibraryActions();
   const selectedImage = useEditorStore((s) => s.selectedImage);
 
   useEffect(() => {
@@ -266,12 +307,73 @@ export default function AssistantPanel() {
         await handleUpdateExif([currentImage.path], metaPatch);
       }
 
+      // Organization edits: tags / rating / color label.
+      const orgParts: Array<string> = [];
+      if (currentImage) {
+        const path = currentImage.path;
+
+        const { add, remove } = normalizeTags(response?.tags);
+        if (add.length || remove.length) {
+          const img = useLibraryStore.getState().imageList.find((i) => i.path === path);
+          let tagObjs = (img?.tags || [])
+            .filter((tg: string) => !tg.startsWith('color:'))
+            .map((tg: string) => ({ tag: tg.startsWith('user:') ? tg.slice(5) : tg, isUser: tg.startsWith('user:') }));
+          for (const tag of add) {
+            if (!tagObjs.some((o) => o.tag === tag)) {
+              await invoke(Invokes.AddTagForPaths, { paths: [path], tag: `user:${tag}` });
+              tagObjs.push({ tag, isUser: true });
+            }
+          }
+          for (const tag of remove) {
+            const existing = tagObjs.find((o) => o.tag === tag);
+            if (existing) {
+              await invoke(Invokes.RemoveTagForPaths, { paths: [path], tag: existing.isUser ? `user:${tag}` : tag });
+              tagObjs = tagObjs.filter((o) => o.tag !== tag);
+            }
+          }
+          handleTagsChanged([path], tagObjs);
+          if (add.length) orgParts.push(`tags +${add.join(', +')}`);
+          if (remove.length) orgParts.push(`tags -${remove.join(', -')}`);
+        }
+
+        if (typeof response?.rating === 'number') {
+          const r = Math.max(0, Math.min(5, Math.round(response.rating)));
+          handleRate(r, [path]);
+          orgParts.push(r === 0 ? 'rating cleared' : `rating ${r}★`);
+        }
+
+        if (typeof response?.colorLabel === 'string') {
+          const c = response.colorLabel.trim().toLowerCase();
+          if (c === 'none' || c === 'null' || c === '') {
+            handleSetColorLabel(null, [path]);
+            orgParts.push('label cleared');
+          } else if (VALID_COLORS.has(c)) {
+            // handleSetColorLabel toggles off if the image already has this color,
+            // so only call it when the color actually differs (the model means "set").
+            const curTags = useLibraryStore.getState().imageList.find((i) => i.path === path)?.tags || [];
+            const curColor = curTags.find((tg: string) => tg.startsWith('color:'))?.slice(6) || null;
+            if (curColor !== c) handleSetColorLabel(c, [path]);
+            orgParts.push(`label ${c}`);
+          }
+        }
+      }
+      const appliedOrganization = orgParts.length ? orgParts.join(' · ') : null;
+
+      if (hasMeta || appliedOrganization) {
+        const summary = [
+          ...Object.entries(metaPatch).map(([k, v]) => `${EXIF_TO_FRIENDLY[k] || k}: ${v || '(cleared)'}`),
+          ...(appliedOrganization ? [appliedOrganization] : []),
+        ].join(' · ');
+        toast.success(t('editor.assistant.appliedToast', 'Updated {{summary}}', { summary }));
+      }
+
       addMessage({
         id: nextMessageId(),
         role: 'assistant',
         content: response?.reply || t('editor.assistant.emptyReply', 'Done.'),
         appliedAdjustments: hasPatch ? patch : null,
         appliedMetadata: hasMeta ? metaPatch : null,
+        appliedOrganization,
       });
     } catch (err: any) {
       addMessage({
@@ -283,7 +385,20 @@ export default function AssistantPanel() {
     } finally {
       setLoading(false);
     }
-  }, [input, attachments, isLoading, addMessage, setLoading, setAdjustments, handleUpdateExif, selectedModel, t]);
+  }, [
+    input,
+    attachments,
+    isLoading,
+    addMessage,
+    setLoading,
+    setAdjustments,
+    handleUpdateExif,
+    handleRate,
+    handleSetColorLabel,
+    handleTagsChanged,
+    selectedModel,
+    t,
+  ]);
 
   const handleKeyDown = (e: any) => {
     e.stopPropagation();
@@ -403,6 +518,12 @@ export default function AssistantPanel() {
                 <div className="mt-2 pt-2 border-t border-border-color/40 flex items-start gap-1.5 text-xs text-text-secondary">
                   <Tag size={13} className="mt-0.5 shrink-0 text-accent" />
                   <span>{formatMetadata(m.appliedMetadata)}</span>
+                </div>
+              )}
+              {m.appliedOrganization && (
+                <div className="mt-2 pt-2 border-t border-border-color/40 flex items-start gap-1.5 text-xs text-text-secondary">
+                  <Tag size={13} className="mt-0.5 shrink-0 text-accent" />
+                  <span>{m.appliedOrganization}</span>
                 </div>
               )}
             </div>

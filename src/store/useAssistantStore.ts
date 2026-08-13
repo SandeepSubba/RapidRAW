@@ -8,6 +8,8 @@ export interface AssistantMessage {
   appliedAdjustments?: Record<string, number> | null;
   // Text metadata fields (EXIF keys) that were written for this message (if any).
   appliedMetadata?: Record<string, string> | null;
+  // Human-readable summary of tag/rating/color-label changes applied (if any).
+  appliedOrganization?: string | null;
   // How many images were attached to this (user) message.
   imageCount?: number;
   isError?: boolean;

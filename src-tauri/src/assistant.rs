@@ -34,6 +34,9 @@ pub struct AssistantResponse {
     pub reply: String,
     pub adjustments: Option<Value>,
     pub metadata: Option<Value>,
+    pub tags: Option<Value>,
+    pub rating: Option<Value>,
+    pub color_label: Option<Value>,
     pub provider: String,
     pub model: String,
 }
@@ -57,20 +60,28 @@ You may set these numeric adjustment fields. Values are ABSOLUTE (the final slid
 - structure: -100..100
 - sharpness: -100..100
 
-You may also set these TEXT metadata fields (string values, written to the image's metadata):
+You may also set these TEXT metadata fields (string values, written to the image's metadata). Use exactly these lowercase keys:
 - title (the image title / description)
 - author (the creator / artist)
 - copyright
 - comments
 
+You may also organize the image:
+- tags: {"add": ["keyword", ...], "remove": ["keyword", ...]} — keyword/tag labels to add or remove
+- rating: an integer 0-5 (star rating; 0 clears it)
+- colorLabel: one of "red", "yellow", "green", "blue", "purple", or "none" (to clear)
+
+You have permission to edit ALL of the above. Whatever the user asks to store (a code, a note, keywords), pick the field they name; if they don't name one, choose the most fitting field (e.g. keywords -> tags, a title/code -> title).
+
 Rules:
 - ALWAYS respond with a single JSON object and NOTHING else, no markdown, no code fences:
-  {"reply": "<short friendly message>", "adjustments": {<only fields you change>}, "metadata": {<only text fields you change>}}
-- If the user is only chatting or no image is open, set "adjustments" and "metadata" to null.
+  {"reply": "<short friendly message>", "adjustments": {<only fields you change>}, "metadata": {<only text fields you change>}, "tags": {"add": [...], "remove": [...]}, "rating": <0-5>, "colorLabel": "<color>"}
+- Set any field you are NOT changing to null (adjustments, metadata, tags, rating, colorLabel).
+- Use exactly the lowercase keys listed above (e.g. "title", not "Title").
 - Only include fields you actually want to change; use absolute values within the ranges above.
 - Take the current adjustments and current metadata (provided below) into account so your changes are sensible.
 - If an image is attached, look at it and base your edits on what you see.
-- When the user asks you to read/OCR text from the image and store it in a metadata field (e.g. "read the code on the label and write it to the title"), extract the exact text, apply any requested transformation, and put the result in the correct "metadata" field.
+- When the user asks you to read/OCR text from the image and store it (e.g. "read the code on the label and write it to the title", or "put it on the tags"), extract the exact text, apply any requested transformation, and put the result in the field they named.
 - Keep "reply" concise and say what you changed."#;
 
 fn default_endpoint(provider: &str) -> &'static str {
@@ -136,18 +147,39 @@ fn non_empty_object(v: Option<&Value>) -> Option<Value> {
     })
 }
 
-fn extract(v: &Value, original: &str) -> (String, Option<Value>, Option<Value>) {
+#[derive(Default)]
+struct Parsed {
+    reply: String,
+    adjustments: Option<Value>,
+    metadata: Option<Value>,
+    tags: Option<Value>,
+    rating: Option<Value>,
+    color_label: Option<Value>,
+}
+
+fn extract(v: &Value, original: &str) -> Parsed {
     let reply = v
         .get("reply")
         .and_then(|r| r.as_str())
         .map(|s| s.to_string())
         .unwrap_or_else(|| original.to_string());
-    let adjustments = non_empty_object(v.get("adjustments"));
-    let metadata = non_empty_object(v.get("metadata"));
-    (reply, adjustments, metadata)
+    Parsed {
+        reply,
+        adjustments: non_empty_object(v.get("adjustments")),
+        metadata: non_empty_object(v.get("metadata")),
+        tags: non_empty_object(v.get("tags")),
+        // Accept a few likely spellings for the color-label key.
+        rating: v.get("rating").cloned().filter(|r| r.is_number()),
+        color_label: v
+            .get("colorLabel")
+            .or_else(|| v.get("color_label"))
+            .or_else(|| v.get("color"))
+            .cloned()
+            .filter(|c| c.is_string()),
+    }
 }
 
-fn parse_assistant_content(content: &str) -> (String, Option<Value>, Option<Value>) {
+fn parse_assistant_content(content: &str) -> Parsed {
     let cleaned = strip_code_fences(content);
     if let Ok(v) = serde_json::from_str::<Value>(&cleaned) {
         return extract(&v, content);
@@ -160,7 +192,10 @@ fn parse_assistant_content(content: &str) -> (String, Option<Value>, Option<Valu
             }
         }
     }
-    (content.trim().to_string(), None, None)
+    Parsed {
+        reply: content.trim().to_string(),
+        ..Default::default()
+    }
 }
 
 // Build the OpenAI-compatible content for one message. Plain string unless this
@@ -434,11 +469,14 @@ pub async fn assistant_chat(
         }
     };
 
-    let (reply, adjustments, metadata) = parse_assistant_content(&content);
+    let parsed = parse_assistant_content(&content);
     Ok(AssistantResponse {
-        reply,
-        adjustments,
-        metadata,
+        reply: parsed.reply,
+        adjustments: parsed.adjustments,
+        metadata: parsed.metadata,
+        tags: parsed.tags,
+        rating: parsed.rating,
+        color_label: parsed.color_label,
         provider: cfg.provider,
         model,
     })
