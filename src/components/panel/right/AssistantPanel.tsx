@@ -16,6 +16,7 @@ import {
   MessageSquare,
   Pencil,
   Check,
+  Layers,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'react-toastify';
@@ -241,9 +242,6 @@ export default function AssistantPanel() {
   const selectedImage = useEditorStore((s) => s.selectedImage);
   const multiSelectedPaths = useLibraryStore((s) => s.multiSelectedPaths);
   const selectedCount = multiSelectedPaths.length;
-  // When several library images are selected, default to applying edits to all of
-  // them (each OCR'd individually), matching how the Metadata panel batches.
-  const [applyToSelected, setApplyToSelected] = useState(true);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -366,8 +364,9 @@ export default function AssistantPanel() {
     const outgoing = [...attachments];
 
     // Batch mode: several library images selected and no manual attachment — OCR
-    // and apply to each of them individually.
-    const doBatch = applyToSelected && outgoing.length === 0 && selectedPaths.length > 1;
+    // and apply to each of them individually (matches how the Metadata panel
+    // treats a multi-selection). A manual attachment falls back to single.
+    const doBatch = outgoing.length === 0 && selectedPaths.length > 1;
 
     const viewerUrl = finalPreviewUrl || uncroppedAdjustedPreviewUrl || currentImage?.thumbnailUrl || null;
     const willAttachViewer = !doBatch && outgoing.length === 0 && !!currentImage && !!viewerUrl;
@@ -491,7 +490,7 @@ export default function AssistantPanel() {
     } finally {
       setLoading(false);
     }
-  }, [input, attachments, isLoading, applyToSelected, addMessage, setLoading, setAdjustments, applyMetaOrg, selectedModel, t]);
+  }, [input, attachments, isLoading, addMessage, setLoading, setAdjustments, applyMetaOrg, selectedModel, t]);
 
   const handleKeyDown = (e: any) => {
     e.stopPropagation();
@@ -742,24 +741,14 @@ export default function AssistantPanel() {
 
       <div className="p-3 border-t border-surface shrink-0">
         {selectedCount > 1 && attachments.length === 0 && (
-          <button
-            type="button"
-            onClick={() => setApplyToSelected((v) => !v)}
-            className="w-full flex items-center gap-2 mb-2 px-2 py-1.5 rounded-md bg-surface/60 hover:bg-surface transition-colors text-left"
-            title={t('editor.assistant.batchTooltip', 'Read and apply to each selected image individually')}
-          >
-            <span
-              className={clsx(
-                'w-4 h-4 rounded-sm border flex items-center justify-center shrink-0',
-                applyToSelected ? 'bg-accent border-accent text-button-text' : 'border-border-color',
-              )}
-            >
-              {applyToSelected && <Check size={12} />}
-            </span>
+          <div className="flex items-center gap-1.5 mb-2 px-1 text-accent">
+            <Layers size={13} className="shrink-0" />
             <Text color={TextColors.secondary} className="text-xs">
-              {t('editor.assistant.applyToSelected', 'Apply to all {{count}} selected images', { count: selectedCount })}
+              {t('editor.assistant.applyingToSelected', 'Will apply to all {{count}} selected images', {
+                count: selectedCount,
+              })}
             </Text>
-          </button>
+          </div>
         )}
 
         {!selectedImage && selectedCount <= 1 && (
