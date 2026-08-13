@@ -282,11 +282,14 @@ export const useKeyboardShortcuts = ({
         },
       },
       rotate_left: {
-        // In the editor: rotate the open image. In the library: batch-rotate the selection.
+        // In the editor: rotate the open image. In the library: batch-rotate the
+        // whole selection. In library view `selectedImage` is also set (it feeds
+        // the metadata/preview panels), so gate on the active view — otherwise a
+        // multi-selection would collapse to rotating just the one active image.
         shouldFire: (s: any) => !!s.editor.selectedImage || s.library.multiSelectedPaths.length > 0,
         execute: (e: any, s: any) => {
           e.preventDefault();
-          if (s.editor.selectedImage) handleRotate(-90);
+          if (s.ui.activeView === 'editor' && s.editor.selectedImage) handleRotate(-90);
           else handleRotateSelected(-90);
         },
       },
@@ -294,7 +297,7 @@ export const useKeyboardShortcuts = ({
         shouldFire: (s: any) => !!s.editor.selectedImage || s.library.multiSelectedPaths.length > 0,
         execute: (e: any, s: any) => {
           e.preventDefault();
-          if (s.editor.selectedImage) handleRotate(90);
+          if (s.ui.activeView === 'editor' && s.editor.selectedImage) handleRotate(90);
           else handleRotateSelected(90);
         },
       },
