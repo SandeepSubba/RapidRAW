@@ -37,6 +37,8 @@ interface AssistantState {
   deleteConversation: (id: string) => void;
   // Empties the active conversation (keeps the row, resets its title).
   clearActive: () => void;
+  // Replace the active conversation's messages wholesale (used by /compact).
+  replaceActiveMessages: (messages: Array<AssistantMessage>) => void;
 }
 
 let idCounter = 0;
@@ -128,6 +130,13 @@ export const useAssistantStore = create<AssistantState>()(
         set((state) => ({
           conversations: state.conversations.map((c) =>
             c.id === state.activeId ? { ...c, messages: [], title: DEFAULT_TITLE, updatedAt: Date.now() } : c,
+          ),
+        })),
+
+      replaceActiveMessages: (messages) =>
+        set((state) => ({
+          conversations: state.conversations.map((c) =>
+            c.id === state.activeId ? { ...c, messages, updatedAt: Date.now() } : c,
           ),
         })),
     }),

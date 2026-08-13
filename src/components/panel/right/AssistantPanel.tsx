@@ -114,6 +114,14 @@ function sanitizeMetadata(raw: any): Record<string, string> {
 
 const VALID_COLORS = new Set(['red', 'yellow', 'green', 'blue', 'purple']);
 
+// Slash commands available in the chat input.
+const SLASH_COMMANDS: Array<{ cmd: string; desc: string }> = [
+  { cmd: '/compact', desc: 'Summarize this chat to shrink its context' },
+  { cmd: '/clear', desc: 'Clear this conversation' },
+  { cmd: '/new', desc: 'Start a new conversation' },
+  { cmd: '/help', desc: 'List commands' },
+];
+
 // Normalize the model's tags field (either an array of adds, or {add,remove})
 // into clean, lowercased add/remove lists.
 function normalizeTags(raw: any): { add: Array<string>; remove: Array<string> } {
@@ -217,6 +225,7 @@ export default function AssistantPanel() {
   const renameConversation = useAssistantStore((s) => s.renameConversation);
   const deleteConversation = useAssistantStore((s) => s.deleteConversation);
   const clearActive = useAssistantStore((s) => s.clearActive);
+  const replaceActiveMessages = useAssistantStore((s) => s.replaceActiveMessages);
 
   const activeConversation = conversations.find((c) => c.id === activeId) || null;
   const messages = activeConversation?.messages ?? [];
@@ -358,9 +367,96 @@ export default function AssistantPanel() {
     [handleUpdateExif, handleRate, handleSetColorLabel, handleTagsChanged, handleRenameToName],
   );
 
+  // Summarize the active conversation into a single message so future turns carry
+  // the gist with far less context. Powered by the same model.
+  const compactConversation = useCallback(async () => {
+    const st = useAssistantStore.getState();
+    const conv = st.conversations.find((c) => c.id === st.activeId);
+    const msgs = conv?.messages ?? [];
+    if (msgs.length === 0) {
+      addMessage({ id: nextMessageId(), role: 'assistant', content: t('editor.assistant.nothingToCompact', 'Nothing to compact yet.') });
+      return;
+    }
+    setLoading(true);
+    try {
+      const history = msgs.map((m) => ({ role: m.role, content: m.content }));
+      history.push({
+        role: 'user',
+        content:
+          'Summarize our conversation so far as a concise briefing that preserves the key facts, decisions, and any established workflow/conventions needed to continue. Do not apply any edits — just write the summary in your reply.',
+      });
+      const response: any = await invoke(Invokes.AssistantChat, {
+        messages: history,
+        adjustments: null,
+        currentMetadata: null,
+        images: [],
+        model: selectedModel || null,
+      });
+      const summary = (response?.reply || '').trim() || t('editor.assistant.summaryUnavailable', '(summary unavailable)');
+      replaceActiveMessages([
+        {
+          id: nextMessageId(),
+          role: 'assistant',
+          content: `🗜️ ${t('editor.assistant.compacted', 'Compacted summary')}:\n\n${summary}`,
+        },
+      ]);
+      toast.success(t('editor.assistant.compactedToast', 'Conversation compacted'));
+    } catch (err: any) {
+      addMessage({
+        id: nextMessageId(),
+        role: 'assistant',
+        content: typeof err === 'string' ? err : err?.message || String(err),
+        isError: true,
+      });
+    } finally {
+      setLoading(false);
+    }
+  }, [addMessage, setLoading, replaceActiveMessages, selectedModel, t]);
+
+  const runCommand = useCallback(
+    async (raw: string) => {
+      const command = raw.slice(1).trim().split(/\s+/)[0].toLowerCase();
+      switch (command) {
+        case 'compact':
+          await compactConversation();
+          return;
+        case 'clear':
+          clearActive();
+          return;
+        case 'new':
+          newConversation();
+          return;
+        case 'help':
+        case '?':
+          addMessage({
+            id: nextMessageId(),
+            role: 'assistant',
+            content:
+              `${t('editor.assistant.commandsTitle', 'Commands')}:\n` +
+              SLASH_COMMANDS.map((c) => `${c.cmd} — ${c.desc}`).join('\n'),
+          });
+          return;
+        default:
+          addMessage({
+            id: nextMessageId(),
+            role: 'assistant',
+            content: t('editor.assistant.unknownCommand', 'Unknown command "/{{command}}". Type /help.', { command }),
+            isError: true,
+          });
+      }
+    },
+    [compactConversation, clearActive, newConversation, addMessage, t],
+  );
+
   const send = useCallback(async () => {
     const text = input.trim();
     if ((!text && attachments.length === 0) || isLoading) return;
+    // Slash commands are handled locally, not sent to the model.
+    if (text.startsWith('/') && attachments.length === 0) {
+      setInput('');
+      await runCommand(text);
+      return;
+    }
     cancelRef.current = false;
 
     const { selectedImage: currentImage, adjustments, finalPreviewUrl, uncroppedAdjustedPreviewUrl } =
@@ -515,7 +611,7 @@ export default function AssistantPanel() {
     } finally {
       setLoading(false);
     }
-  }, [input, attachments, isLoading, addMessage, setLoading, setAdjustments, applyMetaOrg, selectedModel, t]);
+  }, [input, attachments, isLoading, runCommand, addMessage, setLoading, setAdjustments, applyMetaOrg, selectedModel, t]);
 
   const stop = useCallback(() => {
     cancelRef.current = true;
@@ -769,6 +865,27 @@ export default function AssistantPanel() {
       </div>
 
       <div className="p-3 border-t border-surface shrink-0">
+        {input.startsWith('/') && (
+          <div className="mb-2 rounded-lg border border-border-color bg-bg-primary overflow-hidden">
+            {SLASH_COMMANDS.filter((c) => c.cmd.startsWith(input.split(/\s+/)[0].toLowerCase())).map((c) => (
+              <button
+                key={c.cmd}
+                type="button"
+                onClick={() => {
+                  setInput('');
+                  void runCommand(c.cmd);
+                }}
+                className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-surface transition-colors text-left"
+              >
+                <span className="text-xs font-semibold text-accent shrink-0">{c.cmd}</span>
+                <Text color={TextColors.secondary} className="text-xs truncate">
+                  {c.desc}
+                </Text>
+              </button>
+            ))}
+          </div>
+        )}
+
         {selectedCount > 1 && attachments.length === 0 && (
           <div className="flex items-center gap-1.5 mb-2 px-1 text-accent">
             <Layers size={13} className="shrink-0" />
