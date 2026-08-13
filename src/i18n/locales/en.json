@@ -742,6 +742,7 @@
     "switcher": {
       "tooltips": {
         "adjust": "Adjust",
+        "assistant": "Assistant",
         "crop": "Crop",
         "export": "Export",
         "info": "Info",

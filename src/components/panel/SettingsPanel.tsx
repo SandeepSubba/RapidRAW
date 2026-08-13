@@ -137,6 +137,14 @@ export default function SettingsPanel({
 
   const [aiProvider, setAiProvider] = useState(appSettings?.aiProvider || 'cpu');
   const [aiConnectorAddress, setAiConnectorAddress] = useState<string>(appSettings?.aiConnectorAddress || '');
+  const [assistantEndpoint, setAssistantEndpoint] = useState<string>(appSettings?.assistantEndpoint || '');
+  const [assistantApiKey, setAssistantApiKey] = useState<string>(appSettings?.assistantApiKey || '');
+  const [assistantModel, setAssistantModel] = useState<string>(appSettings?.assistantModel || '');
+  const [assistantTest, setAssistantTest] = useState<{ testing: boolean; success: boolean | null; message: string }>({
+    testing: false,
+    success: null,
+    message: '',
+  });
   const [newShortcut, setNewShortcut] = useState('');
   const [newAiTag, setNewAiTag] = useState('');
 
@@ -253,6 +261,15 @@ export default function SettingsPanel({
     }
     if (appSettings?.aiProvider !== aiProvider) {
       setAiProvider(appSettings?.aiProvider || 'cpu');
+    }
+    if ((appSettings?.assistantEndpoint || '') !== assistantEndpoint) {
+      setAssistantEndpoint(appSettings?.assistantEndpoint || '');
+    }
+    if ((appSettings?.assistantApiKey || '') !== assistantApiKey) {
+      setAssistantApiKey(appSettings?.assistantApiKey || '');
+    }
+    if ((appSettings?.assistantModel || '') !== assistantModel) {
+      setAssistantModel(appSettings?.assistantModel || '');
     }
     setProcessingSettings({
       editorPreviewResolution: appSettings?.editorPreviewResolution || 1920,
@@ -521,6 +538,20 @@ export default function SettingsPanel({
       console.error('AI Connector connection test failed:', err);
     } finally {
       setTimeout(() => setTestStatus({ testing: false, message: '', success: null }), EXECUTE_TIMEOUT);
+    }
+  };
+
+  const handleAssistantTest = async () => {
+    setAssistantTest({ testing: true, success: null, message: t('settings.assistant.testing', 'Testing…') });
+    try {
+      const msg: any = await invoke(Invokes.AssistantTestConnection);
+      setAssistantTest({ testing: false, success: true, message: typeof msg === 'string' ? msg : 'Connected' });
+    } catch (err) {
+      setAssistantTest({
+        testing: false,
+        success: false,
+        message: typeof err === 'string' ? err : String(err),
+      });
     }
   };
 
@@ -1715,6 +1746,116 @@ export default function SettingsPanel({
                         )}
                       </AnimatePresence>
                     </div>
+                  </div>
+                </div>
+
+                <div className="p-6 bg-surface rounded-xl shadow-md">
+                  <Text variant={TextVariants.title} color={TextColors.accent} className="mb-8">
+                    {t('settings.assistant.title', 'AI Assistant')}
+                  </Text>
+                  <Text className="mb-6">
+                    {t(
+                      'settings.assistant.description',
+                      'Chat with an AI in the editor to get help and apply slider adjustments to the open image.',
+                    )}
+                  </Text>
+
+                  <div className="space-y-6">
+                    <SettingItem
+                      label={t('settings.assistant.provider', 'Provider')}
+                      description={t('settings.assistant.providerDesc', 'Which LLM backend the assistant talks to.')}
+                    >
+                      <Dropdown
+                        onChange={(value: any) => onSettingsChange({ ...appSettings, assistantProvider: value })}
+                        options={[
+                          { label: 'LM Studio (local)', value: 'lmstudio' },
+                          { label: 'OpenAI', value: 'openai' },
+                          { label: 'Anthropic (Claude)', value: 'anthropic' },
+                        ]}
+                        value={appSettings?.assistantProvider || 'lmstudio'}
+                        triggerClassName="bg-bg-primary"
+                      />
+                    </SettingItem>
+
+                    <SettingItem
+                      label={t('settings.assistant.endpoint', 'Endpoint URL')}
+                      description={t(
+                        'settings.assistant.endpointDesc',
+                        'Optional. Leave blank for the provider default (LM Studio: http://localhost:1234/v1).',
+                      )}
+                    >
+                      <Input
+                        className="grow"
+                        onBlur={() => onSettingsChange({ ...appSettings, assistantEndpoint })}
+                        onChange={(e: any) => setAssistantEndpoint(e.target.value)}
+                        onKeyDown={(e: any) => e.stopPropagation()}
+                        placeholder="http://localhost:1234/v1"
+                        type="text"
+                        value={assistantEndpoint}
+                        bgClassName="bg-bg-primary"
+                      />
+                    </SettingItem>
+
+                    <SettingItem
+                      label={t('settings.assistant.apiKey', 'API Key')}
+                      description={t(
+                        'settings.assistant.apiKeyDesc',
+                        'Required for OpenAI and Anthropic. Not needed for LM Studio.',
+                      )}
+                    >
+                      <Input
+                        className="grow"
+                        onBlur={() => onSettingsChange({ ...appSettings, assistantApiKey })}
+                        onChange={(e: any) => setAssistantApiKey(e.target.value)}
+                        onKeyDown={(e: any) => e.stopPropagation()}
+                        placeholder="sk-…"
+                        type="password"
+                        value={assistantApiKey}
+                        bgClassName="bg-bg-primary"
+                      />
+                    </SettingItem>
+
+                    <SettingItem
+                      label={t('settings.assistant.model', 'Model')}
+                      description={t(
+                        'settings.assistant.modelDesc',
+                        'Optional. Defaults: LM Studio uses the loaded model; OpenAI gpt-4o-mini; Anthropic claude-3-5-sonnet-latest.',
+                      )}
+                    >
+                      <Input
+                        className="grow"
+                        onBlur={() => onSettingsChange({ ...appSettings, assistantModel })}
+                        onChange={(e: any) => setAssistantModel(e.target.value)}
+                        onKeyDown={(e: any) => e.stopPropagation()}
+                        placeholder={t('settings.assistant.modelPlaceholder', 'Model name (blank = provider default)')}
+                        type="text"
+                        value={assistantModel}
+                        bgClassName="bg-bg-primary"
+                      />
+                    </SettingItem>
+
+                    <SettingItem
+                      label={t('settings.assistant.test', 'Connection')}
+                      description={t('settings.assistant.testDesc', 'Verify the assistant can reach the provider.')}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Button className="w-40" disabled={assistantTest.testing} onClick={handleAssistantTest}>
+                          {assistantTest.testing
+                            ? t('settings.assistant.testing', 'Testing…')
+                            : t('settings.assistant.testButton', 'Test connection')}
+                        </Button>
+                      </div>
+                      {assistantTest.message && (
+                        <Text
+                          color={assistantTest.success ? TextColors.success : TextColors.error}
+                          className="mt-2 flex items-center gap-2"
+                        >
+                          {assistantTest.success === true && <Wifi size={16} />}
+                          {assistantTest.success === false && <WifiOff size={16} />}
+                          {assistantTest.message}
+                        </Text>
+                      )}
+                    </SettingItem>
                   </div>
                 </div>
 

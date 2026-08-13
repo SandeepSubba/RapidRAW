@@ -661,7 +661,20 @@ export const useKeyboardShortcuts = ({
           const list = sortedListRef.current;
           const isNext = e.code === 'ArrowRight' || e.code === 'ArrowDown';
           const activePath = s.library.libraryActivePath;
-          if (!activePath || list.length === 0) return;
+          if (list.length === 0) return;
+          // Nothing focused yet (e.g. just entered the folder, no click): the first
+          // arrow press seeds the cursor on the first image so keyboard nav works
+          // without needing an initial mouse click.
+          if (!activePath) {
+            const first = list[0];
+            s.library.setLibrary({
+              libraryActivePath: first.path,
+              multiSelectedPaths: [first.path],
+              selectionAnchorPath: first.path,
+            });
+            handleImageSelect(first.path, false);
+            return;
+          }
           const currentIndex = list.findIndex((img) => img.path === activePath);
           if (currentIndex === -1) return;
 

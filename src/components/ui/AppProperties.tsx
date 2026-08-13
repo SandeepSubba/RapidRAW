@@ -32,6 +32,9 @@ export const OPTION_SEPARATOR = 'separator';
 export enum Invokes {
   AddTagForPaths = 'add_tag_for_paths',
   ApplyAdjustments = 'apply_adjustments',
+  AssistantChat = 'assistant_chat',
+  AssistantListModels = 'assistant_list_models',
+  AssistantTestConnection = 'assistant_test_connection',
   ApplyAdjustmentsToPaths = 'apply_adjustments_to_paths',
   ApplyOrientationToPaths = 'apply_orientation_to_paths',
   ApplyAutoAdjustmentsToPaths = 'apply_auto_adjustments_to_paths',
@@ -147,6 +150,7 @@ export enum ExifOverlay {
 
 export enum Panel {
   Adjustments = 'adjustments',
+  Agent = 'agent',
   Ai = 'ai',
   Crop = 'crop',
   Export = 'export',
@@ -208,6 +212,10 @@ export type GroupingMode = 'off' | GroupPreference;
 export interface AppSettings {
   aiConnectorAddress?: string;
   aiProvider?: string;
+  assistantProvider?: string;
+  assistantEndpoint?: string;
+  assistantApiKey?: string;
+  assistantModel?: string;
   decorations?: any;
   editorPreviewResolution?: number;
   enableZoomHifi?: boolean;

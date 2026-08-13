@@ -314,6 +314,7 @@ impl Default for WorkspaceState {
                 "metadata".to_string(),
                 "folderTree".to_string(),
                 "export".to_string(),
+                "agent".to_string(),
             ],
         );
         panel_layout.insert("leftBottom".to_string(), vec![]);
@@ -443,6 +444,15 @@ pub struct AppSettings {
     pub thumbnail_size: Option<String>,
     pub thumbnail_aspect_ratio: Option<String>,
     pub ai_provider: Option<String>,
+    // AI Assistant chat: which LLM backend to talk to and how.
+    #[serde(default)]
+    pub assistant_provider: Option<String>, // "lmstudio" | "openai" | "anthropic"
+    #[serde(default)]
+    pub assistant_endpoint: Option<String>, // optional base URL override
+    #[serde(default)]
+    pub assistant_api_key: Option<String>,
+    #[serde(default)]
+    pub assistant_model: Option<String>,
     #[serde(default = "default_adjustment_visibility")]
     pub adjustment_visibility: HashMap<String, bool>,
     #[serde(default = "default_open_tree_sections")]
@@ -577,6 +587,10 @@ impl Default for AppSettings {
             thumbnail_size: Some("medium".to_string()),
             thumbnail_aspect_ratio: Some("cover".to_string()),
             ai_provider: Some("cpu".to_string()),
+            assistant_provider: Some("lmstudio".to_string()),
+            assistant_endpoint: None,
+            assistant_api_key: None,
+            assistant_model: None,
             adjustment_visibility: default_adjustment_visibility(),
             open_tree_sections: default_open_tree_sections(),
             copy_paste_settings: CopyPasteSettings::default(),

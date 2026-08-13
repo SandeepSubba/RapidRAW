@@ -12,6 +12,8 @@ import {
   FilterCriteria,
   Invokes,
   LibraryViewMode,
+  Panel,
+  PanelRegion,
   RawStatus,
   EditedStatus,
   Theme,
@@ -191,13 +193,40 @@ export const useAppInitialization = ({
         }
 
         if (settings?.workspace) {
+          const regions: Array<PanelRegion> = ['leftTop', 'leftBottom', 'rightTop', 'rightBottom'];
+          const loadedLayout: any = { ...(settings.workspace.panelLayout || {}) };
+          for (const r of regions) if (!Array.isArray(loadedLayout[r])) loadedLayout[r] = [];
+
+          // One-time relocation: dock the Assistant panel to the bottom-left with
+          // the other left-side tabs. Guarded by a flag so a later manual move by
+          // the user isn't overridden on the next launch.
+          const RELOCATED_KEY = 'assistant-panel-left-v1';
+          const alreadyRelocated = localStorage.getItem(RELOCATED_KEY) === '1';
+          const existsSomewhere = regions.some((r) => loadedLayout[r].includes(Panel.Agent));
+
+          if (!alreadyRelocated) {
+            for (const r of regions) loadedLayout[r] = loadedLayout[r].filter((p: any) => p !== Panel.Agent);
+            loadedLayout.leftTop = [...loadedLayout.leftTop, Panel.Agent];
+            localStorage.setItem(RELOCATED_KEY, '1');
+          } else if (!existsSomewhere) {
+            loadedLayout.leftTop = [...loadedLayout.leftTop, Panel.Agent];
+          }
+
+          // Keep each region's active tab valid after moving panels around.
+          const activePanels: any = { ...(settings.workspace.activePanels || {}) };
+          for (const r of regions) {
+            if (activePanels[r] && !loadedLayout[r].includes(activePanels[r])) {
+              activePanels[r] = loadedLayout[r][0] ?? null;
+            }
+          }
+
           setUI({
             leftPanelWidth: settings.workspace.leftPanelWidth,
             rightPanelWidth: settings.workspace.rightPanelWidth,
             leftTopHeight: settings.workspace.leftTopHeight,
             rightTopHeight: settings.workspace.rightTopHeight,
-            panelLayout: settings.workspace.panelLayout,
-            activePanels: settings.workspace.activePanels,
+            panelLayout: loadedLayout,
+            activePanels,
             panelSwitcherPlacement: settings.workspace.panelSwitcherPlacement,
           });
         }
