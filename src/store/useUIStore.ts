@@ -146,14 +146,16 @@ export const useUIStore = create<UIState>((set, get) => ({
   compactEditorPanelHeightOverride: null,
 
   panelLayout: {
-    leftTop: [Panel.Metadata, Panel.FolderTree, Panel.Export, Panel.Agent],
-    leftBottom: [],
+    leftTop: [Panel.Metadata, Panel.FolderTree, Panel.Export],
+    // The assistant lives in its own bottom-left region so it can edit metadata
+    // while the Metadata panel stays visible above it and updates live.
+    leftBottom: [Panel.Agent],
     rightTop: [Panel.Adjustments, Panel.Crop, Panel.Masks, Panel.Ai, Panel.Presets],
     rightBottom: [],
   },
   activePanels: {
     leftTop: Panel.FolderTree,
-    leftBottom: null,
+    leftBottom: Panel.Agent,
     rightTop: Panel.Adjustments,
     rightBottom: null,
   },

@@ -197,27 +197,29 @@ export const useAppInitialization = ({
           const loadedLayout: any = { ...(settings.workspace.panelLayout || {}) };
           for (const r of regions) if (!Array.isArray(loadedLayout[r])) loadedLayout[r] = [];
 
-          // One-time relocation: dock the Assistant panel to the bottom-left with
-          // the other left-side tabs. Guarded by a flag so a later manual move by
-          // the user isn't overridden on the next launch.
-          const RELOCATED_KEY = 'assistant-panel-left-v1';
+          // One-time relocation: dock the Assistant panel in its OWN bottom-left
+          // region (leftBottom), so the Metadata panel stays visible above it and
+          // reflects assistant edits live instead of being hidden behind a tab.
+          // Guarded by a flag so a later manual move by the user isn't overridden.
+          const RELOCATED_KEY = 'assistant-panel-leftbottom-v1';
           const alreadyRelocated = localStorage.getItem(RELOCATED_KEY) === '1';
           const existsSomewhere = regions.some((r) => loadedLayout[r].includes(Panel.Agent));
 
           if (!alreadyRelocated) {
             for (const r of regions) loadedLayout[r] = loadedLayout[r].filter((p: any) => p !== Panel.Agent);
-            loadedLayout.leftTop = [...loadedLayout.leftTop, Panel.Agent];
+            loadedLayout.leftBottom = [...loadedLayout.leftBottom, Panel.Agent];
             localStorage.setItem(RELOCATED_KEY, '1');
           } else if (!existsSomewhere) {
-            loadedLayout.leftTop = [...loadedLayout.leftTop, Panel.Agent];
+            loadedLayout.leftBottom = [...loadedLayout.leftBottom, Panel.Agent];
           }
 
-          // Keep each region's active tab valid after moving panels around.
+          // Keep each region's active tab valid after moving panels around, and
+          // give a newly-populated region (e.g. leftBottom now holding the
+          // assistant) an active tab so it actually renders.
           const activePanels: any = { ...(settings.workspace.activePanels || {}) };
           for (const r of regions) {
-            if (activePanels[r] && !loadedLayout[r].includes(activePanels[r])) {
-              activePanels[r] = loadedLayout[r][0] ?? null;
-            }
+            const validActive = activePanels[r] && loadedLayout[r].includes(activePanels[r]);
+            if (!validActive) activePanels[r] = loadedLayout[r][0] ?? null;
           }
 
           setUI({
