@@ -628,7 +628,11 @@ async fn call_claude_code(
             }
         }
 
-        let prompt = build_cli_prompt(&messages, &image_files);
+        // The system prompt embeds the current adjustments/metadata JSON, which
+        // can exceed the OS argv limit (E2BIG) once an image with masks is open.
+        // stdin has no such limit, so prepend it to the piped prompt instead of
+        // passing it via --append-system-prompt.
+        let prompt = format!("{}\n\n{}", system, build_cli_prompt(&messages, &image_files));
 
         let mut cmd = Command::new(&binary);
         cmd.current_dir(&dir)
@@ -637,8 +641,6 @@ async fn call_claude_code(
             .arg("json")
             .arg("--model")
             .arg(&model)
-            .arg("--append-system-prompt")
-            .arg(&system)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -665,14 +667,15 @@ async fn call_claude_code(
             .map_err(|e| format!("Claude Code failed: {}", e))?;
         let _ = std::fs::remove_dir_all(&dir);
 
-        if !output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        // On failure the CLI still prints its JSON envelope with the readable
+        // message at "result" — prefer that over dumping the raw envelope.
+        if !output.status.success() && serde_json::from_str::<Value>(stdout.trim()).is_err() {
             let err = String::from_utf8_lossy(&output.stderr);
-            let out = String::from_utf8_lossy(&output.stdout);
-            let detail = if !err.trim().is_empty() { err } else { out };
+            let detail = if !err.trim().is_empty() { err } else { stdout.clone() };
             return Err(format!("Claude Code error: {}", truncate(detail.trim(), 400)));
         }
 
-        let stdout = String::from_utf8_lossy(&output.stdout);
         let v: Value = serde_json::from_str(stdout.trim())
             .map_err(|e| format!("Unexpected Claude Code output: {} — {}", e, truncate(&stdout, 300)))?;
         if v["is_error"].as_bool().unwrap_or(false) {
@@ -806,6 +809,18 @@ pub async fn assistant_test_connection(app_handle: AppHandle) -> Result<String, 
     Ok(format!("Connected to {} — {} model(s) available", label, models.len()))
 }
 
+// Replace any string value over 1KB (mask bitmaps, embedded images) with a
+// placeholder so the adjustments context stays small. Real slider values and
+// names are all far below this.
+fn strip_bulky_strings(v: &mut Value) {
+    match v {
+        Value::String(s) if s.len() > 1024 => *s = "<large data omitted>".to_string(),
+        Value::Array(arr) => arr.iter_mut().for_each(strip_bulky_strings),
+        Value::Object(map) => map.values_mut().for_each(strip_bulky_strings),
+        _ => {}
+    }
+}
+
 #[tauri::command]
 pub async fn assistant_chat(
     messages: Vec<ChatMessage>,
@@ -822,7 +837,14 @@ pub async fn assistant_chat(
     let images = images.unwrap_or_default();
 
     let adj_context = match &adjustments {
-        Some(a) => serde_json::to_string(a).unwrap_or_else(|_| "unavailable".to_string()),
+        Some(a) => {
+            // Mask bitmaps etc. are embedded in the adjustments as huge base64
+            // strings; they blow the model context (and argv/stdin limits) and
+            // carry no meaning for the model. Strip them, keep the structure.
+            let mut a = a.clone();
+            strip_bulky_strings(&mut a);
+            serde_json::to_string(&a).unwrap_or_else(|_| "unavailable".to_string())
+        }
         None => "none (no image is currently open, so you cannot apply edits)".to_string(),
     };
     let meta_context = match &current_metadata {
