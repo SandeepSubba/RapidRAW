@@ -107,7 +107,11 @@ function sanitizeMetadata(raw: any): Record<string, string> {
   for (const [key, value] of Object.entries(raw)) {
     const exifKey = metaKeyToExif(key);
     if (!exifKey || value == null) continue;
-    out[exifKey] = String(value).trim();
+    // Skip empty/whitespace values: schema-constrained models fill unchanged
+    // fields with "" and we must not blank existing metadata because of that.
+    const str = String(value).trim();
+    if (str === '') continue;
+    out[exifKey] = str;
   }
   return out;
 }
@@ -119,6 +123,7 @@ const SLASH_COMMANDS: Array<{ cmd: string; desc: string }> = [
   { cmd: '/compact', desc: 'Summarize this chat to shrink its context' },
   { cmd: '/clear', desc: 'Clear this conversation' },
   { cmd: '/new', desc: 'Start a new conversation' },
+  { cmd: '/reset', desc: 'Delete ALL chat history and start fresh' },
   { cmd: '/help', desc: 'List commands' },
 ];
 
@@ -169,10 +174,18 @@ function formatPatch(patch: Record<string, number>): string {
 
 // Fetch a blob: URL (the viewer's processed preview) and turn it into the
 // base64 payload the backend expects, so the assistant can "see" the open image.
-async function blobUrlToImage(url: string): Promise<{ mediaType: string; data: string } | null> {
-  try {
-    const resp = await fetch(url);
-    const blob = await resp.blob();
+// Local models are often loaded with a small context window (LM Studio defaults
+// to ~4k). A full-size preview can blow past it, and the server silently
+// truncates the request — the model then drops fields (e.g. filename) or emits
+// stale values. Cap the longest edge so the image + prompt fit comfortably.
+const ASSISTANT_IMAGE_MAX_DIM = 2048;
+// Cloud vision models (Kimi/OpenAI/Claude) aren't VRAM/context-limited like a
+// local model, so we can send much larger images — critical for reading small
+// text (e.g. tiny fabric labels) that gets crushed at 2048px.
+const ASSISTANT_IMAGE_MAX_DIM_CLOUD = 4096;
+
+async function downscaleBlob(blob: Blob, maxDim: number): Promise<{ mediaType: string; data: string }> {
+  const noop = async () => {
     const dataUrl: string = await new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(reader.result as string);
@@ -180,27 +193,56 @@ async function blobUrlToImage(url: string): Promise<{ mediaType: string; data: s
       reader.readAsDataURL(blob);
     });
     const comma = dataUrl.indexOf(',');
-    const data = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
-    const mediaType = dataUrl.slice(5, dataUrl.indexOf(';')) || blob.type || 'image/png';
-    return { mediaType, data };
+    return {
+      mediaType: dataUrl.slice(5, dataUrl.indexOf(';')) || blob.type || 'image/png',
+      data: comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl,
+    };
+  };
+  try {
+    const bitmap = await createImageBitmap(blob);
+    const longest = Math.max(bitmap.width, bitmap.height);
+    if (longest <= maxDim) {
+      bitmap.close?.();
+      return noop();
+    }
+    const scale = maxDim / longest;
+    const w = Math.max(1, Math.round(bitmap.width * scale));
+    const h = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      bitmap.close?.();
+      return noop();
+    }
+    ctx.drawImage(bitmap, 0, 0, w, h);
+    bitmap.close?.();
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+    return { mediaType: 'image/jpeg', data: dataUrl.slice(dataUrl.indexOf(',') + 1) };
+  } catch {
+    return noop();
+  }
+}
+
+async function blobUrlToImage(
+  url: string,
+  maxDim: number = ASSISTANT_IMAGE_MAX_DIM,
+): Promise<{ mediaType: string; data: string } | null> {
+  try {
+    const resp = await fetch(url);
+    const blob = await resp.blob();
+    return await downscaleBlob(blob, maxDim);
   } catch {
     return null;
   }
 }
 
-function fileToAttachment(file: File): Promise<Attachment> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = reader.result as string;
-      const comma = dataUrl.indexOf(',');
-      const data = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
-      const mediaType = dataUrl.slice(5, dataUrl.indexOf(';')) || file.type || 'image/png';
-      resolve({ id: nextMessageId(), dataUrl, mediaType, data });
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
+async function fileToAttachment(file: File, maxDim: number): Promise<Attachment> {
+  // Downscale manual attachments too (a File is a Blob), so a full-size photo
+  // doesn't blow up the request body — matches the viewer/batch paths.
+  const { mediaType, data } = await downscaleBlob(file, maxDim);
+  return { id: nextMessageId(), dataUrl: `data:${mediaType};base64,${data}`, mediaType, data };
 }
 
 export default function AssistantPanel() {
@@ -225,6 +267,7 @@ export default function AssistantPanel() {
   const renameConversation = useAssistantStore((s) => s.renameConversation);
   const deleteConversation = useAssistantStore((s) => s.deleteConversation);
   const clearActive = useAssistantStore((s) => s.clearActive);
+  const clearAll = useAssistantStore((s) => s.clearAll);
   const replaceActiveMessages = useAssistantStore((s) => s.replaceActiveMessages);
 
   const activeConversation = conversations.find((c) => c.id === activeId) || null;
@@ -255,6 +298,9 @@ export default function AssistantPanel() {
           ? 'Claude Code'
           : 'LM Studio';
   const selectedModel = appSettings?.assistantModel || '';
+  // Local (LM Studio) is VRAM/context-limited, so keep images small; cloud
+  // providers can take much larger images for better small-text OCR.
+  const imageMaxDim = provider === 'lmstudio' ? ASSISTANT_IMAGE_MAX_DIM : ASSISTANT_IMAGE_MAX_DIM_CLOUD;
 
   const { setAdjustments } = useEditorActions();
   const { handleUpdateExif, handleRate, handleSetColorLabel, handleTagsChanged, handleRenameToName } =
@@ -284,13 +330,16 @@ export default function AssistantPanel() {
     refreshModels();
   }, [refreshModels, provider]);
 
-  const addFiles = useCallback((files: Array<File>) => {
-    const images = files.filter((f) => f.type.startsWith('image/'));
-    if (images.length === 0) return;
-    Promise.all(images.map(fileToAttachment)).then((atts) =>
-      setAttachments((prev) => [...prev, ...atts]),
-    );
-  }, []);
+  const addFiles = useCallback(
+    (files: Array<File>) => {
+      const images = files.filter((f) => f.type.startsWith('image/'));
+      if (images.length === 0) return;
+      Promise.all(images.map((f) => fileToAttachment(f, imageMaxDim))).then((atts) =>
+        setAttachments((prev) => [...prev, ...atts]),
+      );
+    },
+    [imageMaxDim],
+  );
 
   const handlePaste = useCallback(
     (e: any) => {
@@ -314,8 +363,23 @@ export default function AssistantPanel() {
   // Apply a model response's metadata + organization (tags/rating/color/rename)
   // to one image path. Returns a summary so the chat can show what changed.
   const applyMetaOrg = useCallback(
-    async (response: any, path: string): Promise<{ metaPatch: Record<string, string> | null; org: string | null }> => {
+    async (
+      response: any,
+      path: string,
+      intent?: { rename: boolean; title: boolean },
+    ): Promise<{ metaPatch: Record<string, string> | null; org: string | null }> => {
       const metaPatch = sanitizeMetadata(response?.metadata);
+      const modelFilename =
+        typeof response?.filename === 'string' && response.filename.trim() ? response.filename.trim() : null;
+
+      // Local models are unreliable at filling BOTH title and filename when asked
+      // to do both (they fill one, or narrate in `reply`). This workflow uses the
+      // same value for both, so mirror whichever one the model produced into the
+      // other when the user's intent for it is clear.
+      if (intent?.title && !metaPatch['ImageDescription'] && modelFilename) {
+        metaPatch['ImageDescription'] = modelFilename;
+      }
+
       const hasMeta = Object.keys(metaPatch).length > 0;
       if (hasMeta) await handleUpdateExif([path], metaPatch);
 
@@ -345,18 +409,22 @@ export default function AssistantPanel() {
         if (remove.length) orgParts.push(`tags -${remove.join(', -')}`);
       }
 
+      // Only ACT on a positive rating. Schema-constrained models often emit 0
+      // (or null) for fields they aren't changing, so treat 0 as "no change"
+      // rather than wiping an existing rating on every edit.
       if (typeof response?.rating === 'number') {
         const r = Math.max(0, Math.min(5, Math.round(response.rating)));
-        handleRate(r, [path]);
-        orgParts.push(r === 0 ? 'rating cleared' : `rating ${r}★`);
+        if (r >= 1) {
+          handleRate(r, [path]);
+          orgParts.push(`rating ${r}★`);
+        }
       }
 
+      // Only SET a real color; ignore none/null/empty so the assistant never
+      // clears a label just because the model filled the field with "none".
       if (typeof response?.colorLabel === 'string') {
         const c = response.colorLabel.trim().toLowerCase();
-        if (c === 'none' || c === 'null' || c === '') {
-          handleSetColorLabel(null, [path]);
-          orgParts.push('label cleared');
-        } else if (VALID_COLORS.has(c)) {
+        if (VALID_COLORS.has(c)) {
           const curTags = useLibraryStore.getState().imageList.find((i) => i.path === path)?.tags || [];
           const curColor = curTags.find((tg: string) => tg.startsWith('color:'))?.slice(6) || null;
           if (curColor !== c) handleSetColorLabel(c, [path]);
@@ -364,9 +432,12 @@ export default function AssistantPanel() {
         }
       }
 
-      if (typeof response?.filename === 'string' && response.filename.trim()) {
-        const newPath = await handleRenameToName(path, response.filename);
-        if (newPath) orgParts.push(`renamed to ${newPath.split(/[\\/]/).pop() || response.filename}`);
+      // Rename to the model's filename, or — if the user asked to rename but the
+      // model only produced a title — mirror the title into the filename.
+      const renameTo = modelFilename || (intent?.rename ? metaPatch['ImageDescription'] || null : null);
+      if (renameTo) {
+        const newPath = await handleRenameToName(path, renameTo);
+        if (newPath) orgParts.push(`renamed to ${newPath.split(/[\\/]/).pop() || renameTo}`);
       }
 
       return { metaPatch: hasMeta ? metaPatch : null, org: orgParts.length ? orgParts.join(' · ') : null };
@@ -433,6 +504,17 @@ export default function AssistantPanel() {
         case 'new':
           newConversation();
           return;
+        case 'reset':
+          clearAll();
+          // Belt-and-suspenders: also wipe the persisted copy directly, so the
+          // history can't rehydrate from localStorage on the next load.
+          try {
+            (useAssistantStore as any).persist?.clearStorage?.();
+          } catch {
+            /* ignore */
+          }
+          toast.success(t('editor.assistant.resetDone', 'Cleared all chat history.'));
+          return;
         case 'help':
         case '?':
           addMessage({
@@ -452,7 +534,7 @@ export default function AssistantPanel() {
           });
       }
     },
-    [compactConversation, clearActive, newConversation, addMessage, t],
+    [compactConversation, clearActive, clearAll, newConversation, addMessage, t],
   );
 
   const send = useCallback(async () => {
@@ -497,6 +579,20 @@ export default function AssistantPanel() {
       content: m.content,
     }));
 
+    // Infer what the user wants written, scanning recent user turns so "do it
+    // again"/"do the same" follow-ups inherit the intent from earlier messages.
+    // Used to mirror title<->filename when a weak model fills only one of them.
+    const recentUserText = activeMessages
+      .filter((m) => m.role === 'user')
+      .slice(-8)
+      .map((m) => m.content)
+      .join('\n')
+      .toLowerCase();
+    const intent = {
+      rename: /\b(rename|renamed|file ?name|file'?s name)\b/.test(recentUserText),
+      title: /\btitle\b/.test(recentUserText),
+    };
+
     try {
       if (doBatch) {
         const paths = [...selectedPaths];
@@ -516,7 +612,10 @@ export default function AssistantPanel() {
           if (cancelRef.current) break;
           const name = (path.split(/[\\/]/).pop() || path).split('?vc=')[0];
           try {
-            const prepared: any = await invoke(Invokes.AssistantPrepareImage, { path, maxDim: 2000 });
+            const prepared: any = await invoke(Invokes.AssistantPrepareImage, {
+              path,
+              maxDim: imageMaxDim,
+            });
             const response: any = await invoke(Invokes.AssistantChat, {
               messages: batchHistory,
               adjustments: null,
@@ -525,7 +624,7 @@ export default function AssistantPanel() {
               model: selectedModel || null,
             });
             if (cancelRef.current) break;
-            const { metaPatch, org } = await applyMetaOrg(response, path);
+            const { metaPatch, org } = await applyMetaOrg(response, path, intent);
             done += 1;
             addMessage({
               id: nextMessageId(),
@@ -562,7 +661,7 @@ export default function AssistantPanel() {
 
       let images = outgoing.map((a) => ({ mediaType: a.mediaType, data: a.data }));
       if (willAttachViewer && viewerUrl) {
-        const viewer = await blobUrlToImage(viewerUrl);
+        const viewer = await blobUrlToImage(viewerUrl, imageMaxDim);
         if (viewer) images = [viewer];
       }
       const response: any = await invoke(Invokes.AssistantChat, {
@@ -587,7 +686,7 @@ export default function AssistantPanel() {
       let metaPatch: Record<string, string> | null = null;
       let appliedOrganization: string | null = null;
       if (currentImage) {
-        const res = await applyMetaOrg(response, currentImage.path);
+        const res = await applyMetaOrg(response, currentImage.path, intent);
         metaPatch = res.metaPatch;
         appliedOrganization = res.org;
       }
@@ -618,7 +717,19 @@ export default function AssistantPanel() {
     } finally {
       setLoading(false);
     }
-  }, [input, attachments, isLoading, runCommand, addMessage, setLoading, setAdjustments, applyMetaOrg, selectedModel, t]);
+  }, [
+    input,
+    attachments,
+    isLoading,
+    runCommand,
+    addMessage,
+    setLoading,
+    setAdjustments,
+    applyMetaOrg,
+    selectedModel,
+    imageMaxDim,
+    t,
+  ]);
 
   const stop = useCallback(() => {
     cancelRef.current = true;

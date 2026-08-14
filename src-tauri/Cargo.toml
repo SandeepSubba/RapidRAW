@@ -80,7 +80,15 @@ tether-usb = ["dep:gphoto2"]
 [target.'cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))'.dependencies]
 trash = "5.2.6"
 tauri-plugin-single-instance = "2.4.2"
-reqwest = { version = "0.13", default-features = false, features = ["json", "multipart", "rustls"] }
+
+# TLS backend: use the OS-native stack (schannel on Windows, Secure Transport on
+# macOS) instead of rustls. rustls is strict about TLS close_notify and its
+# ClientHello fingerprint can be dropped by some networks (observed from Hong Kong
+# to api.moonshot.ai: "peer closed connection without sending TLS close_notify /
+# unexpected_eof"). The OS stack matches the system browser/PowerShell and
+# connects cleanly. Linux keeps rustls (below) to avoid an OpenSSL dependency.
+[target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
+reqwest = { version = "0.13", default-features = false, features = ["json", "multipart", "native-tls"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc = "0.2"
@@ -97,6 +105,7 @@ include_dir = "0.7.4"
 gtk = "0.18.2"
 webkit2gtk = "=2.0.2"
 webkit2gtk-nvidia-quirk = "1.4"
+reqwest = { version = "0.13", default-features = false, features = ["json", "multipart", "rustls"] }
 
 [build-dependencies]
 tauri-build = { version = "2.6", features = [] }

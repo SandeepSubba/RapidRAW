@@ -12,6 +12,7 @@ import {
   SlidersHorizontal,
   Keyboard,
   Bookmark,
+  RefreshCw,
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -145,6 +146,9 @@ export default function SettingsPanel({
     success: null,
     message: '',
   });
+  const [assistantModels, setAssistantModels] = useState<string[]>([]);
+  const [assistantModelsLoading, setAssistantModelsLoading] = useState(false);
+  const [assistantModelsError, setAssistantModelsError] = useState(false);
   const [newShortcut, setNewShortcut] = useState('');
   const [newAiTag, setNewAiTag] = useState('');
 
@@ -554,6 +558,26 @@ export default function SettingsPanel({
       });
     }
   };
+
+  const refreshAssistantModels = async () => {
+    setAssistantModelsError(false);
+    setAssistantModelsLoading(true);
+    try {
+      const list: any = await invoke(Invokes.AssistantListModels);
+      setAssistantModels(Array.isArray(list) ? list : []);
+    } catch {
+      setAssistantModels([]);
+      setAssistantModelsError(true);
+    } finally {
+      setAssistantModelsLoading(false);
+    }
+  };
+
+  // Load the model list on mount and whenever the (saved) provider/endpoint changes.
+  useEffect(() => {
+    refreshAssistantModels();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appSettings?.assistantProvider, appSettings?.assistantEndpoint]);
 
   const closeConfirmModal = () => {
     setConfirmModalState({ ...confirmModalState, isOpen: false });
@@ -1829,19 +1853,69 @@ export default function SettingsPanel({
                       label={t('settings.assistant.model', 'Model')}
                       description={t(
                         'settings.assistant.modelDesc',
-                        'Optional. Defaults: LM Studio uses the loaded model; OpenAI gpt-4o-mini; Anthropic claude-3-5-sonnet-latest.',
+                        'Pick a loaded model from the list (hit refresh after loading one in your provider). For vision/OCR, choose a vision-capable model. Blank = provider default.',
                       )}
                     >
-                      <Input
-                        className="grow"
-                        onBlur={() => onSettingsChange({ ...appSettings, assistantModel })}
-                        onChange={(e: any) => setAssistantModel(e.target.value)}
-                        onKeyDown={(e: any) => e.stopPropagation()}
-                        placeholder={t('settings.assistant.modelPlaceholder', 'Model name (blank = provider default)')}
-                        type="text"
-                        value={assistantModel}
-                        bgClassName="bg-bg-primary"
-                      />
+                      <div className="flex flex-col gap-2 w-full">
+                        <div className="flex items-center gap-2">
+                          <select
+                            value={assistantModel}
+                            onChange={(e) => {
+                              setAssistantModel(e.target.value);
+                              onSettingsChange({ ...appSettings, assistantModel: e.target.value });
+                            }}
+                            onKeyDown={(e) => e.stopPropagation()}
+                            className="grow min-w-0 rounded-md bg-bg-primary border border-border-color px-2 py-2 text-sm text-text-primary focus:outline-none focus:border-accent"
+                          >
+                            <option value="">{t('settings.assistant.defaultModel', 'Provider default')}</option>
+                            {assistantModel && !assistantModels.includes(assistantModel) && (
+                              <option value={assistantModel}>{assistantModel}</option>
+                            )}
+                            {assistantModels.map((m) => (
+                              <option key={m} value={m}>
+                                {m}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            onClick={refreshAssistantModels}
+                            disabled={assistantModelsLoading}
+                            title={t('settings.assistant.refreshModels', 'Refresh models')}
+                            className="p-2 rounded-md hover:bg-bg-primary text-text-secondary hover:text-text-primary transition-colors shrink-0 disabled:opacity-50"
+                          >
+                            <RefreshCw size={16} className={assistantModelsLoading ? 'animate-spin' : ''} />
+                          </button>
+                        </div>
+                        {(assistantModelsError || (!assistantModelsLoading && assistantModels.length === 0)) && (
+                          <>
+                            <Text variant={TextVariants.small} color={TextColors.secondary}>
+                              {assistantModelsError
+                                ? t(
+                                    'settings.assistant.modelsError',
+                                    "Couldn't list models — is the provider running? You can still type a name below.",
+                                  )
+                                : t(
+                                    'settings.assistant.modelsEmpty',
+                                    'No models found. Load one in your provider, then hit refresh — or type a name below.',
+                                  )}
+                            </Text>
+                            <Input
+                              className="grow"
+                              onBlur={() => onSettingsChange({ ...appSettings, assistantModel })}
+                              onChange={(e: any) => setAssistantModel(e.target.value)}
+                              onKeyDown={(e: any) => e.stopPropagation()}
+                              placeholder={t(
+                                'settings.assistant.modelPlaceholder',
+                                'Model name (blank = provider default)',
+                              )}
+                              type="text"
+                              value={assistantModel}
+                              bgClassName="bg-bg-primary"
+                            />
+                          </>
+                        )}
+                      </div>
                     </SettingItem>
 
                     <SettingItem

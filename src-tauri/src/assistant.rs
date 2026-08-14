@@ -83,6 +83,7 @@ Rules:
 - Set any field you are NOT changing to null (adjustments, metadata, tags, rating, colorLabel, filename).
 - Use exactly the lowercase keys listed above (e.g. "title", not "Title").
 - Only include fields you actually want to change; use absolute values within the ranges above.
+- NEVER change adjustments, rating, or colorLabel unless the user EXPLICITLY asks for that kind of change. For a metadata / title / filename / tag request, do NOT touch adjustments, rating, or colorLabel at all — omit them (or set them to null). Applying an unrequested exposure change can black out the image.
 - Take the current adjustments and current metadata (provided below) into account so your changes are sensible.
 - If an image is attached, look at it and base your edits on what you see.
 - When the user asks you to read/OCR text from the image and store it (e.g. "read the code on the label and write it to the title", or "put it on the tags"), extract the exact text, apply any requested transformation, and put the result in the field they named.
@@ -123,15 +124,27 @@ fn models_url(base: &str) -> String {
 // Turn a provider's error response into a readable message. OpenAI and Anthropic
 // both nest a human message at error.message; fall back to the raw body.
 fn provider_error(label: &str, status: reqwest::StatusCode, body: &str) -> String {
+    let mut msg = None;
     if let Ok(v) = serde_json::from_str::<Value>(body) {
-        if let Some(msg) = v["error"]["message"]
+        // error.message (OpenAI/Anthropic), top-level message, or a bare string
+        // error field (LM Studio returns {"error":"...context size..."}).
+        msg = v["error"]["message"]
             .as_str()
             .or_else(|| v["message"].as_str())
-        {
-            return format!("{}: {}", label, msg);
-        }
+            .or_else(|| v["error"].as_str())
+            .map(|s| s.to_string());
     }
-    format!("{} error {}: {}", label, status, truncate(body, 400))
+    let msg = msg.unwrap_or_else(|| format!("error {}: {}", status, truncate(body, 400)));
+    // The most common local-model failure: the image + prompt overflow a small
+    // context window. Give an actionable hint instead of a cryptic token count.
+    let lower = msg.to_lowercase();
+    if lower.contains("context size") || lower.contains("context length") || lower.contains("context window") {
+        return format!(
+            "{}: {}\n\nThe image + prompt are larger than the model's context window. In LM Studio, reload the model with a larger context length (8192 or more), or attach a smaller image.",
+            label, msg
+        );
+    }
+    format!("{}: {}", label, msg)
 }
 
 fn normalize_role(role: &str) -> &str {
@@ -276,32 +289,81 @@ async fn call_openai_compatible(
         let attach = i == last_idx && role == "user";
         msgs.push(json!({ "role": role, "content": openai_content(&m.content, images, attach) }));
     }
-    let body = json!({
+    // Force HTTP/1.1: reqwest+rustls otherwise negotiates HTTP/2 via ALPN, and
+    // some endpoints (seen with api.moonshot.ai) reset the h2 connection, which
+    // surfaces as an opaque "error sending request" with no HTTP response.
+    let client = reqwest::Client::builder()
+        .http1_only()
+        .build()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?;
+    // NOTE: no `temperature` — some models (e.g. Moonshot/Kimi) reject any value
+    // other than their fixed default and 400 the whole request. The JSON schema
+    // constrains the output shape regardless, so a custom temperature isn't worth
+    // the compatibility cost.
+    let base_body = json!({
         "model": model,
         "messages": msgs,
-        "temperature": 0.3,
         "stream": false,
     });
 
-    let client = reqwest::Client::new();
-    let mut req = client.post(&url).json(&body);
-    if !api_key.is_empty() {
-        req = req.bearer_auth(api_key);
+    // One attempt with a specific body; returns Ok(content) or Err(message).
+    let attempt = |body: Value| {
+        let client = client.clone();
+        let url = url.clone();
+        let api_key = api_key.to_string();
+        let provider_label = provider_label.to_string();
+        async move {
+            let mut req = client.post(&url).json(&body);
+            if !api_key.is_empty() {
+                req = req.bearer_auth(&api_key);
+            }
+            let resp = req.send().await.map_err(|e| {
+                // Include the underlying cause chain — reqwest's top-level message
+                // ("error sending request for url ...") hides whether it was TLS,
+                // DNS, a reset connection, or a timeout.
+                let mut msg = format!("Could not reach {} at {}: {}", provider_label, url, e);
+                let mut src = std::error::Error::source(&e);
+                while let Some(s) = src {
+                    msg.push_str(" | caused by: ");
+                    msg.push_str(&s.to_string());
+                    src = std::error::Error::source(s);
+                }
+                msg
+            })?;
+            let status = resp.status();
+            let text = resp.text().await.map_err(|e| e.to_string())?;
+            if !status.is_success() {
+                return Err(provider_error(&provider_label, status, &text));
+            }
+            let v: Value =
+                serde_json::from_str(&text).map_err(|e| format!("Bad JSON from {}: {}", provider_label, e))?;
+            v["choices"][0]["message"]["content"]
+                .as_str()
+                .map(|s| s.to_string())
+                .ok_or_else(|| format!("{} returned no message content", provider_label))
+        }
+    };
+
+    // Prefer a strict typed schema so small models place fields correctly.
+    let mut schema_body = base_body.clone();
+    schema_body["response_format"] = edits_response_format();
+    match attempt(schema_body).await {
+        Ok(content) => Ok(content),
+        Err(e) => {
+            // Fall back to a plain request if the server doesn't support
+            // response_format / json_schema; otherwise surface the real error.
+            let el = e.to_lowercase();
+            let unsupported = el.contains("response_format")
+                || el.contains("response format")
+                || el.contains("json_schema")
+                || el.contains("json schema");
+            if unsupported {
+                attempt(base_body).await
+            } else {
+                Err(e)
+            }
+        }
     }
-    let resp = req
-        .send()
-        .await
-        .map_err(|e| format!("Could not reach {} at {}: {}", provider_label, url, e))?;
-    let status = resp.status();
-    let text = resp.text().await.map_err(|e| e.to_string())?;
-    if !status.is_success() {
-        return Err(provider_error(provider_label, status, &text));
-    }
-    let v: Value = serde_json::from_str(&text).map_err(|e| format!("Bad JSON from {}: {}", provider_label, e))?;
-    v["choices"][0]["message"]["content"]
-        .as_str()
-        .map(|s| s.to_string())
-        .ok_or_else(|| format!("{} returned no message content", provider_label))
 }
 
 async fn call_anthropic(
@@ -420,6 +482,81 @@ fn apply_edits_tool() -> Value {
                 "filename": { "type": "string", "description": "New file name WITHOUT extension (renames the file on disk)." }
             },
             "required": ["reply"]
+        }
+    })
+}
+
+// OpenAI-compatible `response_format` that pins the exact JSON shape. Small local
+// models otherwise misplace fields (e.g. dumping `title`/`filename` into
+// `adjustments`). The typed properties + `additionalProperties:false` stop
+// misplacement, while `required` is ONLY `["reply"]` so the model is free to OMIT
+// fields it isn't changing. (Requiring every field pushes weak models to invent
+// values — e.g. exposure -5, which blacks out the image — so we must not do that.)
+fn edits_response_format() -> Value {
+    let num = json!({ "type": ["number", "null"] });
+    let adjustments_props: Value = {
+        let keys = [
+            "exposure",
+            "contrast",
+            "highlights",
+            "shadows",
+            "whites",
+            "blacks",
+            "temperature",
+            "tint",
+            "vibrance",
+            "saturation",
+            "hue",
+            "clarity",
+            "dehaze",
+            "structure",
+            "sharpness",
+        ];
+        let mut m = serde_json::Map::new();
+        for k in keys {
+            m.insert(k.to_string(), num.clone());
+        }
+        Value::Object(m)
+    };
+    json!({
+        "type": "json_schema",
+        "json_schema": {
+            "name": "rapidraw_edits",
+            "strict": false,
+            "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["reply"],
+                "properties": {
+                    "reply": { "type": "string" },
+                    "adjustments": {
+                        "type": ["object", "null"],
+                        "additionalProperties": false,
+                        "properties": adjustments_props
+                    },
+                    "metadata": {
+                        "type": ["object", "null"],
+                        "additionalProperties": false,
+                        "properties": {
+                            "title": { "type": ["string", "null"] },
+                            "author": { "type": ["string", "null"] },
+                            "copyright": { "type": ["string", "null"] },
+                            "comments": { "type": ["string", "null"] }
+                        }
+                    },
+                    "tags": {
+                        "type": ["object", "null"],
+                        "additionalProperties": false,
+                        "properties": {
+                            "add": { "type": ["array", "null"], "items": { "type": "string" } },
+                            "remove": { "type": ["array", "null"], "items": { "type": "string" } }
+                        }
+                    },
+                    "rating": { "type": ["integer", "null"], "minimum": 0, "maximum": 5 },
+                    "colorLabel": { "type": ["string", "null"], "enum": ["red", "yellow", "green", "blue", "purple", "none", null] },
+                    "filename": { "type": ["string", "null"] }
+                }
+            }
         }
     })
 }

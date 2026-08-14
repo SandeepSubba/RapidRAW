@@ -37,6 +37,8 @@ interface AssistantState {
   deleteConversation: (id: string) => void;
   // Empties the active conversation (keeps the row, resets its title).
   clearActive: () => void;
+  // Wipes ALL conversations and persisted history — a full fresh start.
+  clearAll: () => void;
   // Replace the active conversation's messages wholesale (used by /compact).
   replaceActiveMessages: (messages: Array<AssistantMessage>) => void;
 }
@@ -132,6 +134,8 @@ export const useAssistantStore = create<AssistantState>()(
             c.id === state.activeId ? { ...c, messages: [], title: DEFAULT_TITLE, updatedAt: Date.now() } : c,
           ),
         })),
+
+      clearAll: () => set({ conversations: [], activeId: null }),
 
       replaceActiveMessages: (messages) =>
         set((state) => ({
