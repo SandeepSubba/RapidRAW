@@ -95,6 +95,9 @@ export enum Invokes {
   ListImagesInDir = 'list_images_in_dir',
   ListImagesRecursive = 'list_images_recursive',
   LoadImage = 'load_image',
+  UpdateNegativeConversion = 'update_negative_conversion',
+  SetNegativeFilmBase = 'set_negative_film_base',
+  GetNegativeRawPreview = 'get_negative_raw_preview',
   LoadMetadata = 'load_metadata',
   LoadPresets = 'load_presets',
   LoadSettings = 'load_settings',
@@ -211,6 +214,7 @@ export type GroupPreference = 'jpeg' | 'raw';
 export type GroupingMode = 'off' | GroupPreference;
 
 export interface AppSettings {
+  filmPanelAdvanced?: boolean;
   aiConnectorAddress?: string;
   aiProvider?: string;
   assistantProvider?: string;

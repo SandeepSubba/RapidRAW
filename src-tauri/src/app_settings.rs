@@ -405,6 +405,8 @@ pub struct AutoProfile {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
+    #[serde(default)]
+    pub film_panel_advanced: Option<bool>,
     pub last_root_path: Option<String>,
     #[serde(default)]
     pub root_folders: Vec<String>,
@@ -556,6 +558,7 @@ pub struct AppSettings {
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
+            film_panel_advanced: None,
             last_root_path: None,
             root_folders: Vec::new(),
             pinned_folders: Vec::new(),

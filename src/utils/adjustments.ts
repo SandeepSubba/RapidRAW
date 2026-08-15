@@ -389,6 +389,7 @@ export interface SectionVisibility {
   color: boolean;
   details: boolean;
   effects: boolean;
+  film: boolean;
 }
 
 export const COLOR_LABELS: Array<Color> = [
@@ -497,6 +498,7 @@ export const INITIAL_MASK_ADJUSTMENTS: MaskAdjustments = {
     color: true,
     details: true,
     effects: true,
+    film: true,
   },
   shadows: 0,
   sharpness: 0,
@@ -596,6 +598,7 @@ export const INITIAL_ADJUSTMENTS: Adjustments = {
     color: true,
     details: true,
     effects: true,
+    film: true,
   },
   shadows: 0,
   sharpness: 0,
@@ -934,4 +937,6 @@ export const ADJUSTMENT_SECTIONS: Sections = {
     Effect.LensBlurMinFade,
     Effect.LensBlurMaxFade,
   ],
+  // Sidecar-owned negative-conversion tuning; no copyable keys on purpose.
+  film: [],
 };

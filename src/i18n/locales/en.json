@@ -98,7 +98,10 @@
       "blueYellow": "Blue/Yellow",
       "centre": "Centré",
       "chromaticAberration": "Chromatic Aberration",
-      "clarity": "Clarity", "skinSmoothing": "Skin Smoothing", "skinTexture": "Skin Texture", "skinSmoothingScale": "Smoothing Scale",
+      "clarity": "Clarity",
+      "skinSmoothing": "Skin Smoothing",
+      "skinTexture": "Skin Texture",
+      "skinSmoothingScale": "Smoothing Scale",
       "color": "Color",
       "dehaze": "Dehaze",
       "luminance": "Luminance",
@@ -301,13 +304,21 @@
         "color": "Color",
         "curves": "Curves",
         "details": "Details",
-        "effects": "Effects"
+        "effects": "Effects",
+        "film": "Film"
       },
       "title": "Adjustments",
       "tooltips": {
         "autoAdjust": "Auto Adjust Image",
         "resetAdjustments": "Reset Adjustments",
         "toggleAnalytics": "Toggle Analytics Display"
+      },
+      "film": {
+        "advanced": "Advanced",
+        "clipBlack": "Black Clip",
+        "clipWhite": "White Clip",
+        "sampleBase": "Sample film base",
+        "sampleBaseHint": "Click the clear film rebate on the raw negative to pin the base point."
       }
     },
     "ai": {
@@ -1127,7 +1138,9 @@
       "quickErase": "Quick Erase",
       "quickEraser": "Quick Eraser",
       "radial": "Radial",
-      "sky": "Sky", "eyes": "Eyes", "mouth": "Mouth",
+      "sky": "Sky",
+      "eyes": "Eyes",
+      "mouth": "Mouth",
       "subject": "Subject"
     }
   },

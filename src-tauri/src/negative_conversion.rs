@@ -393,6 +393,33 @@ pub async fn update_negative_conversion(
     Ok(results)
 }
 
+/// Small gamma-lifted JPEG of the *unconverted* negative, so the film-base
+/// eyedropper has the raw orange rebate to click on (the editor view shows the
+/// converted positive, usually cropped past the rebate).
+#[tauri::command]
+pub async fn get_negative_raw_preview(path: String, app_handle: AppHandle) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || -> Result<String, String> {
+        use base64::{engine::general_purpose::STANDARD, Engine};
+        let (source_path, _) = parse_virtual_path(&path);
+        let real_path = source_path.to_string_lossy().to_string();
+        let img = load_raw_for(&real_path, &app_handle)?;
+        let mut rgb = img.thumbnail(1200, 1200).to_rgb32f();
+        for p in rgb.pixels_mut() {
+            for c in 0..3 {
+                p[c] = p[c].clamp(0.0, 1.0).powf(1.0 / 2.2);
+            }
+        }
+        let rgb8 = DynamicImage::ImageRgb32F(rgb).to_rgb8();
+        let mut jpeg = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 85)
+            .encode_image(&rgb8)
+            .map_err(|e| e.to_string())?;
+        Ok(format!("data:image/jpeg;base64,{}", STANDARD.encode(&jpeg)))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Pin the conversion's film-base (per-channel bounds min) to a clicked point
 /// on the raw negative — the library-image counterpart of the scanner's
 /// film-base eyedropper. `x`/`y` are normalized coords in raw image space.

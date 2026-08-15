@@ -2509,6 +2509,7 @@ pub fn run() {
             negative_conversion::set_negative_conversion,
             negative_conversion::update_negative_conversion,
             negative_conversion::set_negative_film_base,
+            negative_conversion::get_negative_raw_preview,
             tethering::start_tether_session,
             tethering::stop_tether_session,
             tethering::usb::tether_list_cameras,

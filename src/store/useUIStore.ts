@@ -9,6 +9,7 @@ export interface CollapsibleSectionsState {
   curves: boolean;
   details: boolean;
   effects: boolean;
+  film: boolean;
 }
 
 export interface ConfirmModalState {
@@ -175,7 +176,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   activePanel: Panel.Adjustments,
   renderedPanel: Panel.Adjustments,
   slideDirection: 1,
-  collapsibleSectionsState: { basic: true, color: false, curves: true, details: false, effects: false },
+  collapsibleSectionsState: { basic: true, color: false, curves: true, details: false, effects: false, film: true },
 
   isCreateFolderModalOpen: false,
   isRenameFolderModalOpen: false,

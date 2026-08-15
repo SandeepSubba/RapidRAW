@@ -8,6 +8,7 @@ import CurveGraph from '../../adjustments/Curves';
 import ColorPanel from '../../adjustments/Color';
 import DetailsPanel from '../../adjustments/Details';
 import EffectsPanel from '../../adjustments/Effects';
+import FilmPanel from '../../adjustments/FilmPanel';
 import CollapsibleSection from '../../ui/CollapsibleSection';
 import Waveform from '../editor/Waveform';
 import Resizer from '../../ui/Resizer';
@@ -290,12 +291,17 @@ export default function Controls() {
         )}
         {selectedImage ? (
           Object.keys(ADJUSTMENT_SECTIONS).map((sectionName: string) => {
+            // Film tuning only exists for converted negatives.
+            if (sectionName === 'film' && !(adjustments as any)?.negativeConversion?.enabled) {
+              return null;
+            }
             const SectionComponent: any = {
               basic: BasicAdjustments,
               curves: CurveGraph,
               color: ColorPanel,
               details: DetailsPanel,
               effects: EffectsPanel,
+              film: FilmPanel,
             }[sectionName];
 
             const title = t(`editor.adjustments.sections.${sectionName}`);
