@@ -20,7 +20,11 @@ const FILM_TYPES: { id: FilmType; label: string }[] = [
 ];
 const FALLBACK_RESOLUTIONS = [900, 1800, 3600, 7200];
 
-type PreviewResult = { data: string; crop: [number, number, number, number] | null };
+type PreviewResult = {
+  data: string;
+  crop: [number, number, number, number] | null;
+  histogram: [number[], number[], number[]] | null;
+};
 
 export function detectScanner() {
   const { setScanner } = useScannerStore.getState();
@@ -136,6 +140,10 @@ export default function ScannerPane() {
   );
   const profiles = allProfiles(negativeProfiles);
   const [profileName, setProfileName] = useState<string | null>(null);
+  const [previewHist, setPreviewHist] = useState<[number[], number[], number[]] | null>(null);
+  // Densitometer: RGB (0-255) under the cursor, sampled from the preview bitmap.
+  const [probe, setProbe] = useState<[number, number, number] | null>(null);
+  const probeCanvas = useRef<HTMLCanvasElement | null>(null);
   const applyProfile = (name: string) => {
     const pr = profiles.find((x) => x.name === name);
     if (!pr) return;
@@ -182,6 +190,8 @@ export default function ScannerPane() {
         basePoint: s.basePoint,
       });
       s.setScanner({ previewData: res.data, cropRect: res.crop, cropManual: false, scanning: 'idle', progress: 0 });
+      setPreviewHist(res.histogram ?? null);
+      probeCanvas.current = null;
     } catch (e) {
       s.setScanner({ scanning: 'idle', progress: 0, error: String(e) });
     }
@@ -211,6 +221,8 @@ export default function ScannerPane() {
           previewData: res.data,
           cropRect: st.cropManual ? st.cropRect : raw ? null : res.crop,
         });
+        if (!raw) setPreviewHist(res.histogram ?? null);
+        probeCanvas.current = null;
       } catch {
         // No cached preview (or a scan is running) — settings still apply to the next scan.
       }
@@ -224,6 +236,24 @@ export default function ScannerPane() {
     const next = !s.eyedropping;
     s.setScanner({ eyedropping: next });
     rerenderPreview(0, next);
+  };
+
+  const handlePreviewMove = (e: any) => {
+    if (!s.scanAdvanced || !s.previewData) return;
+    const img = e.currentTarget as HTMLImageElement;
+    if (!probeCanvas.current) {
+      const c = document.createElement('canvas');
+      c.width = img.naturalWidth;
+      c.height = img.naturalHeight;
+      c.getContext('2d', { willReadFrequently: true })?.drawImage(img, 0, 0);
+      probeCanvas.current = c;
+    }
+    const ctx = probeCanvas.current.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return;
+    const x = Math.floor((e.nativeEvent.offsetX / img.clientWidth) * img.naturalWidth);
+    const y = Math.floor((e.nativeEvent.offsetY / img.clientHeight) * img.naturalHeight);
+    const d = ctx.getImageData(Math.min(x, img.naturalWidth - 1), Math.min(y, img.naturalHeight - 1), 1, 1).data;
+    setProbe([d[0], d[1], d[2]]);
   };
 
   const handlePreviewClick = (e: any) => {
@@ -347,6 +377,8 @@ export default function ScannerPane() {
               src={s.previewData}
               alt="Scan preview"
               onClick={handlePreviewClick}
+              onMouseMove={handlePreviewMove}
+              onMouseLeave={() => setProbe(null)}
               className={`block max-w-full max-h-full ${s.eyedropping ? 'cursor-crosshair' : ''}`}
             />
             {s.autoCrop && s.cropRect && !s.eyedropping && (
@@ -674,6 +706,35 @@ export default function ScannerPane() {
                     onChange={(name: string) => applyProfile(name)}
                   />
                 </div>
+                {previewHist && (
+                  <div>
+                    <svg viewBox="0 0 64 28" className="w-full h-12 rounded-md bg-surface/60" preserveAspectRatio="none">
+                      {(['#f87171', '#4ade80', '#60a5fa'] as const).map((color, c) => {
+                        const bins = previewHist[c];
+                        const max = Math.max(1, ...bins);
+                        const pts = bins
+                          .map((v, i) => `${i},${28 - (Math.log1p(v) / Math.log1p(max)) * 27}`)
+                          .join(' ');
+                        return (
+                          <polyline
+                            key={color}
+                            points={pts}
+                            fill="none"
+                            stroke={color}
+                            strokeWidth="1"
+                            opacity="0.9"
+                          />
+                        );
+                      })}
+                    </svg>
+                    <p className="text-[10px] text-text-secondary mt-0.5 h-3 font-mono">
+                      {probe
+                        ? `R ${probe[0]}  G ${probe[1]}  B ${probe[2]}` +
+                          (probe.some((v) => v >= 254) ? '  — clipped' : '')
+                        : 'Hover the preview to read RGB'}
+                    </p>
+                  </div>
+                )}
                 <Slider
                   label="Red (Cyan)"
                   min={0.5}

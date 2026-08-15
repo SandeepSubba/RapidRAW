@@ -59,6 +59,21 @@ pub struct ScannerDevice {
 pub struct PreviewResult {
     pub data: String,
     pub crop: Option<[f32; 4]>,
+    // 64-bin per-channel histogram of the rendered preview (R, G, B) for the
+    // scan pane's clipping readout; absent for the raw eyedropper view.
+    pub histogram: Option<[Vec<u32>; 3]>,
+}
+
+// ponytail: 64 bins from the 8-bit render is plenty for a rail-width sparkline.
+fn preview_histogram(img: &image::DynamicImage) -> [Vec<u32>; 3] {
+    let rgb = img.to_rgb8();
+    let mut h = [vec![0u32; 64], vec![0u32; 64], vec![0u32; 64]];
+    for p in rgb.pixels() {
+        for c in 0..3 {
+            h[c][(p[c] >> 2) as usize] += 1;
+        }
+    }
+    h
 }
 
 // What the DETECTED scanner actually supports, parsed from `scanimage -A` so the
@@ -1096,7 +1111,7 @@ fn render_preview(
     // target the orange rebate; returned directly since it needs no conversion.
     if raw {
         *tone_slot.lock().unwrap() = None;
-        return Ok(PreviewResult { data: raw_preview_data(tif, rotation_steps)?, crop: None });
+        return Ok(PreviewResult { data: raw_preview_data(tif, rotation_steps)?, crop: None, histogram: None });
     }
     // Loaded for tone (converting negatives) and/or the auto-crop overlay rect.
     let convert = film_type != "e6";
@@ -1166,7 +1181,11 @@ fn render_preview(
     image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 88)
         .encode_image(&img.to_rgb8())
         .map_err(|e| e.to_string())?;
-    Ok(PreviewResult { data: format!("data:image/jpeg;base64,{}", STANDARD.encode(&jpeg)), crop })
+    Ok(PreviewResult {
+        data: format!("data:image/jpeg;base64,{}", STANDARD.encode(&jpeg)),
+        crop,
+        histogram: Some(preview_histogram(&img)),
+    })
 }
 
 #[tauri::command]
