@@ -28,6 +28,7 @@ interface ScannerState {
   samples: number;
   irClean: boolean;
   irSensitivity: number; // 0..100, 50 = default IR dust-removal aggressiveness
+  showDefects: boolean; // B&W: highlight detected specks on the preview
   bitDepth: number;
   autoCrop: boolean;
   cropRect: [number, number, number, number] | null;
@@ -77,6 +78,7 @@ export const useScannerStore = create<ScannerState>()(
       samples: 1,
       irClean: false,
       irSensitivity: 50,
+      showDefects: false,
       bitDepth: 12,
       autoCrop: false,
       cropRect: null,

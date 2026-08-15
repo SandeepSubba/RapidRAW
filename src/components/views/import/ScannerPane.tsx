@@ -181,6 +181,7 @@ export default function ScannerPane() {
         exposureOffset: s.exposureOffset,
         contrast: s.contrast,
         look: lookOf(s),
+        showDefects: s.irClean && s.filmType === 'bw' && s.showDefects,
         rotationSteps: s.rotationSteps,
         autoCrop: s.autoCrop,
         sourceVisible: s.caps?.sourceVisible ?? '',
@@ -209,6 +210,7 @@ export default function ScannerPane() {
           exposureOffset: st.exposureOffset,
           contrast: st.contrast,
           look: lookOf(st),
+          showDefects: st.irClean && st.filmType === 'bw' && st.showDefects,
           rotationSteps: st.rotationSteps,
           autoCrop: raw ? false : st.autoCrop,
           raw,
@@ -613,25 +615,46 @@ export default function ScannerPane() {
           </select>
         </div>
 
-        {s.filmType !== 'bw' && hasIR && (
+        {(s.filmType === 'bw' || hasIR) && (
           <div>
             <Switch
-              label="Dust removal (IR)"
+              label={s.filmType === 'bw' ? 'Dust removal (software)' : 'Dust removal (IR)'}
               checked={s.irClean}
               disabled={busy}
-              onChange={(on) => s.setScanner({ irClean: on })}
-              tooltip="extra infrared pass finds dust & scratches, fills them · not for silver B&W film"
+              onChange={(on) => {
+                s.setScanner({ irClean: on, showDefects: on ? s.showDefects : false });
+                if (!on && s.showDefects && s.previewData) rerenderPreview(100);
+              }}
+              tooltip={
+                s.filmType === 'bw'
+                  ? 'silver film blocks infrared, so defects are detected in the visible scan instead — conservative by design, grain stays'
+                  : 'extra infrared pass finds dust & scratches, fills them · not for silver B&W film'
+              }
             />
             {s.irClean && (
               <div className="mt-3" data-tooltip="higher removes more dust but can soften fine detail">
                 <Slider
-                  label="IR sensitivity"
+                  label={s.filmType === 'bw' ? 'Sensitivity' : 'IR sensitivity'}
                   min={0}
                   max={100}
                   step={1}
                   value={s.irSensitivity}
                   defaultValue={50}
                   onChange={(e: any) => s.setScanner({ irSensitivity: parseInt(e.target.value, 10) })}
+                />
+              </div>
+            )}
+            {s.irClean && s.filmType === 'bw' && (
+              <div className="mt-2">
+                <Switch
+                  label="Show detected specks"
+                  checked={s.showDefects}
+                  disabled={busy || !s.previewData}
+                  onChange={(on) => {
+                    s.setScanner({ showDefects: on });
+                    if (s.previewData) rerenderPreview(100);
+                  }}
+                  tooltip="highlights what the cleaner would fill, in red, on the preview"
                 />
               </div>
             )}

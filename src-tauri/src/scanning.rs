@@ -533,6 +533,77 @@ fn downsample2(src: &[f32], w: usize, h: usize) -> Vec<f32> {
     out
 }
 
+// SRDx-style software defect detection for silver B&W film, where IR is blind
+// (the silver image blocks infrared everywhere, dust included). Dust and
+// scratches block light in the visible pass too, so the same residual detector
+// works on the visible luma — but film grain and real image detail also make
+// dark local features, so detection is deliberately conservative: a higher
+// threshold floor plus a connected-area cap so only small specks qualify and
+// image edges/detail are never inpainted.
+fn software_defect_mask(vis_luma: &[f32], w: usize, h: usize, dpi: u32, thr_mult: f32) -> Vec<bool> {
+    let mut mask = ir_defect_mask(vis_luma, vis_luma, w, h, dpi, thr_mult);
+    // Area cap: ~0.4mm speck at this dpi. Anything larger is image content.
+    let max_area = {
+        let d = ((dpi as f32 / 25.4) * 0.4) as usize; // 0.4mm in px
+        (d * d).max(64)
+    };
+    // ponytail: one flood-fill pass; per-component labeling is all we need.
+    let mut seen = vec![false; w * h];
+    let mut stack = Vec::new();
+    for start in 0..w * h {
+        if !mask[start] || seen[start] {
+            continue;
+        }
+        stack.clear();
+        stack.push(start);
+        seen[start] = true;
+        let mut comp = vec![start];
+        while let Some(i) = stack.pop() {
+            let (x, y) = (i % w, i / w);
+            let mut push = |j: usize| {
+                if mask[j] && !seen[j] {
+                    seen[j] = true;
+                    stack.push(j);
+                    comp.push(j);
+                }
+            };
+            if x > 0 { push(i - 1); }
+            if x + 1 < w { push(i + 1); }
+            if y > 0 { push(i - w); }
+            if y + 1 < h { push(i + w); }
+        }
+        if comp.len() > max_area {
+            for i in comp {
+                mask[i] = false;
+            }
+        }
+    }
+    mask
+}
+
+// Software clean for B&W: detect on the visible luma, inpaint in place.
+fn software_clean_scan(vis_path: &Path, dpi: u32, sensitivity: f32) -> Result<usize, String> {
+    // More conservative map than IR: 50 -> 8.0; 0 -> 11.5; 100 -> 4.5.
+    let thr_mult = (11.5 - 0.07 * sensitivity.clamp(0.0, 100.0)).clamp(4.5, 11.5);
+    let vis = open_image(vis_path)?.to_rgb32f();
+    let (w, h) = vis.dimensions();
+    let (w, h) = (w as usize, h as usize);
+    let vis_luma: Vec<f32> = vis.as_raw().chunks_exact(3).map(|c| (c[0] + c[1] + c[2]) / 3.0).collect();
+    let mask = software_defect_mask(&vis_luma, w, h, dpi, thr_mult);
+    let count = mask.iter().filter(|m| **m).count();
+    if count == 0 {
+        return Ok(0);
+    }
+    let mut rgb = vis.into_raw();
+    fill_masked(&mut rgb, &mask, w, h);
+    let data: Vec<u16> = rgb.iter().map(|v| (v.clamp(0.0, 1.0) * 65535.0) as u16).collect();
+    image::ImageBuffer::<image::Rgb<u16>, Vec<u16>>::from_raw(w as u32, h as u32, data)
+        .ok_or_else(|| "buffer mismatch in software clean".to_string())?
+        .save_with_format(vis_path, image::ImageFormat::Tiff)
+        .map_err(|e| e.to_string())?;
+    Ok(count)
+}
+
 // Run the IR clean on a finished visible scan: returns defect pixel count.
 // `sensitivity` (0..100, 50 = default) tunes how aggressively defects are caught:
 // higher removes more (lower MAD multiplier), lower is more conservative.
@@ -1098,6 +1169,7 @@ fn render_preview(
     auto_crop: bool,
     raw: bool,
     base_point: Option<(f32, f32)>,
+    show_defects: bool,
     app_handle: &AppHandle,
     tone_slot: &Arc<Mutex<Option<ToneSolve>>>,
 ) -> Result<PreviewResult, String> {
@@ -1177,9 +1249,47 @@ fn render_preview(
     let img = crate::file_management::generate_thumbnail_data(&path_str, context.as_ref(), None, app_handle)
         .map_err(|e| e.to_string())?;
 
+    let mut out_rgb = img.to_rgb8();
+    // Defect-mask preview (B&W only — the same software detector the scan will
+    // run): paint detected specks red so sensitivity can be judged before
+    // committing a full scan.
+    if show_defects && film_type == "bw" {
+        if let Ok(vis) = open_image(tif) {
+            use image::GenericImageView as _;
+            let (vw, vh) = vis.dimensions();
+            let luma: Vec<f32> = vis
+                .to_rgb32f()
+                .as_raw()
+                .chunks_exact(3)
+                .map(|c| (c[0] + c[1] + c[2]) / 3.0)
+                .collect();
+            // ponytail: preview dpi isn't known here — infer from width
+            // (35mm frame ≈ 1.4in across); only sets the blur radius.
+            let dpi_equiv = ((vw as f32 / 1.4) as u32).clamp(300, 7200);
+            let mask = software_defect_mask(&luma, vw as usize, vh as usize, dpi_equiv, 8.0);
+            let mut m8 = image::GrayImage::from_fn(vw, vh, |x, y| {
+                image::Luma([if mask[(y * vw + x) as usize] { 255u8 } else { 0 }])
+            });
+            m8 = match rotation_steps % 4 {
+                1 => image::imageops::rotate90(&m8),
+                2 => image::imageops::rotate180(&m8),
+                3 => image::imageops::rotate270(&m8),
+                _ => m8,
+            };
+            let (ow, oh) = out_rgb.dimensions();
+            let m8 = image::imageops::resize(&m8, ow, oh, image::imageops::FilterType::Nearest);
+            for (p, m) in out_rgb.pixels_mut().zip(m8.pixels()) {
+                if m[0] > 0 {
+                    p[0] = 255;
+                    p[1] = 40;
+                    p[2] = 40;
+                }
+            }
+        }
+    }
     let mut jpeg = Vec::new();
     image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 88)
-        .encode_image(&img.to_rgb8())
+        .encode_image(&out_rgb)
         .map_err(|e| e.to_string())?;
     Ok(PreviewResult {
         data: format!("data:image/jpeg;base64,{}", STANDARD.encode(&jpeg)),
@@ -1194,6 +1304,7 @@ pub async fn scan_preview(
     exposure_offset: f32,
     contrast: f32,
     look: Option<ScanLook>,
+    show_defects: Option<bool>,
     rotation_steps: u32,
     auto_crop: bool,
     source_visible: String,
@@ -1222,7 +1333,7 @@ pub async fn scan_preview(
                 ScanFail::Error(m) => m,
             },
         )?;
-        render_preview(&tmp, &film_type, exposure_offset, contrast, &look.unwrap_or_default(), rotation_steps, auto_crop, raw, base_point, &app_handle, &tone_slot)
+        render_preview(&tmp, &film_type, exposure_offset, contrast, &look.unwrap_or_default(), rotation_steps, auto_crop, raw, base_point, show_defects.unwrap_or(false), &app_handle, &tone_slot)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1234,6 +1345,7 @@ pub async fn scan_rerender_preview(
     exposure_offset: f32,
     contrast: f32,
     look: Option<ScanLook>,
+    show_defects: Option<bool>,
     rotation_steps: u32,
     auto_crop: bool,
     raw: bool,
@@ -1250,7 +1362,7 @@ pub async fn scan_rerender_preview(
     }
     let tone_slot = state.preview_tone.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        render_preview(&tif, &film_type, exposure_offset, contrast, &look.unwrap_or_default(), rotation_steps, auto_crop, raw, base_point, &app_handle, &tone_slot)
+        render_preview(&tif, &film_type, exposure_offset, contrast, &look.unwrap_or_default(), rotation_steps, auto_crop, raw, base_point, show_defects.unwrap_or(false), &app_handle, &tone_slot)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1335,6 +1447,13 @@ pub async fn scan_start(
             }
             result
         };
+        // B&W can't use IR (silver blocks it) — software detection instead.
+        if scan_result.is_ok() && ir_clean && film_type == "bw" && !cancelled.load(Ordering::SeqCst) {
+            match software_clean_scan(&tmp, dpi, ir_sensitivity) {
+                Ok(n) => log::info!("[scan] software clean filled {n} defect px"),
+                Err(e) => log::warn!("[scan] software clean skipped: {e}"),
+            }
+        }
         if scan_result.is_ok() && do_ir && !cancelled.load(Ordering::SeqCst) {
             let ir_tmp = dest.join(".rapidraw-scan.ir");
             let ir_source = source_infrared.as_deref().unwrap_or(SRC_INFRARED);
