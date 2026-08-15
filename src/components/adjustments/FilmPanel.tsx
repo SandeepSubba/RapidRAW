@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
-import { Pipette, RotateCcw, X } from 'lucide-react';
+import { Pipette, Plus, RotateCcw, Trash2, X } from 'lucide-react';
 import Slider from '../ui/Slider';
 import Switch from '../ui/Switch';
 import { Invokes } from '../ui/AppProperties';
+import Dropdown from '../ui/Dropdown';
 import { useEditorStore } from '../../store/useEditorStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
+import { allProfiles, suggestProfile, FilmProfile } from '../../utils/filmProfiles';
 
 interface FilmParams {
   redWeight: number;
@@ -115,6 +117,63 @@ export default function FilmPanel({ adjustments }: any) {
     }
   };
 
+  // --- Film-stock profiles (params only; bounds stay per-frame) ---
+  const profiles = allProfiles(appSettings?.negativeProfiles as FilmProfile[] | undefined);
+  const [profileName, setProfileName] = useState<string | null>(null);
+  const [savingName, setSavingName] = useState<string | null>(null); // null = closed
+
+  // Auto-suggest by the roll's film-stock EXIF once per image.
+  useEffect(() => {
+    const stock = (selectedImage as any)?.exif?.ImageDescription;
+    const hit = suggestProfile(profiles, stock);
+    setProfileName(hit ? hit.name : null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedImage?.path]);
+
+  const applyProfile = (name: string) => {
+    const pr = profiles.find((x) => x.name === name);
+    if (!pr) return;
+    setProfileName(name);
+    setParams({ ...pr.params });
+    const clip =
+      pr.clipBlack != null && pr.clipWhite != null
+        ? { black: pr.clipBlack * 100, white: pr.clipWhite * 100 }
+        : null;
+    if (clip) {
+      setClipBlack(clip.black);
+      setClipWhite(clip.white);
+      setClipDirty(true);
+    }
+    commit({ ...pr.params }, clip);
+  };
+
+  const saveProfile = () => {
+    const name = savingName?.trim();
+    if (!name || !appSettings) return;
+    const user = ((appSettings.negativeProfiles as FilmProfile[]) ?? []).filter((x) => x.name !== name);
+    user.push({
+      name,
+      filmStock: (selectedImage as any)?.exif?.ImageDescription || undefined,
+      params: { ...params },
+      clipBlack: clipDirty ? clipBlack / 100 : undefined,
+      clipWhite: clipDirty ? clipWhite / 100 : undefined,
+    });
+    handleSettingsChange({ ...appSettings, negativeProfiles: user });
+    setProfileName(name);
+    setSavingName(null);
+  };
+
+  const deleteProfile = () => {
+    if (!appSettings || !profileName) return;
+    const pr = profiles.find((x) => x.name === profileName);
+    if (!pr || pr.builtin) return;
+    const user = ((appSettings.negativeProfiles as FilmProfile[]) ?? []).filter(
+      (x) => x.name !== profileName,
+    );
+    handleSettingsChange({ ...appSettings, negativeProfiles: user });
+    setProfileName(null);
+  };
+
   const resetToAuto = () => {
     setParams(DEFAULT_PARAMS);
     setClipBlack(DEFAULT_CLIP_BLACK);
@@ -156,6 +215,49 @@ export default function FilmPanel({ adjustments }: any) {
 
   return (
     <div className={busy ? 'opacity-70 pointer-events-none' : ''}>
+      <div className="flex items-center gap-1 mb-2">
+        <div className="flex-1 min-w-0">
+          <Dropdown
+            options={profiles.map((pr) => ({ label: pr.name, value: pr.name }))}
+            value={profileName}
+            onChange={(name: string) => applyProfile(name)}
+          />
+        </div>
+        <button
+          className="p-1.5 rounded-md text-text-secondary hover:bg-surface hover:text-text-primary"
+          onClick={() => setSavingName(savingName === null ? '' : null)}
+          title={t('editor.adjustments.film.saveProfile')}
+        >
+          <Plus size={14} />
+        </button>
+        {profileName && !profiles.find((x) => x.name === profileName)?.builtin && (
+          <button
+            className="p-1.5 rounded-md text-text-secondary hover:bg-surface hover:text-text-primary"
+            onClick={deleteProfile}
+            title={t('editor.adjustments.film.deleteProfile')}
+          >
+            <Trash2 size={14} />
+          </button>
+        )}
+      </div>
+      {savingName !== null && (
+        <div className="flex items-center gap-1 mb-2">
+          <input
+            className="flex-1 min-w-0 px-2 py-1 rounded-md bg-surface text-sm text-text-primary outline-none"
+            placeholder={t('editor.adjustments.film.profileNamePlaceholder')}
+            value={savingName}
+            autoFocus
+            onChange={(e) => setSavingName(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && saveProfile()}
+          />
+          <button
+            className="px-2 py-1 rounded-md bg-surface text-sm text-text-secondary hover:text-text-primary"
+            onClick={saveProfile}
+          >
+            {t('editor.adjustments.film.save')}
+          </button>
+        </div>
+      )}
       <Slider
         label={t('modals.negativeConversion.exposure')}
         min={-1}

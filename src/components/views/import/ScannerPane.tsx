@@ -1,6 +1,9 @@
 import { useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { ChevronDown, Film, Loader2, Pipette, RefreshCw, RotateCcw, RotateCw, X } from 'lucide-react';
+import Dropdown from '../../ui/Dropdown';
+import { useSettingsStore } from '../../../store/useSettingsStore';
+import { allProfiles, FilmProfile } from '../../../utils/filmProfiles';
 import { toast } from 'react-toastify';
 import { Invokes } from '../../ui/AppProperties';
 import { useImportStore } from '../../../store/useImportStore';
@@ -128,6 +131,26 @@ export default function ScannerPane() {
   // in the library after this pane closes; the pane just reads store state.
 
   const busy = s.scanning !== 'idle';
+  const negativeProfiles = useSettingsStore(
+    (st) => st.appSettings?.negativeProfiles as FilmProfile[] | undefined,
+  );
+  const profiles = allProfiles(negativeProfiles);
+  const [profileName, setProfileName] = useState<string | null>(null);
+  const applyProfile = (name: string) => {
+    const pr = profiles.find((x) => x.name === name);
+    if (!pr) return;
+    setProfileName(name);
+    s.setScanner({
+      redWeight: pr.params.redWeight,
+      greenWeight: pr.params.greenWeight,
+      blueWeight: pr.params.blueWeight,
+      curveContrast: pr.params.contrast,
+      ...(pr.clipBlack != null ? { clipBlack: pr.clipBlack * 100 } : {}),
+      ...(pr.clipWhite != null ? { clipWhite: pr.clipWhite * 100 } : {}),
+    });
+    if (s.previewData) rerenderPreview(100);
+  };
+
   // Conversion look for the backend: store keeps clip as %, wire wants fractions.
   const lookOf = (st: typeof s) => ({
     redWeight: st.redWeight,
@@ -644,6 +667,13 @@ export default function ScannerPane() {
             />
             {s.scanAdvanced && (
               <div className="space-y-1">
+                <div data-tooltip="Film-stock profile — same profiles as the editor Film panel">
+                  <Dropdown
+                    options={profiles.map((pr) => ({ label: pr.name, value: pr.name }))}
+                    value={profileName}
+                    onChange={(name: string) => applyProfile(name)}
+                  />
+                </div>
                 <Slider
                   label="Red (Cyan)"
                   min={0.5}

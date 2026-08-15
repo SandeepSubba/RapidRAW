@@ -217,6 +217,13 @@ export type GroupingMode = 'off' | GroupPreference;
 export interface AppSettings {
   filmPanelAdvanced?: boolean;
   displayNegativeIcon?: boolean;
+  negativeProfiles?: Array<{
+    name: string;
+    filmStock?: string;
+    params: { redWeight: number; greenWeight: number; blueWeight: number; exposure: number; contrast: number };
+    clipBlack?: number;
+    clipWhite?: number;
+  }>;
   aiConnectorAddress?: string;
   aiProvider?: string;
   assistantProvider?: string;

@@ -319,7 +319,11 @@
         "clipBlack": "Black Clip",
         "clipWhite": "White Clip",
         "sampleBase": "Sample film base",
-        "sampleBaseHint": "Click the clear film rebate on the raw negative to pin the base point."
+        "sampleBaseHint": "Click the clear film rebate on the raw negative to pin the base point.",
+        "saveProfile": "Save as profile",
+        "deleteProfile": "Delete profile",
+        "profileNamePlaceholder": "Profile name (e.g. Portra 400)",
+        "save": "Save"
       }
     },
     "ai": {

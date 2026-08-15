@@ -409,6 +409,10 @@ pub struct AppSettings {
     pub film_panel_advanced: Option<bool>,
     #[serde(default)]
     pub display_negative_icon: Option<bool>,
+    // Named film-stock conversion profiles (frontend-owned; params only, never
+    // bounds). Kept opaque — the backend just round-trips it.
+    #[serde(default)]
+    pub negative_profiles: Option<serde_json::Value>,
     pub last_root_path: Option<String>,
     #[serde(default)]
     pub root_folders: Vec<String>,
@@ -562,6 +566,7 @@ impl Default for AppSettings {
         Self {
             film_panel_advanced: None,
             display_negative_icon: None,
+            negative_profiles: None,
             last_root_path: None,
             root_folders: Vec::new(),
             pinned_folders: Vec::new(),
