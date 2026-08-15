@@ -38,6 +38,15 @@ interface ScannerState {
   eyedropping: boolean;
   exposureOffset: number;
   contrast: number;
+  // Advanced conversion look: color timing, sigmoid contrast (print grade),
+  // and clip percentiles. Neutral defaults = the automatic conversion.
+  scanAdvanced: boolean;
+  redWeight: number;
+  greenWeight: number;
+  blueWeight: number;
+  curveContrast: number;
+  clipBlack: number; // percent, 0.1 = the automatic 0.1%
+  clipWhite: number; // percent
   rotationSteps: number;
   // Optional shooting metadata written to the scan's sidecar + EXIF (roll-level).
   filmStock: string;
@@ -76,6 +85,13 @@ export const useScannerStore = create<ScannerState>()(
       eyedropping: false,
       exposureOffset: 0,
       contrast: 0,
+      scanAdvanced: false,
+      redWeight: 1.0,
+      greenWeight: 1.0,
+      blueWeight: 1.0,
+      curveContrast: 1.5,
+      clipBlack: 0.1,
+      clipWhite: 99.9,
       rotationSteps: 0,
       filmStock: '',
       iso: '',
@@ -103,6 +119,13 @@ export const useScannerStore = create<ScannerState>()(
         autoCrop: state.autoCrop,
         exposureOffset: state.exposureOffset,
         contrast: state.contrast,
+        scanAdvanced: state.scanAdvanced,
+        redWeight: state.redWeight,
+        greenWeight: state.greenWeight,
+        blueWeight: state.blueWeight,
+        curveContrast: state.curveContrast,
+        clipBlack: state.clipBlack,
+        clipWhite: state.clipWhite,
         rotationSteps: state.rotationSteps,
         filmStock: state.filmStock,
         iso: state.iso,

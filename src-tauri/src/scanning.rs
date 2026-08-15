@@ -881,6 +881,33 @@ fn auto_tone_for(
 
 pub const DEFAULT_SCAN_CONTRAST: f32 = 1.5;
 
+/// User-tunable conversion look for the scan pane's Advanced controls. All
+/// fields have neutral defaults, so an absent/default look reproduces the
+/// previous fully-automatic behavior bit-for-bit.
+#[derive(serde::Deserialize, Debug, Clone, Copy)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ScanLook {
+    pub red_weight: f32,
+    pub green_weight: f32,
+    pub blue_weight: f32,
+    pub curve_contrast: f32,
+    pub clip_black: f32,
+    pub clip_white: f32,
+}
+
+impl Default for ScanLook {
+    fn default() -> Self {
+        Self {
+            red_weight: 1.0,
+            green_weight: 1.0,
+            blue_weight: 1.0,
+            curve_contrast: DEFAULT_SCAN_CONTRAST,
+            clip_black: crate::negative_conversion::DEFAULT_CLIP_BLACK,
+            clip_white: crate::negative_conversion::DEFAULT_CLIP_WHITE,
+        }
+    }
+}
+
 
 // Sidecar for a freshly scanned file: negative conversion (bounds from the
 // detected frame, auto exposure, manual gain as uniform weights) and/or
@@ -892,6 +919,7 @@ pub const DEFAULT_SCAN_CONTRAST: f32 = 1.5;
 fn write_scan_sidecar(
     target: &Path,
     negative: Option<([crate::negative_conversion::ChannelBounds; 3], f32, f32)>,
+    look: &ScanLook,
     rotation_steps: u32,
     brightness: f32,
     contrast: f32,
@@ -942,13 +970,16 @@ fn write_scan_sidecar(
         }
     }
     if let Some((bounds, exposure, weight)) = negative {
+        // Auto gain is uniform; the user's color timing multiplies on top.
         meta.adjustments["negativeConversion"] = serde_json::json!({
             "enabled": true,
             "exposure": exposure,
-            "contrast": DEFAULT_SCAN_CONTRAST,
-            "redWeight": weight,
-            "greenWeight": weight,
-            "blueWeight": weight,
+            "contrast": look.curve_contrast,
+            "redWeight": weight * look.red_weight,
+            "greenWeight": weight * look.green_weight,
+            "blueWeight": weight * look.blue_weight,
+            "clipBlack": look.clip_black,
+            "clipWhite": look.clip_white,
             "bounds": [
                 [bounds[0].min, bounds[0].max],
                 [bounds[1].min, bounds[1].max],
@@ -1047,6 +1078,7 @@ fn render_preview(
     film_type: &str,
     exposure_offset: f32,
     contrast: f32,
+    look: &ScanLook,
     rotation_steps: u32,
     auto_crop: bool,
     raw: bool,
@@ -1072,7 +1104,8 @@ fn render_preview(
     if convert {
         let img = src.as_ref().unwrap();
         let crop = detect_frame_crop(img);
-        let mut bounds = crate::negative_conversion::analyze_bounds_for(&crop);
+        let mut bounds =
+            crate::negative_conversion::analyze_bounds_for_clipped(&crop, look.clip_black, look.clip_white);
         if let Some((bx, by)) = base_point {
             // Pin each channel's base (bounds min) to the sampled rebate; keep the
             // auto white point but guard the divisor stays positive.
@@ -1084,11 +1117,12 @@ fn render_preview(
                 }
             }
         }
-        let (base_exposure, auto_gain, auto_ev) = auto_tone_for(&crop, bounds, DEFAULT_SCAN_CONTRAST, false);
+        let (base_exposure, auto_gain, auto_ev) = auto_tone_for(&crop, bounds, look.curve_contrast, false);
         *tone_slot.lock().unwrap() = Some((bounds, base_exposure, auto_gain, auto_ev));
         write_scan_sidecar(
             tif,
             Some((bounds, base_exposure, auto_gain)),
+            look,
             rotation_steps,
             exposure_offset + auto_ev,
             contrast,
@@ -1098,7 +1132,7 @@ fn render_preview(
     } else {
         // Slide (E-6) — positive film, no inversion.
         *tone_slot.lock().unwrap() = None;
-        write_scan_sidecar(tif, None, rotation_steps, exposure_offset, contrast, None, &FilmMeta::default())?;
+        write_scan_sidecar(tif, None, look, rotation_steps, exposure_offset, contrast, None, &FilmMeta::default())?;
     }
 
     // Overlay rect only — the preview image itself stays uncropped so the dimmed
@@ -1140,6 +1174,7 @@ pub async fn scan_preview(
     film_type: String,
     exposure_offset: f32,
     contrast: f32,
+    look: Option<ScanLook>,
     rotation_steps: u32,
     auto_crop: bool,
     source_visible: String,
@@ -1168,7 +1203,7 @@ pub async fn scan_preview(
                 ScanFail::Error(m) => m,
             },
         )?;
-        render_preview(&tmp, &film_type, exposure_offset, contrast, rotation_steps, auto_crop, raw, base_point, &app_handle, &tone_slot)
+        render_preview(&tmp, &film_type, exposure_offset, contrast, &look.unwrap_or_default(), rotation_steps, auto_crop, raw, base_point, &app_handle, &tone_slot)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1179,6 +1214,7 @@ pub async fn scan_rerender_preview(
     film_type: String,
     exposure_offset: f32,
     contrast: f32,
+    look: Option<ScanLook>,
     rotation_steps: u32,
     auto_crop: bool,
     raw: bool,
@@ -1195,7 +1231,7 @@ pub async fn scan_rerender_preview(
     }
     let tone_slot = state.preview_tone.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        render_preview(&tif, &film_type, exposure_offset, contrast, rotation_steps, auto_crop, raw, base_point, &app_handle, &tone_slot)
+        render_preview(&tif, &film_type, exposure_offset, contrast, &look.unwrap_or_default(), rotation_steps, auto_crop, raw, base_point, &app_handle, &tone_slot)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1207,6 +1243,7 @@ pub async fn scan_start(
     film_type: String,
     exposure_offset: f32,
     contrast: f32,
+    look: Option<ScanLook>,
     rotation_steps: u32,
     samples: u32,
     ir_clean: bool,
@@ -1236,6 +1273,7 @@ pub async fn scan_start(
     // Consume-once: the very next Scan frame gets the previewed tone exactly;
     // later frames (holder advanced, no fresh preview) re-solve on their own scan.
     let preview_tone = state.preview_tone.lock().unwrap().take();
+    let look = look.unwrap_or_default();
     log::info!("[scan] starting {file_name} @ {dpi}dpi into {dest_folder}");
 
     std::thread::spawn(move || {
@@ -1351,9 +1389,11 @@ pub async fn scan_start(
                         Some(t) if dpi != 7200 => Ok(t),
                         _ => open_image(&target).map(|img| {
                             let crop = detect_frame_crop(&img);
-                            let bounds = crate::negative_conversion::analyze_bounds_for(&crop);
+                            let bounds = crate::negative_conversion::analyze_bounds_for_clipped(
+                                &crop, look.clip_black, look.clip_white,
+                            );
                             let (exposure, gain, ev) =
-                                auto_tone_for(&crop, bounds, DEFAULT_SCAN_CONTRAST, dpi == 7200);
+                                auto_tone_for(&crop, bounds, look.curve_contrast, dpi == 7200);
                             (bounds, exposure, gain, ev)
                         }),
                     };
@@ -1361,6 +1401,7 @@ pub async fn scan_start(
                         write_scan_sidecar(
                             &target,
                             Some((bounds, exposure, gain)),
+                            &look,
                             rotation_steps,
                             exposure_offset + ev,
                             contrast,
@@ -1369,7 +1410,7 @@ pub async fn scan_start(
                         )
                     })
                 } else {
-                    write_scan_sidecar(&target, None, rotation_steps, exposure_offset, contrast, crop_rect, &film_meta)
+                    write_scan_sidecar(&target, None, &look, rotation_steps, exposure_offset, contrast, crop_rect, &film_meta)
                 };
                 if let Err(e) = result {
                     log::warn!("[scan] sidecar write failed for {path}: {e}");

@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { ChevronDown, Film, Loader2, Pipette, RefreshCw, RotateCw, X } from 'lucide-react';
+import { ChevronDown, Film, Loader2, Pipette, RefreshCw, RotateCcw, RotateCw, X } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { Invokes } from '../../ui/AppProperties';
 import { useImportStore } from '../../../store/useImportStore';
@@ -128,6 +128,15 @@ export default function ScannerPane() {
   // in the library after this pane closes; the pane just reads store state.
 
   const busy = s.scanning !== 'idle';
+  // Conversion look for the backend: store keeps clip as %, wire wants fractions.
+  const lookOf = (st: typeof s) => ({
+    redWeight: st.redWeight,
+    greenWeight: st.greenWeight,
+    blueWeight: st.blueWeight,
+    curveContrast: st.curveContrast,
+    clipBlack: st.clipBlack / 100,
+    clipWhite: st.clipWhite / 100,
+  });
   const resolutions = s.caps?.resolutions?.length ? s.caps.resolutions : FALLBACK_RESOLUTIONS;
   const hasIR = !s.caps || !!s.caps.sourceInfrared; // fallback (no caps) assumes the 7600i has IR
   const scanDepth = Math.min(16, s.caps?.maxDepth ?? 16);
@@ -140,6 +149,7 @@ export default function ScannerPane() {
         filmType: s.filmType,
         exposureOffset: s.exposureOffset,
         contrast: s.contrast,
+        look: lookOf(s),
         rotationSteps: s.rotationSteps,
         autoCrop: s.autoCrop,
         sourceVisible: s.caps?.sourceVisible ?? '',
@@ -165,6 +175,7 @@ export default function ScannerPane() {
           filmType: st.filmType,
           exposureOffset: st.exposureOffset,
           contrast: st.contrast,
+          look: lookOf(st),
           rotationSteps: st.rotationSteps,
           autoCrop: raw ? false : st.autoCrop,
           raw,
@@ -216,6 +227,23 @@ export default function ScannerPane() {
     if (s.previewData) rerenderPreview(250);
   };
 
+  const handleLookChange = (patch: Partial<ReturnType<typeof useScannerStore.getState>>) => {
+    s.setScanner(patch);
+    if (s.previewData) rerenderPreview(250);
+  };
+
+  const resetLook = () => {
+    s.setScanner({
+      redWeight: 1.0,
+      greenWeight: 1.0,
+      blueWeight: 1.0,
+      curveContrast: 1.5,
+      clipBlack: 0.1,
+      clipWhite: 99.9,
+    });
+    if (s.previewData) rerenderPreview(100);
+  };
+
   const handleRotate = () => {
     // Carry a hand-dragged crop through the 90° CW turn (normalized rect rotates
     // [x,y,w,h] -> [1-(y+h), x, h, w]) so it isn't forgotten; auto crops re-detect.
@@ -250,6 +278,7 @@ export default function ScannerPane() {
         filmType: s.filmType,
         exposureOffset: s.exposureOffset,
         contrast: s.contrast,
+        look: lookOf(s),
         rotationSteps: s.rotationSteps,
         samples: s.samples,
         irClean: s.irClean && hasIR,
@@ -604,6 +633,85 @@ export default function ScannerPane() {
           defaultValue={0}
           onChange={(e: any) => handleContrastChange(parseFloat(e.target.value))}
         />
+
+        {s.filmType !== 'e6' && (
+          <>
+            <Switch
+              label="Advanced conversion"
+              checked={s.scanAdvanced}
+              onChange={(on: boolean) => s.setScanner({ scanAdvanced: on })}
+              tooltip="Tune the negative conversion itself — color timing, print grade, clip points. Carried into the scan and re-editable in the editor's Film panel."
+            />
+            {s.scanAdvanced && (
+              <div className="space-y-1">
+                <Slider
+                  label="Red (Cyan)"
+                  min={0.5}
+                  max={1.5}
+                  step={0.01}
+                  value={s.redWeight}
+                  defaultValue={1}
+                  onChange={(e: any) => handleLookChange({ redWeight: parseFloat(e.target.value) })}
+                />
+                <Slider
+                  label="Green (Magenta)"
+                  min={0.5}
+                  max={1.5}
+                  step={0.01}
+                  value={s.greenWeight}
+                  defaultValue={1}
+                  onChange={(e: any) => handleLookChange({ greenWeight: parseFloat(e.target.value) })}
+                />
+                <Slider
+                  label="Blue (Yellow)"
+                  min={0.5}
+                  max={1.5}
+                  step={0.01}
+                  value={s.blueWeight}
+                  defaultValue={1}
+                  onChange={(e: any) => handleLookChange({ blueWeight: parseFloat(e.target.value) })}
+                />
+                <Slider
+                  label="Print Grade"
+                  min={0.5}
+                  max={2.5}
+                  step={0.01}
+                  value={s.curveContrast}
+                  defaultValue={1.5}
+                  onChange={(e: any) => handleLookChange({ curveContrast: parseFloat(e.target.value) })}
+                />
+                <Slider
+                  label="Black Clip"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={s.clipBlack}
+                  defaultValue={0.1}
+                  suffix="%"
+                  onChange={(e: any) => handleLookChange({ clipBlack: parseFloat(e.target.value) })}
+                />
+                <Slider
+                  label="White Clip"
+                  min={99}
+                  max={100}
+                  step={0.05}
+                  value={s.clipWhite}
+                  defaultValue={99.9}
+                  suffix="%"
+                  onChange={(e: any) => handleLookChange({ clipWhite: parseFloat(e.target.value) })}
+                />
+                <button
+                  onClick={resetLook}
+                  disabled={busy}
+                  className="w-full flex items-center justify-center gap-2 px-3 py-1.5 rounded-md bg-surface/60 hover:bg-surface transition-colors text-sm text-text-secondary"
+                >
+                  <RotateCcw size={14} />
+                  Reset to automatic
+                </button>
+              </div>
+            )}
+          </>
+        )}
 
         <div>
           <p className="text-xs text-text-secondary mb-2">Orientation</p>
