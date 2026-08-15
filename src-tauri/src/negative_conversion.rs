@@ -14,6 +14,7 @@ use crate::load_settings;
 use tauri::Emitter;
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+#[serde(rename_all = "camelCase", default)]
 pub struct NegativeConversionParams {
     pub red_weight: f32,
     pub green_weight: f32,
@@ -41,7 +42,16 @@ pub struct ChannelBounds {
     pub max: f32,
 }
 
-fn analyze_bounds(log_data: &[f32], width: usize, height: usize) -> [ChannelBounds; 3] {
+pub const DEFAULT_CLIP_BLACK: f32 = 0.001;
+pub const DEFAULT_CLIP_WHITE: f32 = 0.999;
+
+fn analyze_bounds(
+    log_data: &[f32],
+    width: usize,
+    height: usize,
+    clip_black: f32,
+    clip_white: f32,
+) -> [ChannelBounds; 3] {
     let margin_x = (width as f32 * 0.12) as usize;
     let margin_y = (height as f32 * 0.12) as usize;
 
@@ -85,8 +95,8 @@ fn analyze_bounds(log_data: &[f32], width: usize, height: usize) -> [ChannelBoun
 
         let len = vals.len() as f32;
 
-        let min_idx = (len * 0.001) as usize;
-        let max_idx = (len * 0.999) as usize;
+        let min_idx = (len * clip_black.clamp(0.0, 0.05)) as usize;
+        let max_idx = (len * clip_white.clamp(0.95, 1.0)) as usize;
 
         let min = vals[min_idx.min(vals.len().saturating_sub(1))];
         let max = vals[max_idx.min(vals.len().saturating_sub(1))];
@@ -116,7 +126,13 @@ fn run_pipeline(
     let bounds = if let Some(b) = override_bounds {
         b
     } else {
-        analyze_bounds(&log_pixels, width as usize, height as usize)
+        analyze_bounds(
+            &log_pixels,
+            width as usize,
+            height as usize,
+            DEFAULT_CLIP_BLACK,
+            DEFAULT_CLIP_WHITE,
+        )
     };
 
     let mut out_buffer = vec![0.0f32; raw_pixels.len()];
@@ -231,6 +247,14 @@ pub fn positive_with(
 }
 
 pub fn analyze_bounds_for(image: &DynamicImage) -> [ChannelBounds; 3] {
+    analyze_bounds_for_clipped(image, DEFAULT_CLIP_BLACK, DEFAULT_CLIP_WHITE)
+}
+
+pub fn analyze_bounds_for_clipped(
+    image: &DynamicImage,
+    clip_black: f32,
+    clip_white: f32,
+) -> [ChannelBounds; 3] {
     let ref_img = downscale_f32_image(image, 1080, 1080);
     let ref_rgb = ref_img.to_rgb32f();
     let (w, h) = ref_rgb.dimensions();
@@ -239,7 +263,189 @@ pub fn analyze_bounds_for(image: &DynamicImage) -> [ChannelBounds; 3] {
         .par_iter()
         .map(|&v| -v.clamp(1e-6, 1.0).log10())
         .collect();
-    analyze_bounds(&log_pixels, w as usize, h as usize)
+    analyze_bounds(&log_pixels, w as usize, h as usize, clip_black, clip_white)
+}
+
+/// The base image changed; drop cached decodes/previews so the new render is used.
+fn clear_decode_caches(state: &AppState) {
+    if let Ok(mut c) = state.decoded_image_cache.lock() {
+        c.clear();
+    }
+    if let Ok(mut c) = state.geometry_cache.lock() {
+        c.clear();
+    }
+    if let Ok(mut c) = state.cached_preview.lock() {
+        *c = None;
+    }
+    if let Ok(mut c) = state.full_warped_cache.lock() {
+        *c = None;
+    }
+    if let Ok(mut c) = state.full_transformed_cache.lock() {
+        *c = None;
+    }
+}
+
+/// Merge tuning params (and optional clip percentiles) into an existing
+/// `negativeConversion` sidecar object, preserving whatever bounds are stored.
+fn merge_params_into(
+    nc: &mut serde_json::Value,
+    params: &NegativeConversionParams,
+    clip: Option<(f32, f32)>,
+) {
+    nc["redWeight"] = params.red_weight.into();
+    nc["greenWeight"] = params.green_weight.into();
+    nc["blueWeight"] = params.blue_weight.into();
+    nc["exposure"] = params.exposure.into();
+    nc["contrast"] = params.contrast.into();
+    if let Some((black, white)) = clip {
+        nc["clipBlack"] = black.into();
+        nc["clipWhite"] = white.into();
+    }
+}
+
+fn bounds_json(bounds: &[ChannelBounds; 3]) -> serde_json::Value {
+    serde_json::json!([
+        [bounds[0].min, bounds[0].max],
+        [bounds[1].min, bounds[1].max],
+        [bounds[2].min, bounds[2].max],
+    ])
+}
+
+fn load_raw_for(real_path: &str, handle: &AppHandle) -> Result<DynamicImage, String> {
+    let settings = load_settings(handle.clone()).unwrap_or_default();
+    match read_file_mapped(Path::new(real_path)) {
+        Ok(mmap) => load_base_image_raw(&mmap, real_path, false, &settings, None),
+        Err(_) => {
+            let bytes = fs::read(real_path).map_err(|e| e.to_string())?;
+            load_base_image_raw(&bytes, real_path, false, &settings, None)
+        }
+    }
+    .map_err(|e| e.to_string())
+}
+
+/// Update the tuning parameters of already-converted negatives. Bounds are
+/// preserved per image; they are recomputed only when clip percentiles are
+/// supplied (the one param that lives inside the bounds analysis).
+#[tauri::command]
+pub async fn update_negative_conversion(
+    paths: Vec<String>,
+    params: NegativeConversionParams,
+    black_point: Option<f32>,
+    white_point: Option<f32>,
+    regen_thumbnails: bool,
+    state: tauri::State<'_, AppState>,
+    app_handle: AppHandle,
+) -> Result<Vec<String>, String> {
+    let handle = app_handle.clone();
+    let results = tokio::task::spawn_blocking(move || -> Result<Vec<String>, String> {
+        let mut results = Vec::new();
+        for (i, path_str) in paths.iter().enumerate() {
+            let _ = handle.emit(
+                "negative-batch-progress",
+                serde_json::json!({ "current": i + 1, "total": paths.len(), "path": path_str }),
+            );
+
+            let (source_path, _) = parse_virtual_path(path_str);
+            let sidecar = crate::exif_processing::get_primary_sidecar_path(&source_path);
+            let mut meta = crate::exif_processing::load_sidecar(&sidecar);
+            let enabled = meta
+                .adjustments
+                .get("negativeConversion")
+                .and_then(|nc| nc.get("enabled"))
+                .and_then(|e| e.as_bool())
+                .unwrap_or(false);
+            if !enabled {
+                continue; // not a converted negative — nothing to tune
+            }
+
+            let clip = match (black_point, white_point) {
+                (Some(b), Some(w)) => Some((b, w)),
+                _ => None,
+            };
+            if let Some((black, white)) = clip {
+                let real_path = source_path.to_string_lossy().to_string();
+                let img = load_raw_for(&real_path, &handle)?;
+                let bounds = analyze_bounds_for_clipped(&img, black, white);
+                meta.adjustments["negativeConversion"]["bounds"] = bounds_json(&bounds);
+            }
+            merge_params_into(&mut meta.adjustments["negativeConversion"], &params, clip);
+
+            let json = serde_json::to_string_pretty(&meta).map_err(|e| e.to_string())?;
+            fs::write(&sidecar, json).map_err(|e| e.to_string())?;
+            results.push(path_str.clone());
+        }
+        Ok(results)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
+    clear_decode_caches(&state);
+
+    if regen_thumbnails && !results.is_empty() {
+        let regen_paths = results.clone();
+        let regen_handle = app_handle.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            crate::file_management::regenerate_thumbnails_for_paths(&regen_paths, &regen_handle);
+        });
+    }
+
+    let _ = app_handle.emit("negatives-converted", &results);
+    Ok(results)
+}
+
+/// Pin the conversion's film-base (per-channel bounds min) to a clicked point
+/// on the raw negative — the library-image counterpart of the scanner's
+/// film-base eyedropper. `x`/`y` are normalized coords in raw image space.
+#[tauri::command]
+pub async fn set_negative_film_base(
+    path: String,
+    x: f32,
+    y: f32,
+    state: tauri::State<'_, AppState>,
+    app_handle: AppHandle,
+) -> Result<(), String> {
+    let handle = app_handle.clone();
+    tokio::task::spawn_blocking(move || -> Result<(), String> {
+        let (source_path, _) = parse_virtual_path(&path);
+        let sidecar = crate::exif_processing::get_primary_sidecar_path(&source_path);
+        let mut meta = crate::exif_processing::load_sidecar(&sidecar);
+        let enabled = meta
+            .adjustments
+            .get("negativeConversion")
+            .and_then(|nc| nc.get("enabled"))
+            .and_then(|e| e.as_bool())
+            .unwrap_or(false);
+        if !enabled {
+            return Err("Negative conversion is not enabled for this image".into());
+        }
+
+        let real_path = source_path.to_string_lossy().to_string();
+        let img = load_raw_for(&real_path, &handle)?;
+        let base = crate::scanning::sample_base_density(&img, x, y, 0);
+
+        // Keep the stored white point; pin each channel's base to the sample,
+        // guarding the divisor stays positive (same guard as the scanner path).
+        let mut bounds = match stored_negative(&meta.adjustments) {
+            Some((_, b)) => b,
+            None => analyze_bounds_for(&img),
+        };
+        for c in 0..3 {
+            bounds[c].min = base[c];
+            if bounds[c].max <= bounds[c].min + 0.05 {
+                bounds[c].max = bounds[c].min + 0.5;
+            }
+        }
+        meta.adjustments["negativeConversion"]["bounds"] = bounds_json(&bounds);
+
+        let json = serde_json::to_string_pretty(&meta).map_err(|e| e.to_string())?;
+        fs::write(&sidecar, json).map_err(|e| e.to_string())?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
+    clear_decode_caches(&state);
+    Ok(())
 }
 
 /// Turn the in-library negative conversion on (`enabled = true`, stores auto-bounds in
@@ -270,24 +476,11 @@ pub async fn set_negative_conversion(
 
             if enabled {
                 let real_path = source_path.to_string_lossy().to_string();
-                let settings = load_settings(handle.clone()).unwrap_or_default();
-                let img = match read_file_mapped(Path::new(&real_path)) {
-                    Ok(mmap) => load_base_image_raw(&mmap, &real_path, false, &settings, None),
-                    Err(_) => {
-                        let bytes = fs::read(&real_path).map_err(|e| e.to_string())?;
-                        load_base_image_raw(&bytes, &real_path, false, &settings, None)
-                    }
-                }
-                .map_err(|e| e.to_string())?;
-
+                let img = load_raw_for(&real_path, &handle)?;
                 let bounds = analyze_bounds_for(&img);
                 meta.adjustments["negativeConversion"] = serde_json::json!({
                     "enabled": true,
-                    "bounds": [
-                        [bounds[0].min, bounds[0].max],
-                        [bounds[1].min, bounds[1].max],
-                        [bounds[2].min, bounds[2].max],
-                    ],
+                    "bounds": bounds_json(&bounds),
                 });
             } else if let Some(obj) = meta.adjustments.as_object_mut() {
                 obj.remove("negativeConversion");
@@ -303,22 +496,7 @@ pub async fn set_negative_conversion(
     .await
     .map_err(|e| e.to_string())??;
 
-    // The base image changed; drop cached decodes/previews so the new render is used.
-    if let Ok(mut c) = state.decoded_image_cache.lock() {
-        c.clear();
-    }
-    if let Ok(mut c) = state.geometry_cache.lock() {
-        c.clear();
-    }
-    if let Ok(mut c) = state.cached_preview.lock() {
-        *c = None;
-    }
-    if let Ok(mut c) = state.full_warped_cache.lock() {
-        *c = None;
-    }
-    if let Ok(mut c) = state.full_transformed_cache.lock() {
-        *c = None;
-    }
+    clear_decode_caches(&state);
 
     // Thumbnails don't refresh from a sidecar edit on their own — regenerate off-thread.
     let regen_paths = results.clone();
@@ -360,5 +538,58 @@ mod tests {
             stored_negative(&serde_json::json!({ "negativeConversion": { "enabled": false } }))
                 .is_none()
         );
+    }
+
+    #[test]
+    fn merge_params_preserves_bounds_and_old_sidecars_still_parse() {
+        // The enable-only shape written by set_negative_conversion (old scans).
+        let mut adjustments = serde_json::json!({
+            "negativeConversion": {
+                "enabled": true,
+                "bounds": [[0.1, 0.8], [0.2, 0.9], [0.15, 0.85]],
+            }
+        });
+        // Params default when absent — old sidecars convert identically.
+        let (params, _) = stored_negative(&adjustments).expect("enable-only shape parses");
+        assert!((params.red_weight - 1.0).abs() < 1e-6);
+        assert!((params.exposure - 0.0).abs() < 1e-6);
+
+        // Merging tuning params must not touch the stored bounds.
+        let tuned = NegativeConversionParams {
+            red_weight: 1.1,
+            green_weight: 0.95,
+            blue_weight: 1.05,
+            exposure: -0.3,
+            contrast: 1.4,
+        };
+        merge_params_into(
+            &mut adjustments["negativeConversion"],
+            &tuned,
+            Some((0.002, 0.995)),
+        );
+        let (params, bounds) = stored_negative(&adjustments).expect("merged shape parses");
+        assert!((params.red_weight - 1.1).abs() < 1e-6);
+        assert!((params.exposure + 0.3).abs() < 1e-6);
+        assert!((params.contrast - 1.4).abs() < 1e-6);
+        assert!((bounds[0].min - 0.1).abs() < 1e-6, "bounds preserved");
+        assert!((bounds[2].max - 0.85).abs() < 1e-6, "bounds preserved");
+        let nc = &adjustments["negativeConversion"];
+        assert!((nc["clipBlack"].as_f64().unwrap() - 0.002).abs() < 1e-9);
+        assert_eq!(nc["enabled"], serde_json::json!(true));
+    }
+
+    #[test]
+    fn camel_case_params_deserialize_from_frontend_shape() {
+        let params: NegativeConversionParams = serde_json::from_value(serde_json::json!({
+            "redWeight": 1.2, "greenWeight": 1.0, "blueWeight": 0.9,
+            "exposure": 0.5, "contrast": 1.3,
+        }))
+        .expect("camelCase wire shape");
+        assert!((params.red_weight - 1.2).abs() < 1e-6);
+        // Partial payloads fall back to defaults.
+        let partial: NegativeConversionParams =
+            serde_json::from_value(serde_json::json!({ "exposure": 0.25 })).unwrap();
+        assert!((partial.red_weight - 1.0).abs() < 1e-6);
+        assert!((partial.exposure - 0.25).abs() < 1e-6);
     }
 }

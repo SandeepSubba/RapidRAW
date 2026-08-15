@@ -1008,7 +1008,7 @@ fn raw_preview_data(tif: &Path, rotation_steps: u32) -> Result<String, String> {
     Ok(format!("data:image/jpeg;base64,{}", STANDARD.encode(&jpeg)))
 }
 
-fn sample_base_density(img: &image::DynamicImage, nx: f32, ny: f32, rotation_steps: u32) -> [f32; 3] {
+pub fn sample_base_density(img: &image::DynamicImage, nx: f32, ny: f32, rotation_steps: u32) -> [f32; 3] {
     let oriented = match rotation_steps % 4 {
         1 => img.rotate90(),
         2 => img.rotate180(),
