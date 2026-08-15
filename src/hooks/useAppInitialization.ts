@@ -16,6 +16,7 @@ import {
   PanelRegion,
   RawStatus,
   EditedStatus,
+  NegativeStatus,
   Theme,
   ThumbnailSize,
   ThumbnailAspectRatio,
@@ -182,6 +183,7 @@ export const useAppInitialization = ({
             ...settings.filterCriteria,
             rawStatus: settings.filterCriteria.rawStatus || RawStatus.All,
             editedStatus: settings.filterCriteria.editedStatus || EditedStatus.All,
+            negativeStatus: settings.filterCriteria.negativeStatus || NegativeStatus.All,
             colors: settings.filterCriteria.colors || [],
           }));
         }

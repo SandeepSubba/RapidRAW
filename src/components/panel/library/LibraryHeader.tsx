@@ -19,6 +19,7 @@ import {
   FilterCriteria,
   RawStatus,
   EditedStatus,
+  NegativeStatus,
   LibraryViewMode,
   SortCriteria,
   SortDirection,
@@ -486,6 +487,7 @@ interface ViewOptionsDropdownProps {
   ratingFilterOptions: Array<{ value: number; label: string }>;
   rawStatusOptions: Array<{ key: RawStatus; label: string }>;
   editedStatusOptions: Array<{ key: EditedStatus; label: string }>;
+  negativeStatusOptions: Array<{ key: NegativeStatus; label: string }>;
   sortOptions: Array<{ key: string; label: string; disabled?: boolean }>;
 }
 
@@ -502,6 +504,7 @@ export function ViewOptionsDropdown({
   ratingFilterOptions,
   rawStatusOptions,
   editedStatusOptions,
+  negativeStatusOptions,
   sortOptions,
 }: ViewOptionsDropdownProps) {
   const { t } = useTranslation();
@@ -528,6 +531,7 @@ export function ViewOptionsDropdown({
     filterCriteria.rating !== 0 ||
     (filterCriteria.rawStatus && filterCriteria.rawStatus !== RawStatus.All) ||
     (filterCriteria.editedStatus && filterCriteria.editedStatus !== EditedStatus.All) ||
+    (filterCriteria.negativeStatus && filterCriteria.negativeStatus !== NegativeStatus.All) ||
     (filterCriteria.colors && filterCriteria.colors.length > 0);
 
   const [lastClickedColor, setLastClickedColor] = useState<string | null>(null);
@@ -705,6 +709,19 @@ export function ViewOptionsDropdown({
                 options={editedStatusOptions.map((o) => ({ id: o.key, label: o.label }))}
                 value={filterCriteria.editedStatus || EditedStatus.All}
                 onChange={(val) => setFilterCriteria((prev: FilterCriteria) => ({ ...prev, editedStatus: val }))}
+              />
+            </div>
+          </div>
+
+          <div>
+            <Text as="div" variant={TextVariants.small} weight={TextWeights.semibold} className="px-3 py-1 uppercase">
+              {t('library.header.viewOptions.filterByNegative', 'Filter by Negatives')}
+            </Text>
+            <div className="px-3 mt-1">
+              <SegmentedSwitch
+                options={negativeStatusOptions.map((o) => ({ id: o.key, label: o.label }))}
+                value={filterCriteria.negativeStatus || NegativeStatus.All}
+                onChange={(val) => setFilterCriteria((prev: FilterCriteria) => ({ ...prev, negativeStatus: val }))}
               />
             </div>
           </div>

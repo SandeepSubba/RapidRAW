@@ -272,7 +272,8 @@
       "resetAdjustments_one": "Reset Adjustments",
       "resetAdjustments_other": "Reset Adjustments on {{count}} Images",
       "showExplorer": "Show in File Explorer",
-      "virtualCopy": "Virtual Copy"
+      "virtualCopy": "Virtual Copy",
+      "applyFilmSettings": "Apply Film Settings"
     },
     "toasts": {
       "couldNotShowExplorer": "Could not show file in explorer: {{err}}",
@@ -962,6 +963,11 @@
         "all": "All Types",
         "nonRawOnly": "Non-RAW Only",
         "rawOnly": "RAW Only"
+      },
+      "negative": {
+        "all": "All",
+        "negativesOnly": "Negatives",
+        "nonNegatives": "Non-negatives"
       }
     },
     "folders": {

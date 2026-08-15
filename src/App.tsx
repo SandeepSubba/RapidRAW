@@ -57,7 +57,7 @@ import { useProductivityActions } from './hooks/useProductivityActions';
 
 import { useAppInitialization } from './hooks/useAppInitialization';
 import { useAndroidBackHandler } from './hooks/useAndroidBackHandler';
-import './i18n';
+import i18n from './i18n';
 
 import {
   Invokes,
@@ -592,6 +592,23 @@ function App() {
     const unlistenScanCancelled = listen('scan-cancelled', () => {
       useScannerStore.getState().setScanner({ scanning: 'idle', progress: 0 });
     });
+    // Batch negative conversion/tuning progress — Rust has always emitted these;
+    // surface them as a single updating toast.
+    const negToastId = { current: null as any };
+    const unlistenNegProgress = listen<{ current: number; total: number }>('negative-batch-progress', (e: any) => {
+      const { current, total } = e.payload;
+      if (total < 2) return; // single-image tweaks don't need a toast
+      const msg = i18n.t('modals.negativeConversion.convertingProgress', { current, total });
+      if (negToastId.current === null) {
+        negToastId.current = toast.info(msg, { autoClose: false });
+      } else {
+        toast.update(negToastId.current, { render: msg });
+      }
+      if (current >= total) {
+        toast.update(negToastId.current, { render: msg, autoClose: 1500 });
+        negToastId.current = null;
+      }
+    });
     return () => {
       clearTimeout(selectTimeout);
       unlisten.then((f) => f());
@@ -600,6 +617,7 @@ function App() {
       unlistenScan.then((f) => f());
       unlistenScanError.then((f) => f());
       unlistenScanCancelled.then((f) => f());
+      unlistenNegProgress.then((f) => f());
     };
   }, []);
 

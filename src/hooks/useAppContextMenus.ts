@@ -82,7 +82,7 @@ export function useAppContextMenus(props: UseAppContextMenusProps) {
       if (paths.length === 0) return;
       paths.forEach((p) => globalImageCache.delete(p));
       try {
-        await invoke('set_negative_conversion', { paths, enabled });
+        await invoke(Invokes.SetNegativeConversion, { paths, enabled });
         // Reflect the new state on the affected items right away so the menu toggles
         // Convert/Revert correctly without waiting on the async folder refresh.
         useLibraryStore.getState().setLibrary((state) => ({
@@ -105,6 +105,35 @@ export function useAppContextMenus(props: UseAppContextMenusProps) {
         }
       } catch (e) {
         toast.error(`Negative conversion failed: ${e}`);
+      }
+    },
+    [props],
+  );
+
+  // Copy the active image's conversion tuning (weights/exposure/contrast/clip)
+  // onto every converted negative in the selection — bounds stay per-frame.
+  const handleApplyFilmSettings = useCallback(
+    async (paths: string[]) => {
+      const nc: any = (useEditorStore.getState().adjustments as any)?.negativeConversion;
+      if (!nc?.enabled || paths.length === 0) return;
+      paths.forEach((p) => globalImageCache.delete(p));
+      try {
+        await invoke(Invokes.UpdateNegativeConversion, {
+          paths,
+          params: {
+            redWeight: nc.redWeight ?? 1.0,
+            greenWeight: nc.greenWeight ?? 1.0,
+            blueWeight: nc.blueWeight ?? 1.0,
+            exposure: nc.exposure ?? 0.0,
+            contrast: nc.contrast ?? 1.0,
+          },
+          blackPoint: nc.clipBlack ?? null,
+          whitePoint: nc.clipWhite ?? null,
+          regenThumbnails: true,
+        });
+        props.refreshImageList();
+      } catch (e) {
+        toast.error(`Applying film settings failed: ${e}`);
       }
     },
     [props],
@@ -618,6 +647,17 @@ export function useAppContextMenus(props: UseAppContextMenusProps) {
               disabled: selectionCount === 0,
               onClick: () => {
                 handleSetNegativeConversion(finalSelection, !allNegative);
+              },
+            },
+            {
+              label: t('contextMenus.thumbnail.applyFilmSettings', { count: selectionCount }),
+              icon: Film,
+              disabled:
+                !allNegative ||
+                selectionCount < 2 ||
+                !(useEditorStore.getState().adjustments as any)?.negativeConversion?.enabled,
+              onClick: () => {
+                handleApplyFilmSettings(finalSelection);
               },
             },
             {

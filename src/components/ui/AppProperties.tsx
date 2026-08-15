@@ -95,6 +95,7 @@ export enum Invokes {
   ListImagesInDir = 'list_images_in_dir',
   ListImagesRecursive = 'list_images_recursive',
   LoadImage = 'load_image',
+  SetNegativeConversion = 'set_negative_conversion',
   UpdateNegativeConversion = 'update_negative_conversion',
   SetNegativeFilmBase = 'set_negative_film_base',
   GetNegativeRawPreview = 'get_negative_raw_preview',
@@ -215,6 +216,7 @@ export type GroupingMode = 'off' | GroupPreference;
 
 export interface AppSettings {
   filmPanelAdvanced?: boolean;
+  displayNegativeIcon?: boolean;
   aiConnectorAddress?: string;
   aiProvider?: string;
   assistantProvider?: string;
@@ -302,11 +304,20 @@ export const EditedStatus = {
 
 export type EditedStatus = (typeof EditedStatus)[keyof typeof EditedStatus];
 
+export const NegativeStatus = {
+  All: 'all',
+  NegativesOnly: 'negativesOnly',
+  NonNegatives: 'nonNegatives',
+} as const;
+
+export type NegativeStatus = (typeof NegativeStatus)[keyof typeof NegativeStatus];
+
 export interface FilterCriteria {
   colors: Array<string>;
   rating: number;
   rawStatus: RawStatus;
   editedStatus?: EditedStatus;
+  negativeStatus?: NegativeStatus;
 }
 
 export interface Folder {

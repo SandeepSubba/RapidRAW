@@ -407,6 +407,8 @@ pub struct AutoProfile {
 pub struct AppSettings {
     #[serde(default)]
     pub film_panel_advanced: Option<bool>,
+    #[serde(default)]
+    pub display_negative_icon: Option<bool>,
     pub last_root_path: Option<String>,
     #[serde(default)]
     pub root_folders: Vec<String>,
@@ -559,6 +561,7 @@ impl Default for AppSettings {
     fn default() -> Self {
         Self {
             film_panel_advanced: None,
+            display_negative_icon: None,
             last_root_path: None,
             root_folders: Vec::new(),
             pinned_folders: Vec::new(),

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Image as ImageIcon, Folder, FolderOpen, Star as StarIcon, SlidersHorizontal, CloudOff, Layers } from 'lucide-react';
+import { Image as ImageIcon, Folder, FolderOpen, Star as StarIcon, SlidersHorizontal, CloudOff, Layers, Film } from 'lucide-react';
 import clsx from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { COLOR_LABELS, Color } from '../../../utils/adjustments';
@@ -30,6 +30,7 @@ const ThumbnailComponent = ({
   tags,
   aspectRatio: thumbnailAspectRatio,
   isEdited,
+  isNegative,
   exif,
   isCloudPlaceholder,
   groupBadgeLabel,
@@ -39,6 +40,8 @@ const ThumbnailComponent = ({
   const exifOverlay = useSettingsStore((s) => s.appSettings?.exifOverlay || ExifOverlay.Off);
   const displayEditIcon = useSettingsStore((s) => s.appSettings?.displayEditIcon ?? true);
   const showEditIcon = isEdited && displayEditIcon;
+  const displayNegativeIcon = useSettingsStore((s) => s.appSettings?.displayNegativeIcon ?? true);
+  const showNegativeIcon = isNegative && displayNegativeIcon;
 
   const [showPlaceholder, setShowPlaceholder] = useState(false);
   const [layers, setLayers] = useState<ImageLayer[]>([]);
@@ -143,10 +146,11 @@ const ThumbnailComponent = ({
   const isHover = exifOverlay === ExifOverlay.Hover;
 
   const hasEditIcon = !!showEditIcon;
+  const hasNegativeIcon = !!showNegativeIcon;
   const hasColorLabel = !!colorLabel;
   const hasRating = rating > 0;
   const hasGroupBadge = !!groupBadgeLabel;
-  const hasAnyOverlay = hasEditIcon || hasColorLabel || hasRating || hasGroupBadge;
+  const hasAnyOverlay = hasEditIcon || hasNegativeIcon || hasColorLabel || hasRating || hasGroupBadge;
 
   return (
     <div
@@ -235,6 +239,16 @@ const ThumbnailComponent = ({
             )}
           >
             <SlidersHorizontal size={12} />
+          </div>
+
+          <div
+            className={clsx(
+              'text-white flex items-center transition-all duration-200 ease-out overflow-hidden',
+              hasNegativeIcon ? 'max-w-3 opacity-100 scale-100' : 'max-w-0 opacity-0 scale-75 pointer-events-none',
+              hasNegativeIcon && hasEditIcon ? 'ml-1.5' : 'ml-0',
+            )}
+          >
+            <Film size={12} />
           </div>
 
           <div
@@ -900,6 +914,7 @@ const RowComponent = ({
                 tags={imageFile.tags}
                 exif={imageFile.exif}
                 isEdited={imageFile.is_edited}
+                isNegative={imageFile.is_negative}
                 aspectRatio={thumbnailAspectRatio}
                 isCloudPlaceholder={imageFile.is_cloud_placeholder}
                 groupBadgeLabel={imageFile.group_id && groupBadgeInfo?.get(imageFile.group_id)?.label}

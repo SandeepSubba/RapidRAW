@@ -32,6 +32,7 @@ import {
   ThumbnailAspectRatio,
   RawStatus,
   EditedStatus,
+  NegativeStatus,
   LibraryDisplayMode,
 } from '../ui/AppProperties';
 import { GroupBadgeInfo, GroupId } from '../../utils/imageGrouping';
@@ -221,6 +222,15 @@ export default function MainLibrary(props: MainLibraryProps) {
       { key: EditedStatus.All, label: t('library.filters.edited.all') },
       { key: EditedStatus.EditedOnly, label: t('library.filters.edited.editedOnly') },
       { key: EditedStatus.UneditedOnly, label: t('library.filters.edited.uneditedOnly') },
+    ],
+    [t],
+  );
+
+  const translatedNegativeStatusOptions = useMemo(
+    () => [
+      { key: NegativeStatus.All, label: t('library.filters.negative.all') },
+      { key: NegativeStatus.NegativesOnly, label: t('library.filters.negative.negativesOnly') },
+      { key: NegativeStatus.NonNegatives, label: t('library.filters.negative.nonNegatives') },
     ],
     [t],
   );
@@ -592,6 +602,7 @@ export default function MainLibrary(props: MainLibraryProps) {
               ratingFilterOptions={translatedRatingFilterOptions}
               rawStatusOptions={translatedRawStatusOptions}
               editedStatusOptions={translatedEditedStatusOptions}
+              negativeStatusOptions={translatedNegativeStatusOptions}
               sortOptions={translatedSortOptions}
             />
             {!props.isAndroid && (
