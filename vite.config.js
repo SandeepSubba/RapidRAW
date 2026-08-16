@@ -1,3 +1,9 @@
+// Node's libuv threadpool defaults to 4 threads, which rolldown (vite 8's
+// bundler) saturates and then deadlocks on: a cold dep-optimize or build sits
+// at 0% CPU forever, so tauri gives up after 180s and shows an empty window.
+// Set before anything touches the threadpool.
+process.env.UV_THREADPOOL_SIZE ??= '16';
+
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
