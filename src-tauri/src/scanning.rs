@@ -341,6 +341,9 @@ fn run_scanimage(
                     let _ = app_handle.emit("scan-progress", serde_json::json!({ "percent": whole }));
                 }
             } else {
+                // genesys prints the informative I/O error before its generic
+                // "trying to stop scanner" — log every line so none is lost.
+                log::warn!("[scan] scanimage: {line}");
                 last_line = line;
             }
         }
@@ -367,6 +370,32 @@ fn run_scanimage(
         return Err(ScanFail::Error(msg));
     }
     Ok(())
+}
+
+// genesys fails intermittently mid-scan (USB I/O error → "trying to stop
+// scanner") and recovers on the next run — retry a failed pass once instead of
+// scrapping the whole multi-pass scan. Cancel is never retried.
+#[allow(clippy::too_many_arguments)]
+fn run_scanimage_retry(
+    state_child: &Arc<Mutex<Option<Child>>>,
+    cancelled: &Arc<AtomicBool>,
+    app_handle: &AppHandle,
+    source: &str,
+    mode: &str,
+    dpi: u32,
+    depth: u32,
+    tmp_out: &Path,
+    pass: u32,
+    passes: u32,
+) -> Result<(), ScanFail> {
+    match run_scanimage(state_child, cancelled, app_handle, source, mode, dpi, depth, tmp_out, pass, passes) {
+        Err(ScanFail::Error(m)) if !cancelled.load(Ordering::SeqCst) => {
+            log::warn!("[scan] pass {pass} failed ({m}), retrying once");
+            std::thread::sleep(std::time::Duration::from_secs(3));
+            run_scanimage(state_child, cancelled, app_handle, source, mode, dpi, depth, tmp_out, pass, passes)
+        }
+        r => r,
+    }
 }
 
 fn scan_mode(film_type: &str) -> &'static str {
@@ -1473,7 +1502,7 @@ pub async fn scan_start(
         let do_ir = ir_clean && film_type != "bw" && source_infrared.is_some();
         let total_passes = samples + do_ir as u32;
         let mut scan_result = if samples == 1 {
-            run_scanimage(&child_slot, &cancelled, &app_handle, &source, scan_mode(&film_type), dpi, scan_depth, &tmp, 0, total_passes)
+            run_scanimage_retry(&child_slot, &cancelled, &app_handle, &source, scan_mode(&film_type), dpi, scan_depth, &tmp, 0, total_passes)
         } else {
             let pass_files: Vec<PathBuf> =
                 (0..samples).map(|i| dest.join(format!(".rapidraw-scan.pass{i}"))).collect();
@@ -1483,7 +1512,7 @@ pub async fn scan_start(
                     result = Err(ScanFail::Cancelled);
                     break;
                 }
-                if let Err(e) = run_scanimage(
+                if let Err(e) = run_scanimage_retry(
                     &child_slot, &cancelled, &app_handle, &source, scan_mode(&film_type), dpi, scan_depth, pass_file,
                     i as u32, total_passes,
                 ) {
