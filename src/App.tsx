@@ -589,6 +589,7 @@ function App() {
     });
     const unlistenScanError = listen<{ message: string }>('scan-error', (e: any) => {
       useScannerStore.getState().setScanner({ scanning: 'idle', progress: 0, error: e.payload.message });
+      toast.error(e.payload.message);
     });
     const unlistenScanCancelled = listen('scan-cancelled', () => {
       useScannerStore.getState().setScanner({ scanning: 'idle', progress: 0 });

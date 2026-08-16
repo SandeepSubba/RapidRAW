@@ -1631,6 +1631,7 @@ pub async fn scan_start(
                 let _ = app_handle.emit("scan-cancelled", ());
             }
             Err(ScanFail::Error(m)) => {
+                log::error!("[scan] failed: {m}");
                 let _ = std::fs::remove_file(&tmp);
                 let _ = app_handle.emit("scan-error", serde_json::json!({ "message": m }));
             }
