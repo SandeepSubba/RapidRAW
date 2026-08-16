@@ -110,12 +110,20 @@ export default function FilmPanel({ adjustments }: any) {
   // Track latest values for the release callback without re-subscribing.
   const latest = useRef({ params, clipBlack, clipWhite, clipDirty });
   latest.current = { params, clipBlack, clipWhite, clipDirty };
-  const onDragStateChange = (dragging: boolean) => {
-    if (!dragging) {
-      const l = latest.current;
-      commit(l.params, l.clipDirty ? { black: l.clipBlack, white: l.clipWhite } : null);
-    }
-  };
+  // Must be identity-stable and transition-guarded: Slider re-fires this on
+  // every callback change, and an unguarded commit here re-rendered → re-fired
+  // → committed in an infinite loop that cancelled every decode.
+  const wasDragging = useRef(false);
+  const onDragStateChange = useCallback(
+    (dragging: boolean) => {
+      if (wasDragging.current && !dragging) {
+        const l = latest.current;
+        commit(l.params, l.clipDirty ? { black: l.clipBlack, white: l.clipWhite } : null);
+      }
+      wasDragging.current = dragging;
+    },
+    [commit],
+  );
 
   // --- Film-stock profiles (params only; bounds stay per-frame) ---
   const profiles = allProfiles(appSettings?.negativeProfiles as FilmProfile[] | undefined);
