@@ -42,3 +42,6 @@ Rules:
 - The `claudecode` assistant provider shells out to the `claude` CLI (absolute
   path in settings); prompts go via stdin — never argv (E2BIG with mask-laden
   adjustments).
+- Generative replace (Settings → Generative AI) needs the local ComfyUI +
+  RapidRAW-AI-Connector stack — see `docs/AI_CONNECTOR.md` (port traps: app →
+  connector:5000, connector → ComfyUI:5545). Installed on the home Mac only.
