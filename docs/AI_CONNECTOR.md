@@ -38,9 +38,30 @@ it needs the companion middleware
     (HF `xinsir/controlnet-union-sdxl-1.0`, ~2.5GB)
 - `~/RapidRAW-AI-Connector` — clone, venv (same python), requirements.
 - `~/start-ai.sh` — boots ComfyUI on 5545, waits for it, then the connector
-  on 5000. Ctrl-C stops both. Logs: `/tmp/comfyui.log`,
-  `/tmp/ai-connector.log`. Not auto-started: 16GB RAM — run it only while
-  doing generative edits.
+  on 5001. Ctrl-C stops both. Logs: `/tmp/comfyui.log`,
+  `/tmp/ai-connector.log`.
+
+## Start/stop is automatic
+
+The stack is never meant to sit idle: warm ComfyUI holds many GB of SDXL
+weights on unified memory and will exhaust a 16GB machine (it did, once).
+
+- **Stops itself.** `start-ai.sh` runs an idle watchdog and shuts both
+  processes down after `IDLE_MIN` (default 15) minutes with no generation.
+  It counts `/inpaint` requests in the connector log, not log activity —
+  RapidRAW health-polls every 10s, so any mtime-based timer would never fire.
+  Override per run: `IDLE_MIN=5 ~/start-ai.sh`.
+- **Starts on demand.** `ai_connector::ensure_local_stack` (called from the
+  `ai-connector` branch of `invoke_generative_replace_with_mask_def`) spawns
+  `~/start-ai.sh` when the connector is down, then polls `/health` for up to
+  3 minutes. Gated on a loopback address and the script existing, so a remote
+  connector is never second-guessed.
+- The status poll emits `canStart` alongside `connected`, and `AIPanel`'s
+  `isGenerativeAvailable` ORs it in — otherwise the prompt field is disabled
+  while the stack is down and nothing could ever trigger the start.
+
+First edit after an idle stop costs ~3 min (boot + weight load); later ones
+are fast until it goes idle again.
 
 Verified end-to-end 2026-08-16: `/upload_source` + `/inpaint` ("a red
 flower" on a synthetic scene) → correct composited crop in 155s including

@@ -2,7 +2,12 @@
    whole filesystem at startup (open dir handles on /), hanging vite for
    minutes. All class names live under src/ (index.html has one static div). */
 @import 'tailwindcss' source("./");
-@source "../index.html";
+
+/* index.html's only utility, written out so nothing outside src/ is scanned:
+   an @source pointing at it reopens the root crawl. */
+html {
+  overscroll-behavior: none;
+}
 
 @theme {
   --color-bg-primary: var(--app-bg-primary);

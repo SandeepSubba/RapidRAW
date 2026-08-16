@@ -79,6 +79,8 @@ interface EditorState {
   isGeneratingAiMask: boolean;
   isGeneratingAi: boolean;
   isAIConnectorConnected: boolean;
+  // Connector is down but a local launcher can boot it on the next edit.
+  canStartAIStack: boolean;
   hasRenderedFirstFrame: boolean;
   patchesSentToBackend: Set<string>;
 
@@ -144,6 +146,7 @@ export const useEditorStore = create<EditorState>((set) => ({
 
   isGeneratingAiMask: false,
   isAIConnectorConnected: false,
+  canStartAIStack: false,
   isGeneratingAi: false,
   isMaskControlHovered: false,
   hasRenderedFirstFrame: false,

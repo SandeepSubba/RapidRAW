@@ -436,6 +436,12 @@ pub async fn invoke_generative_replace_with_mask_def(
     {
         let base_url = format!("http://{}", address);
 
+        // The local stack auto-stops when idle (it is memory-heavy), so it is
+        // usually down when a generative edit starts — boot it on demand.
+        ai_connector::ensure_local_stack(&address)
+            .await
+            .map_err(|e| e.to_string())?;
+
         let mut rgba_mask = RgbaImage::new(img_w, img_h);
         for (src_val, dst_chunk) in mask_bitmap.as_raw().iter().zip(rgba_mask.chunks_mut(4)) {
             let intensity = *src_val;
