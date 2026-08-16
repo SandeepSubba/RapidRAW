@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { ChevronDown, Film, Loader2, Pipette, RefreshCw, RotateCcw, RotateCw, X } from 'lucide-react';
+import { ChevronDown, Film, FlipHorizontal2, FlipVertical2, Loader2, Pipette, Plus, RefreshCw, RotateCcw, RotateCw, Trash2, X } from 'lucide-react';
 import Dropdown from '../../ui/Dropdown';
 import { useSettingsStore } from '../../../store/useSettingsStore';
 import { allProfiles, FilmProfile } from '../../../utils/filmProfiles';
@@ -135,11 +135,45 @@ export default function ScannerPane() {
   // in the library after this pane closes; the pane just reads store state.
 
   const busy = s.scanning !== 'idle';
-  const negativeProfiles = useSettingsStore(
-    (st) => st.appSettings?.negativeProfiles as FilmProfile[] | undefined,
-  );
+  const appSettings = useSettingsStore((st) => st.appSettings);
+  const handleSettingsChange = useSettingsStore((st) => st.handleSettingsChange);
+  const negativeProfiles = appSettings?.negativeProfiles as FilmProfile[] | undefined;
   const profiles = allProfiles(negativeProfiles);
   const [profileName, setProfileName] = useState<string | null>(null);
+  const [savingName, setSavingName] = useState<string | null>(null); // null = closed
+
+  // Save/update the current look as a named profile (shared with the editor).
+  const saveProfile = () => {
+    const name = savingName?.trim();
+    if (!name || !appSettings) return;
+    const user = (negativeProfiles ?? []).filter((x) => x.name !== name);
+    user.push({
+      name,
+      filmStock: s.filmStock.trim() || undefined,
+      params: {
+        redWeight: s.redWeight,
+        greenWeight: s.greenWeight,
+        blueWeight: s.blueWeight,
+        exposure: 0,
+        contrast: s.curveContrast,
+      },
+      clipBlack: s.clipBlack / 100,
+      clipWhite: s.clipWhite / 100,
+    });
+    handleSettingsChange({ ...appSettings, negativeProfiles: user });
+    setProfileName(name);
+    setSavingName(null);
+  };
+
+  const deleteProfile = () => {
+    const pr = profileName ? profiles.find((x) => x.name === profileName) : null;
+    if (!appSettings || !pr || pr.builtin) return;
+    handleSettingsChange({
+      ...appSettings,
+      negativeProfiles: (negativeProfiles ?? []).filter((x) => x.name !== pr.name),
+    });
+    setProfileName(null);
+  };
   const [previewHist, setPreviewHist] = useState<[number[], number[], number[]] | null>(null);
   // Densitometer: RGB (0-255) under the cursor, sampled from the preview bitmap.
   const [probe, setProbe] = useState<[number, number, number] | null>(null);
@@ -183,6 +217,8 @@ export default function ScannerPane() {
         look: lookOf(s),
         showDefects: s.irClean && s.filmType === 'bw' && s.showDefects,
         rotationSteps: s.rotationSteps,
+        flipH: s.flipH,
+        flipV: s.flipV,
         autoCrop: s.autoCrop,
         sourceVisible: s.caps?.sourceVisible ?? '',
         previewDpi: previewDpi(s.caps),
@@ -212,6 +248,8 @@ export default function ScannerPane() {
           look: lookOf(st),
           showDefects: st.irClean && st.filmType === 'bw' && st.showDefects,
           rotationSteps: st.rotationSteps,
+          flipH: st.flipH,
+          flipV: st.flipV,
           autoCrop: raw ? false : st.autoCrop,
           raw,
           basePoint: st.basePoint,
@@ -299,14 +337,28 @@ export default function ScannerPane() {
     if (s.previewData) rerenderPreview(100);
   };
 
-  const handleRotate = () => {
-    // Carry a hand-dragged crop through the 90° CW turn (normalized rect rotates
-    // [x,y,w,h] -> [1-(y+h), x, h, w]) so it isn't forgotten; auto crops re-detect.
+  const handleRotate = (dir: 1 | 3) => {
+    // Carry a hand-dragged crop through the 90° turn (CW: [x,y,w,h] ->
+    // [1-(y+h), x, h, w]; CCW is the inverse) so it isn't forgotten; auto
+    // crops re-detect.
     s.setScanner((st) => {
-      const next: any = { rotationSteps: (st.rotationSteps + 1) % 4 };
+      const next: any = { rotationSteps: (st.rotationSteps + dir) % 4 };
       if (st.cropManual && st.cropRect) {
         const [x, y, w, h] = st.cropRect;
-        next.cropRect = [1 - (y + h), x, h, w];
+        next.cropRect = dir === 1 ? [1 - (y + h), x, h, w] : [y, 1 - (x + w), h, w];
+      }
+      return next;
+    });
+    if (s.previewData) rerenderPreview(50);
+  };
+
+  const handleFlip = (axis: 'flipH' | 'flipV') => {
+    // Mirror a hand-dragged crop so it stays on the same film area.
+    s.setScanner((st) => {
+      const next: any = { [axis]: !st[axis] };
+      if (st.cropManual && st.cropRect) {
+        const [x, y, w, h] = st.cropRect;
+        next.cropRect = axis === 'flipH' ? [1 - (x + w), y, w, h] : [x, 1 - (y + h), w, h];
       }
       return next;
     });
@@ -335,6 +387,8 @@ export default function ScannerPane() {
         contrast: s.contrast,
         look: lookOf(s),
         rotationSteps: s.rotationSteps,
+        flipH: s.flipH,
+        flipV: s.flipV,
         samples: s.samples,
         irClean: s.irClean && hasIR,
         irSensitivity: s.irSensitivity,
@@ -722,13 +776,51 @@ export default function ScannerPane() {
             />
             {s.scanAdvanced && (
               <div className="space-y-1">
-                <div data-tooltip="Film-stock profile — same profiles as the editor Film panel">
-                  <Dropdown
-                    options={profiles.map((pr) => ({ label: pr.name, value: pr.name }))}
-                    value={profileName}
-                    onChange={(name: string) => applyProfile(name)}
-                  />
+                <div className="flex items-center gap-1" data-tooltip="Film-stock profile — same profiles as the editor Film panel">
+                  <div className="flex-1 min-w-0">
+                    <Dropdown
+                      options={profiles.map((pr) => ({ label: pr.name, value: pr.name }))}
+                      value={profileName}
+                      onChange={(name: string) => applyProfile(name)}
+                    />
+                  </div>
+                  <button
+                    onClick={() => setSavingName(savingName === null ? (profileName ?? '') : null)}
+                    disabled={busy}
+                    data-tooltip="Save current look as a profile (same name updates it)"
+                    className="p-1.5 rounded-md text-text-secondary hover:bg-surface hover:text-text-primary"
+                  >
+                    <Plus size={14} />
+                  </button>
+                  {profileName && !profiles.find((x) => x.name === profileName)?.builtin && (
+                    <button
+                      onClick={deleteProfile}
+                      disabled={busy}
+                      data-tooltip="Delete this profile"
+                      className="p-1.5 rounded-md text-text-secondary hover:bg-surface hover:text-text-primary"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  )}
                 </div>
+                {savingName !== null && (
+                  <div className="flex items-center gap-1">
+                    <input
+                      className="flex-1 min-w-0 px-2 py-1 rounded-md bg-surface text-sm text-text-primary outline-none"
+                      placeholder="Profile name (e.g. Portra 400)"
+                      value={savingName}
+                      autoFocus
+                      onChange={(e) => setSavingName(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && saveProfile()}
+                    />
+                    <button
+                      onClick={saveProfile}
+                      className="px-2 py-1 rounded-md bg-surface text-sm text-text-secondary hover:text-text-primary"
+                    >
+                      Save
+                    </button>
+                  </div>
+                )}
                 {previewHist && (
                   <div>
                     <svg viewBox="0 0 64 28" className="w-full h-12 rounded-md bg-surface/60" preserveAspectRatio="none">
@@ -828,15 +920,35 @@ export default function ScannerPane() {
         )}
 
         <div>
-          <p className="text-xs text-text-secondary mb-2">Orientation</p>
-          <button
-            onClick={handleRotate}
-            disabled={busy}
-            className="w-full flex items-center justify-center gap-2 px-3 py-1.5 rounded-md bg-surface/60 hover:bg-surface transition-colors text-sm text-text-primary"
-          >
-            <RotateCw size={14} />
-            Rotate 90° {s.rotationSteps > 0 && `(${s.rotationSteps * 90}°)`}
-          </button>
+          <p className="text-xs text-text-secondary mb-2">
+            Orientation {s.rotationSteps > 0 && `(${s.rotationSteps * 90}°)`}
+            {s.flipH && ' · flipped H'}
+            {s.flipV && ' · flipped V'}
+          </p>
+          <div className="flex gap-2">
+            {(
+              [
+                [RotateCcw, () => handleRotate(3), 'Rotate 90° counter-clockwise', false],
+                [RotateCw, () => handleRotate(1), 'Rotate 90° clockwise', false],
+                [FlipHorizontal2, () => handleFlip('flipH'), 'Flip horizontally', s.flipH],
+                [FlipVertical2, () => handleFlip('flipV'), 'Flip vertically', s.flipV],
+              ] as const
+            ).map(([Icon, onClick, tip, active], i) => (
+              <button
+                key={i}
+                onClick={onClick}
+                disabled={busy}
+                data-tooltip={tip}
+                className={`flex-1 flex items-center justify-center px-3 py-1.5 rounded-md transition-colors text-sm ${
+                  active
+                    ? 'bg-surface text-text-primary ring-1 ring-border-color'
+                    : 'bg-surface/60 hover:bg-surface text-text-primary'
+                }`}
+              >
+                <Icon size={14} />
+              </button>
+            ))}
+          </div>
         </div>
 
         <Switch

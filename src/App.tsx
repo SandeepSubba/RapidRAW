@@ -909,7 +909,6 @@ function App() {
                   renderPanel={renderAppPanel}
                   onWidthChange={createResizeHandler('left', effectiveLeftWidth)}
                   isResizing={isResizing}
-                  hiddenPanels={isScannerActive ? [Panel.Agent] : undefined}
                 />
               )}
               <div className="relative flex-1 flex flex-col min-w-0">

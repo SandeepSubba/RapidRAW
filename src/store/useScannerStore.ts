@@ -49,6 +49,8 @@ interface ScannerState {
   clipBlack: number; // percent, 0.1 = the automatic 0.1%
   clipWhite: number; // percent
   rotationSteps: number;
+  flipH: boolean;
+  flipV: boolean;
   // Optional shooting metadata written to the scan's sidecar + EXIF (roll-level).
   filmStock: string;
   iso: string;
@@ -95,6 +97,8 @@ export const useScannerStore = create<ScannerState>()(
       clipBlack: 0.1,
       clipWhite: 99.9,
       rotationSteps: 0,
+      flipH: false,
+      flipV: false,
       filmStock: '',
       iso: '',
       camera: '',
@@ -129,6 +133,8 @@ export const useScannerStore = create<ScannerState>()(
         clipBlack: state.clipBlack,
         clipWhite: state.clipWhite,
         rotationSteps: state.rotationSteps,
+        flipH: state.flipH,
+        flipV: state.flipV,
         filmStock: state.filmStock,
         iso: state.iso,
         camera: state.camera,

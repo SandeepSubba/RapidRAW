@@ -1007,6 +1007,8 @@ fn write_scan_sidecar(
     negative: Option<([crate::negative_conversion::ChannelBounds; 3], f32, f32)>,
     look: &ScanLook,
     rotation_steps: u32,
+    flip_h: bool,
+    flip_v: bool,
     brightness: f32,
     contrast: f32,
     crop: Option<(u32, u32, u32, u32)>,
@@ -1076,6 +1078,12 @@ fn write_scan_sidecar(
     if steps > 0 {
         meta.adjustments["orientationSteps"] = serde_json::json!(steps);
     }
+    if flip_h {
+        meta.adjustments["flipHorizontal"] = serde_json::json!(true);
+    }
+    if flip_v {
+        meta.adjustments["flipVertical"] = serde_json::json!(true);
+    }
     if brightness != 0.0 {
         meta.adjustments["brightness"] = serde_json::json!(brightness);
     }
@@ -1102,7 +1110,7 @@ fn preview_tif_path() -> PathBuf {
 // inversion), so the orange rebate is visible to click. The scan is near-linear
 // and dark (median ~0.07); generate_thumbnail_data would show it almost black
 // because the negative conversion is what normally supplies the gamma.
-fn raw_preview_data(tif: &Path, rotation_steps: u32) -> Result<String, String> {
+fn raw_preview_data(tif: &Path, rotation_steps: u32, flip_h: bool, flip_v: bool) -> Result<String, String> {
     use base64::{engine::general_purpose::STANDARD, Engine};
     let img = open_image(tif)?;
     let img = match rotation_steps % 4 {
@@ -1111,6 +1119,9 @@ fn raw_preview_data(tif: &Path, rotation_steps: u32) -> Result<String, String> {
         3 => img.rotate270(),
         _ => img,
     };
+    // Flips apply after orientation, matching the engine's display order.
+    let img = if flip_h { img.fliph() } else { img };
+    let img = if flip_v { img.flipv() } else { img };
     let mut rgb = img.thumbnail(1200, 1200).to_rgb32f();
     for p in rgb.pixels_mut() {
         for c in 0..3 {
@@ -1166,6 +1177,8 @@ fn render_preview(
     contrast: f32,
     look: &ScanLook,
     rotation_steps: u32,
+    flip_h: bool,
+    flip_v: bool,
     auto_crop: bool,
     raw: bool,
     base_point: Option<(f32, f32)>,
@@ -1183,7 +1196,7 @@ fn render_preview(
     // target the orange rebate; returned directly since it needs no conversion.
     if raw {
         *tone_slot.lock().unwrap() = None;
-        return Ok(PreviewResult { data: raw_preview_data(tif, rotation_steps)?, crop: None, histogram: None });
+        return Ok(PreviewResult { data: raw_preview_data(tif, rotation_steps, flip_h, flip_v)?, crop: None, histogram: None });
     }
     // Loaded for tone (converting negatives) and/or the auto-crop overlay rect.
     let convert = film_type != "e6";
@@ -1194,7 +1207,10 @@ fn render_preview(
         let pin_base = |bounds: &mut [crate::negative_conversion::ChannelBounds; 3]| {
             if let Some((bx, by)) = base_point {
                 // Pin each channel's base (bounds min) to the sampled rebate; keep the
-                // auto white point but guard the divisor stays positive.
+                // auto white point but guard the divisor stays positive. The click is
+                // in displayed (post-flip) space; un-flip back to rotated space.
+                let bx = if flip_h { 1.0 - bx } else { bx };
+                let by = if flip_v { 1.0 - by } else { by };
                 let base = sample_base_density(img, bx, by, rotation_steps);
                 for c in 0..3 {
                     bounds[c].min = base[c];
@@ -1228,6 +1244,8 @@ fn render_preview(
             Some((bounds, base_exposure, auto_gain)),
             look,
             rotation_steps,
+            flip_h,
+            flip_v,
             exposure_offset + auto_ev,
             contrast,
             None,
@@ -1236,7 +1254,7 @@ fn render_preview(
     } else {
         // Slide (E-6) — positive film, no inversion.
         *tone_slot.lock().unwrap() = None;
-        write_scan_sidecar(tif, None, look, rotation_steps, exposure_offset, contrast, None, &FilmMeta::default())?;
+        write_scan_sidecar(tif, None, look, rotation_steps, flip_h, flip_v, exposure_offset, contrast, None, &FilmMeta::default())?;
     }
 
     // Overlay rect only — the preview image itself stays uncropped so the dimmed
@@ -1250,7 +1268,12 @@ fn render_preview(
                 .filter(|r| (r.2 as u64) * (r.3 as u64) * 100 < (w as u64) * (h as u64) * 95)
                 .map(|r| {
                 let ((cx, cy, cw, ch), (rw, rh)) = rotate_rect(r, w, h, rotation_steps);
-                [cx as f32 / rw as f32, cy as f32 / rh as f32, cw as f32 / rw as f32, ch as f32 / rh as f32]
+                let (mut nx, mut ny) = (cx as f32 / rw as f32, cy as f32 / rh as f32);
+                let (nw, nh) = (cw as f32 / rw as f32, ch as f32 / rh as f32);
+                // Mirror into displayed (post-flip) space.
+                if flip_h { nx = 1.0 - (nx + nw); }
+                if flip_v { ny = 1.0 - (ny + nh); }
+                [nx, ny, nw, nh]
             })
         })
     } else {
@@ -1293,6 +1316,12 @@ fn render_preview(
                 3 => image::imageops::rotate270(&m8),
                 _ => m8,
             };
+            if flip_h {
+                image::imageops::flip_horizontal_in_place(&mut m8);
+            }
+            if flip_v {
+                image::imageops::flip_vertical_in_place(&mut m8);
+            }
             let (ow, oh) = out_rgb.dimensions();
             let m8 = image::imageops::resize(&m8, ow, oh, image::imageops::FilterType::Nearest);
             for (p, m) in out_rgb.pixels_mut().zip(m8.pixels()) {
@@ -1323,6 +1352,8 @@ pub async fn scan_preview(
     look: Option<ScanLook>,
     show_defects: Option<bool>,
     rotation_steps: u32,
+    flip_h: Option<bool>,
+    flip_v: Option<bool>,
     auto_crop: bool,
     source_visible: String,
     preview_dpi: u32,
@@ -1350,7 +1381,7 @@ pub async fn scan_preview(
                 ScanFail::Error(m) => m,
             },
         )?;
-        render_preview(&tmp, &film_type, exposure_offset, contrast, &look.unwrap_or_default(), rotation_steps, auto_crop, raw, base_point, show_defects.unwrap_or(false), &app_handle, &tone_slot)
+        render_preview(&tmp, &film_type, exposure_offset, contrast, &look.unwrap_or_default(), rotation_steps, flip_h.unwrap_or(false), flip_v.unwrap_or(false), auto_crop, raw, base_point, show_defects.unwrap_or(false), &app_handle, &tone_slot)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1364,6 +1395,8 @@ pub async fn scan_rerender_preview(
     look: Option<ScanLook>,
     show_defects: Option<bool>,
     rotation_steps: u32,
+    flip_h: Option<bool>,
+    flip_v: Option<bool>,
     auto_crop: bool,
     raw: bool,
     base_point: Option<(f32, f32)>,
@@ -1379,7 +1412,7 @@ pub async fn scan_rerender_preview(
     }
     let tone_slot = state.preview_tone.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        render_preview(&tif, &film_type, exposure_offset, contrast, &look.unwrap_or_default(), rotation_steps, auto_crop, raw, base_point, show_defects.unwrap_or(false), &app_handle, &tone_slot)
+        render_preview(&tif, &film_type, exposure_offset, contrast, &look.unwrap_or_default(), rotation_steps, flip_h.unwrap_or(false), flip_v.unwrap_or(false), auto_crop, raw, base_point, show_defects.unwrap_or(false), &app_handle, &tone_slot)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1393,6 +1426,8 @@ pub async fn scan_start(
     contrast: f32,
     look: Option<ScanLook>,
     rotation_steps: u32,
+    flip_h: Option<bool>,
+    flip_v: Option<bool>,
     samples: u32,
     ir_clean: bool,
     ir_sensitivity: f32,
@@ -1422,6 +1457,7 @@ pub async fn scan_start(
     // later frames (holder advanced, no fresh preview) re-solve on their own scan.
     let preview_tone = state.preview_tone.lock().unwrap().take();
     let look = look.unwrap_or_default();
+    let (flip_h, flip_v) = (flip_h.unwrap_or(false), flip_v.unwrap_or(false));
     log::info!("[scan] starting {file_name} @ {dpi}dpi into {dest_folder}");
 
     std::thread::spawn(move || {
@@ -1530,7 +1566,12 @@ pub async fn scan_start(
                         let (w, h) = (img.width(), img.height());
                         detect_frame_rect(&img, 100)
                             .filter(|r| (r.2 as u64) * (r.3 as u64) * 100 < (w as u64) * (h as u64) * 95)
-                            .map(|r| rotate_rect(r, w, h, rotation_steps).0)
+                            .map(|r| {
+                                let ((cx, cy, cw, ch), (rw, rh)) = rotate_rect(r, w, h, rotation_steps);
+                                let cx = if flip_h { rw - (cx + cw) } else { cx };
+                                let cy = if flip_v { rh - (cy + ch) } else { cy };
+                                (cx, cy, cw, ch)
+                            })
                     })
                 } else {
                     None
@@ -1567,6 +1608,8 @@ pub async fn scan_start(
                             Some((bounds, exposure, gain)),
                             &look,
                             rotation_steps,
+                            flip_h,
+                            flip_v,
                             exposure_offset + ev,
                             contrast,
                             crop_rect,
@@ -1574,7 +1617,7 @@ pub async fn scan_start(
                         )
                     })
                 } else {
-                    write_scan_sidecar(&target, None, &look, rotation_steps, exposure_offset, contrast, crop_rect, &film_meta)
+                    write_scan_sidecar(&target, None, &look, rotation_steps, flip_h, flip_v, exposure_offset, contrast, crop_rect, &film_meta)
                 };
                 if let Err(e) = result {
                     log::warn!("[scan] sidecar write failed for {path}: {e}");
