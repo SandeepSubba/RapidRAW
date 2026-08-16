@@ -1180,6 +1180,10 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
     selectedImage?.isReady,
     hasRenderedFirstFrame,
     isCropping,
+    // cropToolActive feeds isCropViewVisible inside syncWgpu — omitting it left
+    // the wgpu layer hidden after the crop tool auto-deactivated on commit
+    // (both layers hidden → image "disappears" until navigation resyncs).
+    cropToolActive,
     uncroppedAdjustedPreviewUrl,
     showOriginal,
     appSettings?.theme,

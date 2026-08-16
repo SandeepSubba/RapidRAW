@@ -12,7 +12,10 @@ export default defineConfig(async () => ({
   server: {
     port: 1420,
     strictPort: true,
-    host: host || false,
+    // Explicit IPv4: with plain "localhost", node may bind ::1 only (resolution
+    // order shifts with VPN/network state) while tauri probes 127.0.0.1 — the
+    // app then waits 180s for a dev server that is already "ready".
+    host: host || '127.0.0.1',
     hmr: host
       ? {
           protocol: 'ws',
@@ -21,7 +24,11 @@ export default defineConfig(async () => ({
         }
       : undefined,
     watch: {
-      ignored: ['**/src-tauri/**'],
+      // .DS_Store churn from Finder produces directory-level FSEvents that the
+      // watcher re-reports as changes to every sibling source file; the flood
+      // can stall startup. graphify-out is regenerated wholesale and is never
+      // imported, so watching it is pure noise.
+      ignored: ['**/src-tauri/**', '**/graphify-out/**', '**/.DS_Store'],
     },
   },
 
