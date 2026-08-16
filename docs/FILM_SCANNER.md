@@ -99,8 +99,12 @@ app builds a defect mask and fills it from surrounding clean pixels.
 - A **sensitivity** slider (shown when IR is on) tunes how aggressively defects
   are caught — higher removes more dust but can start softening fine detail;
   lower is more conservative. 50 is the neutral default.
-- Not available for silver **B&W** film (the silver image blocks infrared
-  everywhere, so there's no clean signal).
+- For silver **B&W** film the IR channel is blind (silver blocks infrared
+  everywhere), so the switch runs a **software detector** instead: the same
+  residual analysis on the visible scan, deliberately conservative (higher
+  threshold plus a small-speck area cap) so film grain and image detail are
+  never inpainted. A **Show detected specks** toggle paints the would-be-filled
+  pixels red on the preview so sensitivity can be judged before scanning.
 - At 7200 dpi the IR pass is noisier; detection runs on a downsampled frame and
   fills at full resolution so fine dust is still caught.
 - **Limitation:** it can only remove defects that block infrared. Deep
@@ -123,8 +127,46 @@ These are convenience offsets on top of the automatic tone. They are written as
 baked into the conversion — so every scan opens in the editor fully re-tunable,
 and dragging Exposure to 0 shows the untouched automatic conversion.
 
+### Advanced conversion
+A collapsible section (hidden for E-6) that tunes the **conversion itself**,
+not editor offsets: color timing (**Red/Green/Blue weights**, cyan–red /
+magenta–green / yellow–blue), **Print Grade** (the conversion sigmoid's
+contrast), and **Black/White Clip** percentiles. Every change re-renders the
+cached preview instantly — no rescan — and rides into the scan's sidecar, so
+the frame lands with the previewed look and stays re-editable in the editor's
+Film panel.
+
+Clip semantics: auto-tone anchors the frame's midtone, so the tone solve runs
+against default-clip bounds while the render uses the user-clipped bounds —
+that keeps the clip sliders acting as visible black/white-point moves instead
+of being compensated away by the auto exposure.
+
+### Film-stock profiles
+A profile dropdown in Advanced applies a named conversion parameter set
+(NegaFix-style). Built-ins cover generic C-41, a low-contrast portrait look, a
+punchy consumer look, and B&W grades 1–4; **+** saves the current look under a
+name (same name updates), non-builtin profiles can be deleted. Profiles store
+**params only, never bounds** — each frame keeps its own mask analysis. The
+same profile list appears in the editor's Film panel, and a profile whose film
+stock matches the roll's stock metadata is auto-suggested there.
+
+### Histogram & densitometer
+With Advanced open, an RGB histogram of the current preview shows clipping at
+the ends (log-scaled), and hovering the preview reads the RGB values under the
+cursor with a "clipped" flag at 254+.
+
+### Assistant on the scan preview
+With a frame previewed, the AI assistant edits the **scan** rather than a
+library image: it sees the preview render and drives Exposure, Contrast, color
+timing, and Print Grade directly (metadata edits are unavailable in this
+mode). Its changes land on the pane's sliders and re-render immediately.
+
 ### Orientation
-Rotate the frame in 90° steps. Saved as a non-destructive orientation adjustment.
+Icon row: rotate 90° counter-clockwise / clockwise, flip horizontal, flip
+vertical (active flips stay highlighted). All saved as non-destructive
+adjustments (`orientationSteps`, `flipHorizontal`, `flipVertical`) and
+re-editable in the editor. A hand-dragged crop follows rotations and mirrors
+through flips.
 
 ### Auto crop
 Detects the film-frame edges and trims the holder bars, the aperture-shadow
@@ -136,6 +178,29 @@ what you framed. The crop is written as a **normal,
 non-destructive crop adjustment** — the editor's Crop tool can refine or clear
 it, and no pixels are discarded from the TIFF. Frames where no confident frame
 edge is found are left uncropped rather than guessed.
+
+---
+
+## Editing after the scan — the Film panel
+
+Converted negatives (scanned or converted in-library via right-click) get a
+**Film** section at the bottom of the editor's right panel:
+
+- **Basic:** conversion Exposure, Print Grade contrast, Reset to auto.
+- **Advanced** (toggle, remembered): color timing R/G/B, black/white clip,
+  and a **film-base eyedropper** that shows the raw orange negative (the
+  rebate is usually cropped out of the editor view) — click the clear film
+  edge to pin the mask base exactly.
+- **Profiles:** the same list as the scan pane, with save/update/delete and
+  auto-suggest from the roll's film-stock metadata.
+
+The params are **sidecar-owned**: sliders commit on release through a
+dedicated command, re-decode the base image, and stay out of undo history,
+presets, and copy/paste (bounds are per-frame by design). Right-click a
+multi-selection → **Apply Film Settings** copies the active image's tuning to
+every converted negative selected. The library shows a film badge on
+converted negatives (toggleable in settings) and can filter by
+negatives/non-negatives; batch conversions show a progress toast.
 
 ---
 
@@ -252,7 +317,9 @@ reliability, connect it directly rather than through a USB hub.
   imperfect; 3600 dpi is recommended.
 - **IR dust removal** only catches defects that block infrared. Deep
   emulsion-side scratches that removed film dye are transparent to IR and are not
-  detected — the editor's heal/clone tool is the fix for those.
+  detected — the editor's heal/clone tool is the fix for those. B&W uses the
+  software detector instead (see Dust removal), which is deliberately
+  conservative and may leave faint dust at low sensitivity.
 - **No multi-exposure HDR** — the genesys backend exposes no exposure-time
   control, so extended-dynamic-range scanning is not possible; multi-sampling
   reduces noise instead.
