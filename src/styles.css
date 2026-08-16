@@ -1,5 +1,8 @@
-@import 'tailwindcss';
-@source not "../src-tauri";
+/* Explicit source: Tailwind's automatic detection was caught crawling the
+   whole filesystem at startup (open dir handles on /), hanging vite for
+   minutes. All class names live under src/ (index.html has one static div). */
+@import 'tailwindcss' source("./");
+@source "../index.html";
 
 @theme {
   --color-bg-primary: var(--app-bg-primary);
