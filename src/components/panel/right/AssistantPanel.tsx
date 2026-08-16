@@ -372,8 +372,11 @@ export default function AssistantPanel() {
     useLibraryActions();
   const selectedImage = useEditorStore((s) => s.selectedImage);
   const scanPreviewReady = useScannerStore((st) => !!st.previewData);
-  const scannerOpen =
-    useUIStore((st) => st.isImportViewActive) && useImportStore((st) => st.stage) === 'scanner';
+  // Hooks must be unconditional — deriving the flag after both reads keeps the
+  // hook order stable (the short-circuited form crashed the whole tree).
+  const importViewActive = useUIStore((st) => st.isImportViewActive);
+  const importStage = useImportStore((st) => st.stage);
+  const scannerOpen = importViewActive && importStage === 'scanner';
   const multiSelectedPaths = useLibraryStore((s) => s.multiSelectedPaths);
   const selectedCount = multiSelectedPaths.length;
 
