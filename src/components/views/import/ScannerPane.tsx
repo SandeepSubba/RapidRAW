@@ -26,6 +26,41 @@ type PreviewResult = {
   histogram: [number[], number[], number[]] | null;
 };
 
+// Immediate re-render of the cached preview from current store state; used by
+// the assistant after it changes scan controls. No-op without a preview.
+export async function rerenderScanPreviewNow() {
+  const st = useScannerStore.getState();
+  if (!st.previewData || st.scanning !== 'idle') return;
+  try {
+    const res = await invoke<PreviewResult>(Invokes.ScanRerenderPreview, {
+      filmType: st.filmType,
+      exposureOffset: st.exposureOffset,
+      contrast: st.contrast,
+      look: {
+        redWeight: st.redWeight,
+        greenWeight: st.greenWeight,
+        blueWeight: st.blueWeight,
+        curveContrast: st.curveContrast,
+        clipBlack: st.clipBlack / 100,
+        clipWhite: st.clipWhite / 100,
+      },
+      showDefects: st.irClean && st.filmType === 'bw' && st.showDefects,
+      rotationSteps: st.rotationSteps,
+      flipH: st.flipH,
+      flipV: st.flipV,
+      autoCrop: st.autoCrop,
+      raw: false,
+      basePoint: st.basePoint,
+    });
+    st.setScanner({
+      previewData: res.data,
+      cropRect: st.cropManual ? st.cropRect : res.crop,
+    });
+  } catch {
+    // no cached preview / scan running — settings still apply to the next scan
+  }
+}
+
 export function detectScanner() {
   const { setScanner } = useScannerStore.getState();
   setScanner({ detect: 'detecting' });

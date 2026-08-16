@@ -26,6 +26,10 @@ import { Invokes } from '../../ui/AppProperties';
 import Text from '../../ui/Text';
 import { TextColors, TextVariants } from '../../../types/typography';
 import { useEditorStore } from '../../../store/useEditorStore';
+import { useImportStore } from '../../../store/useImportStore';
+import { useScannerStore } from '../../../store/useScannerStore';
+import { rerenderScanPreviewNow } from '../../views/import/ScannerPane';
+import { useUIStore } from '../../../store/useUIStore';
 import { useLibraryStore } from '../../../store/useLibraryStore';
 import { useSettingsStore } from '../../../store/useSettingsStore';
 import { useAssistantStore, nextMessageId, AssistantMessage } from '../../../store/useAssistantStore';
@@ -164,6 +168,67 @@ function sanitizePatch(raw: any): Record<string, number> {
     out[key] = Math.max(range[0], Math.min(range[1], num));
   }
   return out;
+}
+
+// Scan-preview mode: the pane's own controls, described to the model through
+// the adjustments context and mapped back from its patch.
+function scannerContext(sc: any): any {
+  const ctx: any = {
+    _mode:
+      'FILM SCANNER PREVIEW — the only controls are: brightness (exposure, EV -3..3), ' +
+      'contrast (-100..100)' +
+      (sc.filmType !== 'e6'
+        ? ', negativeConversion.redWeight/greenWeight/blueWeight (color timing, 0.5..1.5) and negativeConversion.contrast (print grade, 0.5..2.5)'
+        : '') +
+      '. Return changes under those exact keys in "adjustments". Metadata/tags/rating/filename cannot be changed here.',
+    brightness: sc.exposureOffset,
+    contrast: sc.contrast,
+  };
+  if (sc.filmType !== 'e6') {
+    ctx.negativeConversion = {
+      enabled: true,
+      redWeight: sc.redWeight,
+      greenWeight: sc.greenWeight,
+      blueWeight: sc.blueWeight,
+      contrast: sc.curveContrast,
+    };
+  }
+  return ctx;
+}
+
+function applyScannerPatch(raw: any): Record<string, number> {
+  const applied: Record<string, number> = {};
+  if (!raw || typeof raw !== 'object') return applied;
+  const clamp = (v: any, lo: number, hi: number) => {
+    const n = typeof v === 'number' ? v : parseFloat(v);
+    return Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : null;
+  };
+  const patch: any = {};
+  const b = clamp(raw.brightness ?? raw.exposure, -3, 3);
+  if (b !== null) { patch.exposureOffset = b; applied.exposure = b; }
+  const c = clamp(raw.contrast, -100, 100);
+  if (c !== null) { patch.contrast = c; applied.contrast = c; }
+  const nc = raw.negativeConversion;
+  if (nc && typeof nc === 'object') {
+    const rw = clamp(nc.redWeight, 0.5, 1.5);
+    const gw = clamp(nc.greenWeight, 0.5, 1.5);
+    const bw = clamp(nc.blueWeight, 0.5, 1.5);
+    const pg = clamp(nc.contrast, 0.5, 2.5);
+    if (rw !== null) { patch.redWeight = rw; applied.redWeight = rw; }
+    if (gw !== null) { patch.greenWeight = gw; applied.greenWeight = gw; }
+    if (bw !== null) { patch.blueWeight = bw; applied.blueWeight = bw; }
+    if (pg !== null) { patch.curveContrast = pg; applied.printGrade = pg; }
+    if (Object.keys(patch).some((k) => ['redWeight', 'greenWeight', 'blueWeight', 'curveContrast'].includes(k))) {
+      patch.scanAdvanced = true; // reveal what changed
+    }
+  }
+  if (Object.keys(patch).length > 0) useScannerStore.getState().setScanner(patch);
+  return applied;
+}
+
+function dataUrlToImage(url: string): { mediaType: string; data: string } | null {
+  const m = url.match(/^data:([^;]+);base64,(.*)$/s);
+  return m ? { mediaType: m[1], data: m[2] } : null;
 }
 
 function formatPatch(patch: Record<string, number>): string {
@@ -306,6 +371,9 @@ export default function AssistantPanel() {
   const { handleUpdateExif, handleRate, handleSetColorLabel, handleTagsChanged, handleRenameToName } =
     useLibraryActions();
   const selectedImage = useEditorStore((s) => s.selectedImage);
+  const scanPreviewReady = useScannerStore((st) => !!st.previewData);
+  const scannerOpen =
+    useUIStore((st) => st.isImportViewActive) && useImportStore((st) => st.stage) === 'scanner';
   const multiSelectedPaths = useLibraryStore((s) => s.multiSelectedPaths);
   const selectedCount = multiSelectedPaths.length;
 
@@ -553,13 +621,23 @@ export default function AssistantPanel() {
     const { multiSelectedPaths: selectedPaths, imageList } = useLibraryStore.getState();
     const outgoing = [...attachments];
 
+    // Scan-preview mode: the film-scanner pane is open with a previewed frame —
+    // the assistant drives the scan controls instead of editor adjustments.
+    const scanState = useScannerStore.getState();
+    const scannerMode =
+      useUIStore.getState().isImportViewActive &&
+      useImportStore.getState().stage === 'scanner' &&
+      !!scanState.previewData;
+
     // Batch mode: several library images selected and no manual attachment — OCR
     // and apply to each of them individually (matches how the Metadata panel
     // treats a multi-selection). A manual attachment falls back to single.
-    const doBatch = outgoing.length === 0 && selectedPaths.length > 1;
+    const doBatch = !scannerMode && outgoing.length === 0 && selectedPaths.length > 1;
 
     const viewerUrl = finalPreviewUrl || uncroppedAdjustedPreviewUrl || currentImage?.thumbnailUrl || null;
-    const willAttachViewer = !doBatch && outgoing.length === 0 && !!currentImage && !!viewerUrl;
+    const willAttachViewer = scannerMode
+      ? outgoing.length === 0
+      : !doBatch && outgoing.length === 0 && !!currentImage && !!viewerUrl;
 
     const userMessage: AssistantMessage = {
       id: nextMessageId(),
@@ -660,20 +738,38 @@ export default function AssistantPanel() {
       }
 
       let images = outgoing.map((a) => ({ mediaType: a.mediaType, data: a.data }));
-      if (willAttachViewer && viewerUrl) {
-        const viewer = await blobUrlToImage(viewerUrl, imageMaxDim);
-        if (viewer) images = [viewer];
+      if (willAttachViewer) {
+        if (scannerMode && scanState.previewData) {
+          const preview = dataUrlToImage(scanState.previewData);
+          if (preview) images = [preview];
+        } else if (viewerUrl) {
+          const viewer = await blobUrlToImage(viewerUrl, imageMaxDim);
+          if (viewer) images = [viewer];
+        }
       }
       const response: any = await invoke(Invokes.AssistantChat, {
         messages: history,
-        adjustments: currentImage ? adjustments : null,
-        currentMetadata: currentImage ? readCurrentMetadata(currentImage.exif) : null,
+        adjustments: scannerMode ? scannerContext(scanState) : currentImage ? adjustments : null,
+        currentMetadata: scannerMode || !currentImage ? null : readCurrentMetadata(currentImage.exif),
         images,
         model: selectedModel || null,
       });
 
       if (cancelRef.current) {
         addMessage({ id: nextMessageId(), role: 'assistant', content: t('editor.assistant.stoppedShort', 'Stopped.') });
+        return;
+      }
+
+      if (scannerMode) {
+        const applied = applyScannerPatch(response?.adjustments);
+        const hasScanPatch = Object.keys(applied).length > 0;
+        if (hasScanPatch) await rerenderScanPreviewNow();
+        addMessage({
+          id: nextMessageId(),
+          role: 'assistant',
+          content: response?.reply || t('editor.assistant.emptyReply', 'Done.'),
+          appliedAdjustments: hasScanPatch ? applied : null,
+        });
         return;
       }
 
@@ -1015,10 +1111,19 @@ export default function AssistantPanel() {
           </div>
         )}
 
-        {!selectedImage && selectedCount <= 1 && (
+        {scannerOpen ? (
           <Text color={TextColors.secondary} className="text-xs mb-2">
-            {t('editor.assistant.noImage', 'Open an image to let the assistant apply edits.')}
+            {scanPreviewReady
+              ? t('editor.assistant.scanPreview', 'Editing the scan preview — ask for exposure, contrast, or color changes.')
+              : t('editor.assistant.scanNoPreview', 'Run a preview to let the assistant tune the scan.')}
           </Text>
+        ) : (
+          !selectedImage &&
+          selectedCount <= 1 && (
+            <Text color={TextColors.secondary} className="text-xs mb-2">
+              {t('editor.assistant.noImage', 'Open an image to let the assistant apply edits.')}
+            </Text>
+          )
         )}
 
         {attachments.length > 0 && (
