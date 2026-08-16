@@ -1191,20 +1191,37 @@ fn render_preview(
     if convert {
         let img = src.as_ref().unwrap();
         let crop = detect_frame_crop(img);
-        let mut bounds =
-            crate::negative_conversion::analyze_bounds_for_clipped(&crop, look.clip_black, look.clip_white);
-        if let Some((bx, by)) = base_point {
-            // Pin each channel's base (bounds min) to the sampled rebate; keep the
-            // auto white point but guard the divisor stays positive.
-            let base = sample_base_density(img, bx, by, rotation_steps);
-            for c in 0..3 {
-                bounds[c].min = base[c];
-                if bounds[c].max <= bounds[c].min + 0.05 {
-                    bounds[c].max = bounds[c].min + 0.5;
+        let pin_base = |bounds: &mut [crate::negative_conversion::ChannelBounds; 3]| {
+            if let Some((bx, by)) = base_point {
+                // Pin each channel's base (bounds min) to the sampled rebate; keep the
+                // auto white point but guard the divisor stays positive.
+                let base = sample_base_density(img, bx, by, rotation_steps);
+                for c in 0..3 {
+                    bounds[c].min = base[c];
+                    if bounds[c].max <= bounds[c].min + 0.05 {
+                        bounds[c].max = bounds[c].min + 0.5;
+                    }
                 }
             }
-        }
-        let (base_exposure, auto_gain, auto_ev) = auto_tone_for(&crop, bounds, look.curve_contrast, false);
+        };
+        let mut bounds =
+            crate::negative_conversion::analyze_bounds_for_clipped(&crop, look.clip_black, look.clip_white);
+        pin_base(&mut bounds);
+        // Solve tone against DEFAULT-clip bounds: the solver anchors the frame's
+        // median, so solving on the user-clipped bounds would compensate the
+        // clip right back out and the sliders would appear dead. Solving on the
+        // default bounds and rendering with the user bounds keeps the clip
+        // visible as a black/white-point move.
+        let default_clips = (look.clip_black, look.clip_white)
+            == (crate::negative_conversion::DEFAULT_CLIP_BLACK, crate::negative_conversion::DEFAULT_CLIP_WHITE);
+        let tone_bounds = if default_clips {
+            bounds
+        } else {
+            let mut b = crate::negative_conversion::analyze_bounds_for(&crop);
+            pin_base(&mut b);
+            b
+        };
+        let (base_exposure, auto_gain, auto_ev) = auto_tone_for(&crop, tone_bounds, look.curve_contrast, false);
         *tone_slot.lock().unwrap() = Some((bounds, base_exposure, auto_gain, auto_ev));
         write_scan_sidecar(
             tif,
@@ -1530,8 +1547,17 @@ pub async fn scan_start(
                             let bounds = crate::negative_conversion::analyze_bounds_for_clipped(
                                 &crop, look.clip_black, look.clip_white,
                             );
+                            // Solve on default-clip bounds; see render_preview.
+                            let tone_bounds = if (look.clip_black, look.clip_white)
+                                == (crate::negative_conversion::DEFAULT_CLIP_BLACK,
+                                    crate::negative_conversion::DEFAULT_CLIP_WHITE)
+                            {
+                                bounds
+                            } else {
+                                crate::negative_conversion::analyze_bounds_for(&crop)
+                            };
                             let (exposure, gain, ev) =
-                                auto_tone_for(&crop, bounds, look.curve_contrast, dpi == 7200);
+                                auto_tone_for(&crop, tone_bounds, look.curve_contrast, dpi == 7200);
                             (bounds, exposure, gain, ev)
                         }),
                     };

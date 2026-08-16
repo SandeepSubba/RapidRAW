@@ -17,6 +17,9 @@ interface SidePanelAreaProps {
   renderPanel: (panel: Panel) => React.ReactNode;
   onWidthChange: (e: React.PointerEvent<HTMLDivElement>) => void;
   isResizing: boolean;
+  // Panels to treat as absent (e.g. the assistant while the film scanner is
+  // open); a region left empty by this collapses entirely.
+  hiddenPanels?: Panel[];
 }
 
 function RegionDroppableContainer({
@@ -311,6 +314,7 @@ export default function SidePanelArea({
   renderPanel,
   onWidthChange,
   isResizing,
+  hiddenPanels,
 }: SidePanelAreaProps) {
   const panelLayout = useUIStore((s) => s.panelLayout);
   const isFullScreen = useUIStore((s) => s.isFullScreen);
@@ -355,8 +359,8 @@ export default function SidePanelArea({
     [topHeight, side, setUI],
   );
 
-  const topPanels = panelLayout[topRegion];
-  const bottomPanels = panelLayout[bottomRegion];
+  const topPanels = panelLayout[topRegion].filter((p) => !hiddenPanels?.includes(p));
+  const bottomPanels = panelLayout[bottomRegion].filter((p) => !hiddenPanels?.includes(p));
 
   const hasTop = topPanels.length > 0;
   const hasBottom = bottomPanels.length > 0;

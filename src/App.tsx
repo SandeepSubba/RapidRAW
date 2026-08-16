@@ -27,6 +27,7 @@ import PresetsPanel from './components/panel/right/PresetsPanel';
 import EditorView from './components/views/EditorView';
 import LibraryView from './components/views/LibraryView';
 import ImportView from './components/views/import/ImportView';
+import { useImportStore } from './store/useImportStore';
 
 import { ContextMenuProvider } from './context/ContextMenuContext';
 import { useSettingsStore } from './store/useSettingsStore';
@@ -833,6 +834,10 @@ function App() {
 
   const hasRoots = rootPaths && rootPaths.length > 0;
   const hasMainContent = hasRoots || (activeView === 'editor' && !!selectedImage);
+  // The film-scanner pane has its own full control rail; the editor's right
+  // panel and the assistant are noise there.
+  const importStage = useImportStore((state) => state.stage);
+  const isScannerActive = isImportViewActive && importStage === 'scanner';
 
   const shouldHideFolderTree = isAndroid;
   const isWgpuActive =
@@ -904,6 +909,7 @@ function App() {
                   renderPanel={renderAppPanel}
                   onWidthChange={createResizeHandler('left', effectiveLeftWidth)}
                   isResizing={isResizing}
+                  hiddenPanels={isScannerActive ? [Panel.Agent] : undefined}
                 />
               )}
               <div className="relative flex-1 flex flex-col min-w-0">
@@ -1001,7 +1007,7 @@ function App() {
                   </div>
                 )}
               </div>
-              {!isAndroid && hasMainContent && (
+              {!isAndroid && hasMainContent && !isScannerActive && (
                 <SidePanelArea
                   side="right"
                   width={effectiveRightWidth}
