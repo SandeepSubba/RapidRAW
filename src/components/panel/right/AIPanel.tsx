@@ -348,12 +348,8 @@ export default function AIPanel() {
   const isPro = user?.publicMetadata?.plan === 'pro';
   const [cloudUsage, setCloudUsage] = useState<{ requests: number; limit: number; month: string } | null>(null);
 
-  // The local stack stops itself when idle, so "not connected" doesn't mean
-  // unavailable — submitting a generative edit boots it back up.
-  const canStartAIStack = useEditorStore((s) => s.canStartAIStack);
   const isGenerativeAvailable =
-    (aiProvider === 'cloud' && !!isSignedIn && !!isPro) ||
-    (aiProvider === 'ai-connector' && (isAIConnectorConnected || canStartAIStack));
+    (aiProvider === 'cloud' && !!isSignedIn && !!isPro) || (aiProvider === 'ai-connector' && isAIConnectorConnected);
 
   useEffect(() => {
     if (aiProvider !== 'cloud' || !isSignedIn || !isPro) return;

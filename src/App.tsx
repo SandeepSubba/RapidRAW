@@ -537,10 +537,7 @@ function App() {
 
   useEffect(() => {
     const unlisten = listen('ai-connector-status-update', (event: any) => {
-      setEditor({
-        isAIConnectorConnected: event.payload.connected,
-        canStartAIStack: !!event.payload.canStart,
-      });
+      setEditor({ isAIConnectorConnected: event.payload.connected });
     });
     invoke(Invokes.CheckAIConnectorStatus);
     const interval = setInterval(() => invoke(Invokes.CheckAIConnectorStatus), 10000);

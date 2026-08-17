@@ -41,7 +41,19 @@ it needs the companion middleware
   on 5001. Ctrl-C stops both. Logs: `/tmp/comfyui.log`,
   `/tmp/ai-connector.log`.
 
-## Start/stop is automatic
+## RapidRAW does not manage ComfyUI
+
+The app never starts, stops, or supervises a ComfyUI stack — it only talks to
+whatever `aiConnectorAddress` points at. Run ComfyUI yourself (the standalone
+Comfy Desktop app on this Mac), keep the connector middleware pointed at it,
+and set that connector's address in Settings.
+
+The CLI stack below (`~/ComfyUI` + `docs/start-ai.sh`) is an optional
+alternative to the standalone app, not something the app depends on. Its
+watchdog matters if you use it: warm ComfyUI holds many GB of SDXL weights on
+unified memory and will exhaust a 16GB machine if left idle.
+
+<details><summary>Optional CLI stack (start-ai.sh)</summary>
 
 The stack is never meant to sit idle: warm ComfyUI holds many GB of SDXL
 weights on unified memory and will exhaust a 16GB machine (it did, once).
@@ -51,17 +63,10 @@ weights on unified memory and will exhaust a 16GB machine (it did, once).
   It counts `/inpaint` requests in the connector log, not log activity —
   RapidRAW health-polls every 10s, so any mtime-based timer would never fire.
   Override per run: `IDLE_MIN=5 ~/start-ai.sh`.
-- **Starts on demand.** `ai_connector::ensure_local_stack` (called from the
-  `ai-connector` branch of `invoke_generative_replace_with_mask_def`) spawns
-  `~/start-ai.sh` when the connector is down, then polls `/health` for up to
-  3 minutes. Gated on a loopback address and the script existing, so a remote
-  connector is never second-guessed.
-- The status poll emits `canStart` alongside `connected`, and `AIPanel`'s
-  `isGenerativeAvailable` ORs it in — otherwise the prompt field is disabled
-  while the stack is down and nothing could ever trigger the start.
+</details>
 
-First edit after an idle stop costs ~3 min (boot + weight load); later ones
-are fast until it goes idle again.
+Generative controls stay disabled until the connector answers `/health`, so
+start your ComfyUI and connector before reaching for generative replace.
 
 Verified end-to-end 2026-08-16: `/upload_source` + `/inpaint` ("a red
 flower" on a synthetic scene) → correct composited crop in 155s including

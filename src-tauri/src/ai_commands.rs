@@ -437,21 +437,15 @@ pub async fn precompute_ai_subject_mask(
 #[tauri::command]
 pub async fn check_ai_connector_status(app_handle: tauri::AppHandle) {
     let settings = load_settings(app_handle.clone()).unwrap_or_default();
-    let address = settings.ai_connector_address;
-    let is_connected = if let Some(address) = &address {
-        ai_connector::check_status(address).await.unwrap_or(false)
+    let is_connected = if let Some(address) = settings.ai_connector_address {
+        ai_connector::check_status(&address).await.unwrap_or(false)
     } else {
         false
     };
-    // A stopped local stack isn't "unavailable": the first generative edit
-    // boots it back up, so the UI must stay enabled while it's down.
-    let can_start = !is_connected
-        && address.as_deref().is_some_and(ai_connector::is_local)
-        && ai_connector::local_launcher().is_some();
     use tauri::Emitter;
     let _ = app_handle.emit(
         "ai-connector-status-update",
-        serde_json::json!({ "connected": is_connected, "canStart": can_start }),
+        serde_json::json!({ "connected": is_connected }),
     );
 }
 

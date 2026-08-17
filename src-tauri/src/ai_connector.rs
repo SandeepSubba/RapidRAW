@@ -115,56 +115,6 @@ pub async fn check_status(address: &str) -> Result<bool> {
     Ok(res.is_ok())
 }
 
-// Once warm the local stack holds ~9GB of SDXL weights, so it is not kept
-// running: ~/start-ai.sh stops itself when idle and is booted back up here on
-// the first generative edit.
-const LAUNCHER: &str = "start-ai.sh";
-
-pub fn is_local(address: &str) -> bool {
-    ["127.0.0.1", "localhost", "[::1]"]
-        .iter()
-        .any(|h| address.starts_with(h))
-}
-
-pub fn local_launcher() -> Option<std::path::PathBuf> {
-    let path = std::path::Path::new(&std::env::var_os("HOME")?).join(LAUNCHER);
-    path.is_file().then_some(path)
-}
-
-/// Bring the local stack up if it isn't already. No-op when the connector
-/// answers; an error here means the generative edit genuinely can't proceed.
-pub async fn ensure_local_stack(address: &str) -> Result<()> {
-    if check_status(address).await.unwrap_or(false) {
-        return Ok(());
-    }
-    if !is_local(address) {
-        return Err(anyhow!("AI Connector at {address} is not reachable"));
-    }
-    let Some(script) = local_launcher() else {
-        return Err(anyhow!(
-            "AI Connector is not running, and ~/{LAUNCHER} was not found to start it"
-        ));
-    };
-
-    log::info!("[ai] connector down — booting local stack via {}", script.display());
-    std::process::Command::new("/bin/bash")
-        .arg(&script)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()?;
-
-    // Cold start is ComfyUI's boot plus its model-dir scan — poll rather than
-    // guess at a fixed delay.
-    for _ in 0..90 {
-        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-        if check_status(address).await.unwrap_or(false) {
-            log::info!("[ai] local stack ready");
-            return Ok(());
-        }
-    }
-    Err(anyhow!("Local AI stack did not come up within 3 minutes"))
-}
-
 pub async fn process_inpainting(
     base_url: &str,
     source_path: &str,
