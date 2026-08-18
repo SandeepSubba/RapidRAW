@@ -392,11 +392,26 @@ pub async fn get_or_init_ai_models(
     let sky_seg_path = models_dir.join(SKYSEG_FILENAME);
     let depth_path = models_dir.join(DEPTH_FILENAME);
 
-    let sam_encoder = Session::builder()?.commit_from_file(encoder_path)?;
+    // CoreML (Neural Engine/GPU) for the heavy vision models; unsupported
+    // subgraphs fall back to CPU automatically. Deliberately NOT used for the
+    // SAM decoder (ms-sized, dynamic prompt shapes partition badly) or LaMa
+    // (FFT layers CoreML can't run — partitioning would slow it down).
+    // CoreML compiles at session creation, so first mask use pays a few
+    // extra seconds once per launch.
+    let coreml_builder = || -> Result<ort::session::builder::SessionBuilder> {
+        let builder = Session::builder()?;
+        #[cfg(target_os = "macos")]
+        let builder = builder.with_execution_providers([
+            ort::execution_providers::CoreMLExecutionProvider::default().build(),
+        ])?;
+        Ok(builder)
+    };
+
+    let sam_encoder = coreml_builder()?.commit_from_file(encoder_path)?;
     let sam_decoder = Session::builder()?.commit_from_file(decoder_path)?;
-    let u2netp = Session::builder()?.commit_from_file(u2netp_path)?;
-    let sky_seg = Session::builder()?.commit_from_file(sky_seg_path)?;
-    let depth_anything = Session::builder()?.commit_from_file(depth_path)?;
+    let u2netp = coreml_builder()?.commit_from_file(u2netp_path)?;
+    let sky_seg = coreml_builder()?.commit_from_file(sky_seg_path)?;
+    let depth_anything = coreml_builder()?.commit_from_file(depth_path)?;
 
     crate::register_exit_handler();
 
@@ -1307,6 +1322,7 @@ pub fn generate_image_embeddings(
     image: &DynamicImage,
     encoder: &Mutex<Session>,
 ) -> Result<ImageEmbeddings> {
+    let embed_start = std::time::Instant::now();
     let (orig_width, orig_height) = image.dimensions();
 
     let long_side = orig_width.max(orig_height) as f32;
@@ -1339,6 +1355,7 @@ pub fn generate_image_embeddings(
     let outputs = session.run(ort::inputs![input_tensor_ort])?;
 
     let embeddings = outputs[0].try_extract_array::<f32>()?.to_owned();
+    log::info!("[sam] image embeddings in {:.0?}", embed_start.elapsed());
 
     Ok(ImageEmbeddings {
         path_hash: "".to_string(),

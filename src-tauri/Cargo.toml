@@ -30,7 +30,7 @@ tokio = { version = "1", features = ["full"] }
 uuid = { version = "1.23", features = ["v4", "serde"] }
 walkdir = "2.5.0"
 imageproc = "0.27.0"
-ort = { version = "=2.0.0-rc.10", features = ["ndarray", "load-dynamic"] }
+ort = { version = "=2.0.0-rc.10", features = ["ndarray", "load-dynamic", "coreml"] }
 ndarray = "0.16"
 futures-util = "0.3"
 tauri-plugin-process = "2.3.1"
@@ -122,8 +122,12 @@ incremental = true
 opt-level = 3
 
 [profile.release]
-codegen-units = 1
-lto = true
+# Thin LTO + parallel codegen: builds ~3-5x faster than upstream's
+# codegen-units=1 + fat LTO, for a ~2-5% runtime cost that the GPU-bound
+# pipeline doesn't feel. Upstream's profile serializes the whole final
+# compile phase onto one core.
+codegen-units = 16
+lto = "thin"
 strip = true
 
 [lints.rust]
