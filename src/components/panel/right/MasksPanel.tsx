@@ -2371,6 +2371,10 @@ function SettingsPanel({
             details: DetailsPanel,
             effects: EffectsPanel,
           }[sectionName];
+          // Sections without a mask-context component (e.g. 'film', which is
+          // sidecar-owned and image-global) would render <undefined/> and
+          // crash the whole tree.
+          if (!SectionComponent) return null;
           const title = sectionName.charAt(0).toUpperCase() + sectionName.slice(1);
           return (
             <CollapsibleSection
