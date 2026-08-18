@@ -37,33 +37,39 @@ it needs the companion middleware
   - `models/controlnet/diffusion_pytorch_model_promax.safetensors`
     (HF `xinsir/controlnet-union-sdxl-1.0`, ~2.5GB)
 - `~/RapidRAW-AI-Connector` — clone, venv (same python), requirements.
-- `~/start-ai.sh` — boots ComfyUI on 5545, waits for it, then the connector
-  on 5001. Ctrl-C stops both. Logs: `/tmp/comfyui.log`,
-  `/tmp/ai-connector.log`.
+- `~/rapidraw-ai.sh` (copy in `docs/`) — the launcher, see below.
+  Logs: `/tmp/comfyui.log`, `/tmp/ai-connector.log`.
 
 ## RapidRAW does not manage ComfyUI
 
-The app never starts, stops, or supervises a ComfyUI stack — it only talks to
-whatever `aiConnectorAddress` points at. Run ComfyUI yourself (the standalone
-Comfy Desktop app on this Mac), keep the connector middleware pointed at it,
-and set that connector's address in Settings.
+The app never starts, stops, or supervises ComfyUI — it only talks to whatever
+`aiConnectorAddress` points at, which must be the **connector**, never ComfyUI
+itself (RapidRAW speaks `/health` + `/inpaint`, not the ComfyUI API).
 
-The CLI stack below (`~/ComfyUI` + `docs/start-ai.sh`) is an optional
-alternative to the standalone app, not something the app depends on. Its
-watchdog matters if you use it: warm ComfyUI holds many GB of SDXL weights on
-unified memory and will exhaust a 16GB machine if left idle.
+## Switching backends: `~/rapidraw-ai.sh`
 
-<details><summary>Optional CLI stack (start-ai.sh)</summary>
+One launcher, two backends, same address in RapidRAW (`127.0.0.1:5001`):
 
-The stack is never meant to sit idle: warm ComfyUI holds many GB of SDXL
-weights on unified memory and will exhaust a 16GB machine (it did, once).
+    ~/rapidraw-ai.sh            # menu
+    ~/rapidraw-ai.sh desktop    # Comfy Desktop on 8188 (start the app yourself)
+    ~/rapidraw-ai.sh bundled    # CLI install at ~/ComfyUI, started/stopped for you
 
-- **Stops itself.** `start-ai.sh` runs an idle watchdog and shuts both
-  processes down after `IDLE_MIN` (default 15) minutes with no generation.
-  It counts `/inpaint` requests in the connector log, not log activity —
-  RapidRAW health-polls every 10s, so any mtime-based timer would never fire.
-  Override per run: `IDLE_MIN=5 ~/start-ai.sh`.
-</details>
+Both modes verified 2026-08-18. Details it handles so you don't have to:
+
+- **Frees port 5001 first.** A stale connector keeps serving its OLD target, so
+  a switch looks like it did nothing. This is the single most confusing failure
+  mode — it silently wasted a debugging round.
+- **Finds Comfy Desktop's input dir** by reading `--input-directory` off the
+  running process (it lives at `~/ComfyUI-Shared/input`, *not* in the install
+  folder). ComfyUI rejects LoadImage paths outside that dir, so the connector's
+  cache is placed inside it.
+- **Bundled mode** launches `~/ComfyUI` on 5545 with a matching
+  `--input-directory`, and stops it on Ctrl-C.
+
+Models are shared: the Desktop install's `models/` and `custom_nodes/` are
+symlinks into `~/ComfyUI`, so both backends see the same ~9GB without a second
+copy. The workflow needs the Inpaint-CropAndStitch nodes, which **only load at
+ComfyUI startup** — restart ComfyUI after linking anything new.
 
 Generative controls stay disabled until the connector answers `/health`, so
 start your ComfyUI and connector before reaching for generative replace.
