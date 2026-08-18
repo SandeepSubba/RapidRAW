@@ -657,6 +657,70 @@ export const useKeyboardShortcuts = ({
         },
       },
       {
+        // Editor view: build a filmstrip selection with the keyboard, so copied
+        // settings can be pasted onto several frames without reaching for the
+        // mouse. Only modified arrows are claimed here — plain Left/Right still
+        // fall through to preview_prev/preview_next and change the open image.
+        // The filmstrip is one-dimensional, so Up/Down are left alone.
+        match: (e: KeyboardEvent, s: any) =>
+          s.ui.activeView === 'editor' &&
+          !!s.editor.selectedImage &&
+          ['ArrowLeft', 'ArrowRight'].includes(e.code) &&
+          (e.shiftKey || e.ctrlKey || e.metaKey),
+        execute: (e: KeyboardEvent, s: any) => {
+          e.preventDefault();
+          const list = sortedListRef.current;
+          if (list.length === 0) return;
+
+          // The moving cursor lives in libraryActivePath, same as library view.
+          // Mouse clicks in the editor deliberately leave it alone, so seed it
+          // from the open image on the first keyboard gesture.
+          const cursorPath = s.library.libraryActivePath ?? s.editor.selectedImage!.path;
+          const currentIndex = list.findIndex((img) => img.path === cursorPath);
+          if (currentIndex === -1) return;
+
+          // Never wrap: a selection that jumped from the last frame to the first
+          // would silently include the whole roll.
+          const nextIndex = e.code === 'ArrowRight' ? currentIndex + 1 : currentIndex - 1;
+          if (nextIndex < 0 || nextIndex >= list.length) return;
+          const nextImage = list[nextIndex];
+          if (!nextImage) return;
+
+          if (e.shiftKey) {
+            const anchorPath = s.library.selectionAnchorPath ?? s.editor.selectedImage!.path;
+            const anchorIndex = list.findIndex((img) => img.path === anchorPath);
+            if (anchorIndex === -1) {
+              s.library.setLibrary({
+                libraryActivePath: nextImage.path,
+                multiSelectedPaths: [nextImage.path],
+                selectionAnchorPath: nextImage.path,
+              });
+              return;
+            }
+            const start = Math.min(anchorIndex, nextIndex);
+            const end = Math.max(anchorIndex, nextIndex);
+            s.library.setLibrary({
+              libraryActivePath: nextImage.path,
+              multiSelectedPaths: list.slice(start, end + 1).map((f: ImageFile) => f.path),
+              selectionAnchorPath: anchorPath,
+            });
+          } else {
+            // Ctrl/Cmd: step the cursor and add that frame, leaving the rest of
+            // the selection (and the anchor) intact so ranges can be combined.
+            const grown = new Set(s.library.multiSelectedPaths);
+            grown.add(s.editor.selectedImage!.path);
+            grown.add(nextImage.path);
+            s.library.setLibrary({
+              libraryActivePath: nextImage.path,
+              multiSelectedPaths: Array.from(grown),
+              selectionAnchorPath: nextImage.path,
+            });
+          }
+          // The open image deliberately stays put: these are selection-building
+          // gestures, and loading a new frame would reset the anchor.
+        },
+      },
+      {
         match: (e: KeyboardEvent, s: any) =>
           s.ui.activeView === 'library' && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code),
         execute: (e: KeyboardEvent, s: any) => {
