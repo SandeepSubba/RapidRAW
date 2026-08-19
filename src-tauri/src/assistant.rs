@@ -644,6 +644,15 @@ async fn call_claude_code(
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        // The CLI is a console app, so Windows hands it a console window that
+        // flashes up for the life of every chat turn. All three streams are piped
+        // — nothing is ever shown there — so suppress it.
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
         // Only the Read tool is ever needed (to look at the images); nothing can
         // write, run bash, or edit.
         if !image_files.is_empty() {
