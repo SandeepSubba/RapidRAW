@@ -23,6 +23,7 @@ mod file_management;
 mod formats;
 mod gpu_processing;
 mod hdr_deghosting;
+mod icc;
 mod image_loader;
 mod image_processing;
 mod inpainting;
