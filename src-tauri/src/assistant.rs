@@ -73,7 +73,7 @@ You may also organize the image:
 - tags: {"add": ["keyword", ...], "remove": ["keyword", ...]} — keyword/tag labels to add or remove
 - rating: an integer 0-5 (star rating; 0 clears it)
 - colorLabel: one of "red", "yellow", "green", "blue", "purple", or "none" (to clear)
-- filename: a new file name for the image, WITHOUT the extension (the extension is kept automatically). This renames the actual file on disk. Use only characters valid in a filename.
+- filename: a new file name for the image, WITHOUT the extension (the extension is kept automatically). This renames the actual file on disk. Use only characters valid in a filename. Always propose the plain name you actually want — the app resolves collisions itself by appending -001, -002, and reports the final name back to you. Never invent a numeric suffix to dodge a clash you cannot see, and never ask the user whether a name is taken.
 
 You have permission to edit ALL of the above, including renaming the file. Whatever the user asks to store (a code, a note, keywords), pick the field they name; if they don't name one, choose the most fitting field (e.g. keywords -> tags, a title/code -> title, "rename the file to X" -> filename).
 

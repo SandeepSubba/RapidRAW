@@ -3420,15 +3420,59 @@ pub fn generate_export_filename(path: String, template: String) -> String {
     }
 }
 
+/// Find a free path by appending `-001`, `-002`, … to the stem.
+///
+/// `taken` carries the names claimed earlier in the same batch, which are not on
+/// disk yet — without it a batch renaming several files to one template would
+/// hand out the same "free" name repeatedly.
+fn unique_path_with_suffix(desired: &Path, taken: &HashSet<PathBuf>) -> Result<PathBuf, String> {
+    if !desired.exists() && !taken.contains(desired) {
+        return Ok(desired.to_path_buf());
+    }
+
+    let parent = desired.parent().ok_or("Could not get parent directory")?;
+    let stem = desired
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .ok_or("Could not read file stem")?;
+    let extension = desired.extension().and_then(|s| s.to_str()).unwrap_or("");
+
+    // Bounded so a pathological directory can't spin forever.
+    for n in 1..=9999 {
+        let candidate_name = if extension.is_empty() {
+            format!("{stem}-{n:03}")
+        } else {
+            format!("{stem}-{n:03}.{extension}")
+        };
+        let candidate = parent.join(candidate_name);
+        if !candidate.exists() && !taken.contains(&candidate) {
+            return Ok(candidate);
+        }
+    }
+
+    Err(format!(
+        "Could not find a free name for {} after 9999 attempts.",
+        desired.display()
+    ))
+}
+
 #[tauri::command]
 pub fn rename_files(
     paths: Vec<String>,
     name_template: String,
     app_handle: AppHandle,
+    // When set, a name that is already taken gets a `-001` suffix instead of
+    // failing the whole call. The assistant renames blind — it cannot see the
+    // directory — so for it a collision is a normal outcome to resolve, not an
+    // error. Interactive batch rename leaves this off: there, a surprise
+    // collision is something the user needs told about.
+    unique_suffix: Option<bool>,
 ) -> Result<Vec<String>, String> {
     if paths.is_empty() {
         return Ok(Vec::new());
     }
+    let unique_suffix = unique_suffix.unwrap_or(false);
+    let mut claimed: HashSet<PathBuf> = HashSet::new();
 
     let mut operations: HashMap<PathBuf, PathBuf> = HashMap::new();
     let mut final_new_paths = Vec::with_capacity(paths.len());
@@ -3460,12 +3504,20 @@ pub fn rename_files(
         let new_filename = format!("{}.{}", new_stem, extension);
         let new_path = parent.join(new_filename);
 
-        if new_path.exists() && new_path != original_path {
+        let new_path = if new_path == original_path {
+            new_path
+        } else if unique_suffix {
+            let resolved = unique_path_with_suffix(&new_path, &claimed)?;
+            claimed.insert(resolved.clone());
+            resolved
+        } else if new_path.exists() {
             return Err(format!(
                 "A file with the name {} already exists.",
                 new_path.display()
             ));
-        }
+        } else {
+            new_path
+        };
 
         operations.insert(original_path, new_path);
     }
@@ -3804,5 +3856,63 @@ pub fn sync_metadata_to_xmp(source_path: &Path, metadata: &ImageMetadata, create
         }
 
         let _ = fs::write(&xmp_file, content);
+    }
+}
+
+#[cfg(test)]
+mod rename_collision_tests {
+    use super::*;
+
+    fn tmp(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("rr-rn-{}-{}", tag, std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn free_name_is_returned_unchanged() {
+        let d = tmp("free");
+        let want = d.join("AI-228702.jpg");
+        assert_eq!(
+            unique_path_with_suffix(&want, &HashSet::new()).unwrap(),
+            want
+        );
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn taken_name_gets_the_next_free_suffix() {
+        let d = tmp("taken");
+        fs::write(d.join("AI-228702.jpg"), b"x").unwrap();
+        fs::write(d.join("AI-228702-001.jpg"), b"x").unwrap();
+
+        let got = unique_path_with_suffix(&d.join("AI-228702.jpg"), &HashSet::new()).unwrap();
+        assert_eq!(got, d.join("AI-228702-002.jpg"), "must skip the used suffix");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn names_claimed_earlier_in_the_batch_are_not_reused() {
+        let d = tmp("batch");
+        fs::write(d.join("shot.jpg"), b"x").unwrap();
+
+        let mut claimed = HashSet::new();
+        let first = unique_path_with_suffix(&d.join("shot.jpg"), &claimed).unwrap();
+        claimed.insert(first.clone());
+        let second = unique_path_with_suffix(&d.join("shot.jpg"), &claimed).unwrap();
+
+        assert_eq!(first, d.join("shot-001.jpg"));
+        assert_eq!(second, d.join("shot-002.jpg"), "must not hand out first twice");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn extension_is_preserved_and_stem_not_mangled() {
+        let d = tmp("ext");
+        fs::write(d.join("a.b.c.CR2"), b"x").unwrap();
+        let got = unique_path_with_suffix(&d.join("a.b.c.CR2"), &HashSet::new()).unwrap();
+        assert_eq!(got.file_name().unwrap(), "a.b.c-001.CR2");
+        let _ = fs::remove_dir_all(&d);
     }
 }

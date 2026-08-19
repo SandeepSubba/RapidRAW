@@ -174,6 +174,9 @@ export function useLibraryActions(handleImageSelect?: (path: string, openInEdito
       const newPaths: Array<string> = await invoke(Invokes.RenameFiles, {
         nameTemplate: cleanName,
         paths: [physicalPath],
+        // The assistant can't see the directory, so let the backend settle
+        // collisions with a -001 suffix rather than failing the rename.
+        uniqueSuffix: true,
       });
       const newPath = newPaths?.[0];
       if (!newPath || newPath === physicalPath) return newPath || null;
