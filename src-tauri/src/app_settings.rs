@@ -413,6 +413,16 @@ pub struct AppSettings {
     // bounds). Kept opaque — the backend just round-trips it.
     #[serde(default)]
     pub negative_profiles: Option<serde_json::Value>,
+    // Named user crop ratios (frontend-owned; {name, width, height}). Kept
+    // opaque — the backend just round-trips it, same as negative_profiles.
+    #[serde(default)]
+    pub crop_presets: Option<serde_json::Value>,
+    // Last aspect ratio + orientation used in the crop panel, so it reopens
+    // where the user left it instead of snapping back to the image's own ratio.
+    #[serde(default)]
+    pub last_crop_ratio: Option<f64>,
+    #[serde(default)]
+    pub last_crop_prefer_portrait: Option<bool>,
     pub last_root_path: Option<String>,
     #[serde(default)]
     pub root_folders: Vec<String>,
@@ -567,6 +577,9 @@ impl Default for AppSettings {
             film_panel_advanced: None,
             display_negative_icon: None,
             negative_profiles: None,
+            crop_presets: None,
+            last_crop_ratio: None,
+            last_crop_prefer_portrait: None,
             last_root_path: None,
             root_folders: Vec::new(),
             pinned_folders: Vec::new(),

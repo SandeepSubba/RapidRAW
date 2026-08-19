@@ -97,8 +97,13 @@ export function useImageLoader(cachedEditStateRef: React.RefObject<any>) {
 
           setEditor((state) => {
             if (!state.adjustments.aspectRatio && !state.adjustments.crop) {
+              // Reopen on the ratio the user last cropped with; fall back to the
+              // image's own ratio when they have never picked one.
+              const remembered = useSettingsStore.getState().appSettings?.lastCropRatio;
+              const nativeRatio = loadImageResult.width / loadImageResult.height;
+              const aspectRatio = remembered && remembered > 0 ? remembered : nativeRatio;
               return {
-                adjustments: { ...state.adjustments, aspectRatio: loadImageResult.width / loadImageResult.height },
+                adjustments: { ...state.adjustments, aspectRatio },
               };
             }
             return state;

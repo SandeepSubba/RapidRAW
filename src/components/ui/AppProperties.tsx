@@ -214,6 +214,12 @@ export interface WorkspaceState {
 export type GroupPreference = 'jpeg' | 'raw';
 export type GroupingMode = 'off' | GroupPreference;
 
+export interface CropPreset {
+  name: string;
+  width: number;
+  height: number;
+}
+
 export interface AppSettings {
   filmPanelAdvanced?: boolean;
   displayNegativeIcon?: boolean;
@@ -224,6 +230,9 @@ export interface AppSettings {
     clipBlack?: number;
     clipWhite?: number;
   }>;
+  cropPresets?: Array<CropPreset>;
+  lastCropRatio?: number | null;
+  lastCropPreferPortrait?: boolean;
   aiConnectorAddress?: string;
   aiProvider?: string;
   assistantProvider?: string;

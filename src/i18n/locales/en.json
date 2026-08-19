@@ -433,7 +433,14 @@
         "hPlaceholder": "H",
         "hTooltip": "Height",
         "wPlaceholder": "W",
-        "wTooltip": "Width"
+        "wTooltip": "Width",
+        "savePreset": "Save ratio",
+        "savePresetTooltip": "Save this width x height as a reusable preset",
+        "presetNamePlaceholder": "Preset name",
+        "saveConfirmTooltip": "Save preset",
+        "cancelTooltip": "Cancel",
+        "applyPresetTooltip": "Apply {{width}} x {{height}}",
+        "deletePresetTooltip": "Delete preset"
       },
       "geometryHeading": "Geometry",
       "labels": {
