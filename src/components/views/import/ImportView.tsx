@@ -3,6 +3,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { ArrowLeft, Loader2, HardDriveDownload } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { useImportStore } from '../../../store/useImportStore';
+import { useLibraryStore } from '../../../store/useLibraryStore';
 import { useProcessStore } from '../../../store/useProcessStore';
 import { Status } from '../../ui/ExportImportProperties';
 import { useSdImportActions } from '../../../hooks/useSdImportActions';
@@ -48,6 +49,17 @@ export default function ImportView() {
   const { closeImporter, maybeEjectSource } = useSdImportActions();
   const handledCompletion = useRef(false);
   useImportKeyboard();
+
+  // Default the destination to the folder the library is currently showing, so
+  // importing into the folder you are looking at needs no extra pick. Albums are
+  // pseudo-paths ("Album: name") rather than real directories, so they are skipped,
+  // and an explicit choice already made is never overwritten.
+  const currentFolderPath = useLibraryStore((s) => s.currentFolderPath);
+  useEffect(() => {
+    if (useImportStore.getState().destinationFolder) return;
+    if (!currentFolderPath || currentFolderPath.startsWith('Album: ')) return;
+    useImportStore.getState().setImport({ destinationFolder: currentFolderPath });
+  }, [currentFolderPath]);
 
   // Thumbnails are requested lazily per visible cell in CullGroupsGrid (via an
   // IntersectionObserver), so we never enqueue hundreds of decodes at once.

@@ -8,7 +8,8 @@
 use base64::{Engine as _, engine::general_purpose};
 use rawler::decoders::RawDecodeParams;
 use serde::Serialize;
-use std::path::Path;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use sysinfo::Disks;
 use tauri::{AppHandle, Emitter, State};
@@ -519,9 +520,29 @@ pub fn eject_drive(mount_point: String) -> Result<(), String> {
     }
 }
 
-/// Given source files and a destination folder, return the subset of source paths whose
-/// filename already exists anywhere under the destination (recursively). Used to skip
-/// re-importing photos that are already in the library.
+// Hash a file's bytes so a photo renamed after import is still matched. Streamed
+// in chunks rather than read whole: RAW files run to tens of megabytes, and this
+// is only reached once a same-size candidate exists.
+fn file_content_hash(path: &Path) -> Option<blake3::Hash> {
+    use std::io::Read;
+    let mut file = std::fs::File::open(path).ok()?;
+    let mut hasher = blake3::Hasher::new();
+    let mut buffer = vec![0u8; 128 * 1024];
+    loop {
+        match file.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(read) => {
+                hasher.update(&buffer[..read]);
+            }
+            Err(_) => return None,
+        }
+    }
+    Some(hasher.finalize())
+}
+
+/// Given source files and a destination folder, return the subset of source paths
+/// already present anywhere under the destination (recursively), matched by filename
+/// stem or by file content. Used to skip re-importing photos already in the library.
 #[tauri::command]
 pub fn find_existing_in_destination(
     source_paths: Vec<String>,
@@ -532,9 +553,14 @@ pub fn find_existing_in_destination(
         return Ok(vec![]);
     }
 
-    // Match by filename STEM (base name without extension) so a shot already imported
-    // as RAW also flags its JPEG counterpart on the card (and vice-versa).
-    let mut existing: std::collections::HashSet<String> = std::collections::HashSet::new();
+    // Two independent signals, because either one can be the only match:
+    //   - filename STEM, so a shot already imported as RAW also flags its JPEG
+    //     counterpart on the card (and vice-versa);
+    //   - file CONTENT, so a photo renamed in the library after import (or renamed
+    //     on the way in by a filename template) is still recognised. Stem alone
+    //     missed those and offered them as new.
+    let mut existing_stems: HashSet<String> = HashSet::new();
+    let mut by_size: HashMap<u64, Vec<PathBuf>> = HashMap::new();
     for entry in WalkDir::new(dest)
         .follow_links(false)
         .into_iter()
@@ -542,21 +568,68 @@ pub fn find_existing_in_destination(
     {
         if entry.file_type().is_file() && is_supported_image_file(entry.path()) {
             if let Some(stem) = entry.path().file_stem().and_then(|s| s.to_str()) {
-                existing.insert(stem.to_lowercase());
+                existing_stems.insert(stem.to_lowercase());
+            }
+            if let Ok(meta) = entry.metadata() {
+                by_size
+                    .entry(meta.len())
+                    .or_default()
+                    .push(entry.path().to_path_buf());
             }
         }
     }
 
-    let matches = source_paths
-        .into_iter()
-        .filter(|p| {
-            Path::new(p)
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .map(|s| existing.contains(&s.to_lowercase()))
-                .unwrap_or(false)
-        })
-        .collect();
+    let mut dest_hashes: HashMap<PathBuf, blake3::Hash> = HashMap::new();
+    let mut matches = Vec::new();
+
+    for source in source_paths {
+        let path = Path::new(&source);
+
+        let stem_hit = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .map(|s| existing_stems.contains(&s.to_lowercase()))
+            .unwrap_or(false);
+        if stem_hit {
+            matches.push(source);
+            continue;
+        }
+
+        // Only hash when the destination holds a file of exactly the same byte
+        // length. The common "nothing matches" case then costs metadata reads
+        // alone, which matters when the card holds hundreds of RAWs.
+        let Ok(meta) = std::fs::metadata(path) else {
+            continue;
+        };
+        let Some(candidates) = by_size.get(&meta.len()) else {
+            continue;
+        };
+        let Some(source_hash) = file_content_hash(path) else {
+            continue;
+        };
+
+        let mut content_hit = false;
+        for candidate in candidates {
+            let hash = match dest_hashes.get(candidate) {
+                Some(hash) => Some(*hash),
+                None => {
+                    let computed = file_content_hash(candidate);
+                    if let Some(hash) = computed {
+                        dest_hashes.insert(candidate.clone(), hash);
+                    }
+                    computed
+                }
+            };
+            if hash == Some(source_hash) {
+                content_hit = true;
+                break;
+            }
+        }
+        if content_hit {
+            matches.push(source);
+        }
+    }
+
     Ok(matches)
 }
 
