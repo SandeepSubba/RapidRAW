@@ -738,6 +738,40 @@ export default function CropPanel() {
                     <Text color={isPresetActive(preset) ? TextColors.button : TextColors.secondary}>{preset.name}</Text>
                   </motion.div>
                 ))}
+                {savedPresets.map((preset: SavedCropPreset) => {
+                  const presetRatio = preset.width / preset.height;
+                  const isActive = aspectRatio !== null && Math.abs(aspectRatio - presetRatio) < RATIO_TOLERANCE;
+                  return (
+                    <motion.div
+                      className={clsx(
+                        'group relative px-2 py-1.5 rounded-md transition-colors text-center cursor-pointer',
+                        isActive ? 'bg-accent' : 'bg-surface hover:bg-card-active',
+                      )}
+                      key={preset.name}
+                      onClick={() => handleApplySavedPreset(preset)}
+                      data-tooltip={t('editor.crop.custom.applyPresetTooltip', {
+                        width: preset.width,
+                        height: preset.height,
+                      })}
+                      whileTap={{ scale: 0.98 }}
+                      transition={{ type: 'spring', stiffness: 400, damping: 17 }}
+                    >
+                      <Text className="block truncate" color={isActive ? TextColors.button : TextColors.secondary}>
+                        {preset.name}
+                      </Text>
+                      <button
+                        className="absolute right-0.5 top-1/2 -translate-y-1/2 p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-bg-primary"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteSavedPreset(preset.name);
+                        }}
+                        data-tooltip={t('editor.crop.custom.deletePresetTooltip')}
+                      >
+                        <X size={12} className={TEXT_COLOR_KEYS[TextColors.secondary]} />
+                      </button>
+                    </motion.div>
+                  );
+                })}
               </div>
               <div>
                 <motion.div
@@ -843,42 +877,6 @@ export default function CropPanel() {
                     </button>
                   )}
                 </div>
-                {savedPresets.length > 0 && (
-                  <div className="grid grid-cols-2 gap-2 mt-2">
-                    {savedPresets.map((preset: SavedCropPreset) => {
-                      const presetRatio = preset.width / preset.height;
-                      const isActive = aspectRatio !== null && Math.abs(aspectRatio - presetRatio) < RATIO_TOLERANCE;
-                      return (
-                        <div
-                          className={clsx(
-                            'group relative px-2 py-1.5 rounded-md transition-colors cursor-pointer text-center',
-                            isActive ? 'bg-accent' : 'bg-surface hover:bg-card-active',
-                          )}
-                          key={preset.name}
-                          onClick={() => handleApplySavedPreset(preset)}
-                          data-tooltip={t('editor.crop.custom.applyPresetTooltip', {
-                            width: preset.width,
-                            height: preset.height,
-                          })}
-                        >
-                          <Text className="truncate" color={isActive ? TextColors.button : TextColors.secondary}>
-                            {preset.name}
-                          </Text>
-                          <button
-                            className="absolute right-0.5 top-1/2 -translate-y-1/2 p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-bg-primary"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleDeleteSavedPreset(preset.name);
-                            }}
-                            data-tooltip={t('editor.crop.custom.deletePresetTooltip')}
-                          >
-                            <X size={12} className={TEXT_COLOR_KEYS[TextColors.secondary]} />
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
               </div>
             </div>
 
