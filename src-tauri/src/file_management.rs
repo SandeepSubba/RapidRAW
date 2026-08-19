@@ -3596,6 +3596,20 @@ pub fn extract_xmp_label(content: &str) -> Option<String> {
     None
 }
 
+/// Reverse the five predefined XML entities. Any conforming writer — Lightroom,
+/// Bridge, our own exporter — escapes these inside `<rdf:li>`, so without this a
+/// keyword like "black & white" imports as "black &amp; white".
+///
+/// `&amp;` is decoded last: doing it first would turn the literal text `&amp;lt;`
+/// into `<` instead of `&lt;`.
+fn unescape_xml(s: &str) -> String {
+    s.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        .replace("&amp;", "&")
+}
+
 pub fn extract_xmp_tags(content: &str) -> Vec<String> {
     let mut tags = Vec::new();
     if let Some(start_idx) = content.find("<dc:subject>")
@@ -3606,7 +3620,7 @@ pub fn extract_xmp_tags(content: &str) -> Vec<String> {
         while let Some(li_start) = subject_block[current_idx..].find("<rdf:li>") {
             let val_start = current_idx + li_start + 8;
             if let Some(li_end) = subject_block[val_start..].find("</rdf:li>") {
-                tags.push(subject_block[val_start..val_start + li_end].to_string());
+                tags.push(unescape_xml(&subject_block[val_start..val_start + li_end]));
                 current_idx = val_start + li_end + 9;
             } else {
                 break;

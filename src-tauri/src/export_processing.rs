@@ -515,8 +515,30 @@ fn save_image_with_metadata(
         )?;
     }
 
+    // Kept for the sidecar decision below, since `image_bytes` is moved away.
+    #[cfg(not(target_os = "android"))]
+    let embedded_check = image_bytes.clone();
+
     #[cfg(not(target_os = "android"))]
     fs::write(output_path, image_bytes).map_err(|e| e.to_string())?;
+
+    // TIFF, WebP, AVIF and JXL each need container surgery to carry an XMP
+    // packet, so their keywords ride alongside in a .xmp sidecar — the standard
+    // fallback, and one every DAM reads. Written next to the export, since only
+    // this side knows the output path.
+    #[cfg(not(target_os = "android"))]
+    if export_settings.keep_metadata
+        && !exif_processing::has_embedded_xmp(&embedded_check)
+        && let Some(xmp) = exif_processing::xmp_packet_for_source(std::path::Path::new(
+            source_path_str.split("?vc=").next().unwrap_or(source_path_str),
+        ))
+    {
+        let sidecar = output_path.with_extension("xmp");
+        // Losing the sidecar must not fail an otherwise good export.
+        if let Err(e) = fs::write(&sidecar, xmp) {
+            log::warn!("Failed to write XMP sidecar {}: {}", sidecar.display(), e);
+        }
+    }
 
     Ok(())
 }

@@ -934,13 +934,20 @@ pub fn write_image_with_metadata(
     keep_metadata: bool,
     strip_gps: bool,
 ) -> Result<(), String> {
-    // FIXME: temporary solution until I find a way to write metadata to TIFF
-    if !keep_metadata || output_format.to_lowercase() == "tiff" {
+    if !keep_metadata {
         return Ok(());
     }
 
     let original_path = Path::new(original_path_str);
     if !original_path.exists() {
+        return Ok(());
+    }
+
+    // FIXME: EXIF still can't be written to TIFF — little_exif corrupts tags on
+    // this path. Keywords are separate: they go in as an XMP IFD entry below,
+    // which touches nothing little_exif would have written.
+    if output_format.to_lowercase() == "tiff" {
+        write_xmp_only(image_bytes, original_path, "tiff");
         return Ok(());
     }
 
@@ -1329,6 +1336,24 @@ pub fn write_image_with_metadata(
         log::warn!("Failed to write metadata: {}", e);
     }
 
+    // Keyword tags live in the sidecar, not in the EXIF map read above, and have
+    // no EXIF tag to carry them — emit them as an XMP dc:subject packet. Formats
+    // whose containers we can't splice get a .xmp sidecar instead, written by the
+    // caller (which is the side that knows the output path).
+    if let Some(xmp) = xmp_packet_for_source(original_path) {
+        let format = output_format.to_lowercase();
+        let result = match format.as_str() {
+            "jpg" | "jpeg" => insert_xmp_into_jpeg(image_bytes, &xmp),
+            "png" => insert_xmp_into_png(image_bytes, &xmp),
+            _ => Ok(()),
+        };
+        // A failed splice must not lose the export — the pixels are fine, only
+        // the keywords are missing.
+        if let Err(e) = result {
+            log::warn!("Failed to write XMP keywords: {}", e);
+        }
+    }
+
     Ok(())
 }
 
@@ -1480,4 +1505,583 @@ pub fn write_rrexif_sidecar(source_path_str: &str, target_image_path: &Path) -> 
     metadata.exif = Some(exif_data);
     save_primary_metadata(target_image_path, &metadata)
         .map_err(|e| format!("Failed to write sidecar: {}", e))
+}
+
+/// Keywords have no home in EXIF as little_exif exposes it — there is no
+/// XPKeywords variant and no raw-tag escape hatch — so they go out as an XMP
+/// `dc:subject` bag instead. That is the format every DAM reads (Lightroom,
+/// Bridge, digiKam), and it is the one this app already parses on the way in,
+/// via `file_management::extract_xmp_tags`, so a round-trip preserves them.
+fn build_xmp_packet(tags: &[String]) -> String {
+    // XML-escape: a tag is free text and may legitimately contain & or <.
+    let esc = |s: &str| {
+        s.replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+    };
+    let items = tags
+        .iter()
+        .map(|t| format!("<rdf:li>{}</rdf:li>", esc(t)))
+        .collect::<Vec<_>>()
+        .join("");
+
+    format!(
+        "<?xpacket begin=\"\u{feff}\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>\
+<x:xmpmeta xmlns:x=\"adobe:ns:meta/\">\
+<rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">\
+<rdf:Description rdf:about=\"\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\">\
+<dc:subject><rdf:Bag>{items}</rdf:Bag></dc:subject>\
+</rdf:Description></rdf:RDF></x:xmpmeta>\
+<?xpacket end=\"w\"?>"
+    )
+}
+
+/// Formats whose containers we can splice an XMP packet into.
+///
+/// The rest (TIFF, WebP, AVIF, JXL) each need real container surgery — a new
+/// IFD entry, a VP8X upgrade, an ISOBMFF meta item — so they get a `.xmp`
+/// sidecar written next to the export instead. Every DAM reads those, and an
+/// unparsed sidecar cannot corrupt the image the way a bad chunk can.
+pub fn supports_embedded_xmp(output_format: &str) -> bool {
+    matches!(output_format.to_lowercase().as_str(), "jpg" | "jpeg" | "png" | "tiff" | "tif")
+}
+
+/// Did an XMP packet actually make it into these bytes?
+///
+/// The caller uses this to decide whether a `.xmp` sidecar is still needed: a
+/// splice that failed (odd container variant, size limit) logs a warning but
+/// otherwise looks identical to success, and silently dropping keywords is
+/// worse than an extra file.
+pub fn has_embedded_xmp(image_bytes: &[u8]) -> bool {
+    image_bytes
+        .windows(11)
+        .any(|w| w == b"dc:subject>")
+}
+
+/// Build the XMP packet for an image's sidecar tags, if it has any.
+pub fn xmp_packet_for_source(original_path: &Path) -> Option<String> {
+    let tags = load_primary_metadata(original_path)
+        .tags
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|t| !t.trim().is_empty())
+        .collect::<Vec<_>>();
+    if tags.is_empty() {
+        None
+    } else {
+        Some(build_xmp_packet(&tags))
+    }
+}
+
+/// Splice an XMP packet into an encoded PNG as an uncompressed `iTXt` chunk.
+///
+/// The keyword `XML:com.adobe.xmp` is what the XMP spec mandates for PNG, and
+/// what readers look for. The chunk goes immediately before `IEND`, which is
+/// legal for ancillary chunks and avoids disturbing `IHDR`/`PLTE` ordering.
+fn insert_xmp_into_png(png: &mut Vec<u8>, xmp: &str) -> Result<(), String> {
+    const SIGNATURE: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+    if png.len() < 8 || png[0..8] != SIGNATURE {
+        return Err("not a PNG (bad signature)".to_string());
+    }
+
+    // Walk the chunk list to locate IEND rather than searching for the bytes —
+    // "IEND" could otherwise appear inside compressed image data.
+    let mut pos = 8usize;
+    let mut iend_start = None;
+    while pos + 8 <= png.len() {
+        let len = u32::from_be_bytes([png[pos], png[pos + 1], png[pos + 2], png[pos + 3]]) as usize;
+        let ctype = &png[pos + 4..pos + 8];
+        if ctype == b"IEND" {
+            iend_start = Some(pos);
+            break;
+        }
+        // length + type + data + crc
+        pos = pos
+            .checked_add(12)
+            .and_then(|p| p.checked_add(len))
+            .ok_or("malformed PNG chunk length")?;
+    }
+    let iend_start = iend_start.ok_or("no IEND chunk found")?;
+
+    // iTXt payload: keyword\0 compression_flag compression_method
+    //               language\0 translated_keyword\0 text
+    let mut data = Vec::new();
+    data.extend_from_slice(b"XML:com.adobe.xmp");
+    data.push(0); // keyword terminator
+    data.push(0); // compression flag: uncompressed
+    data.push(0); // compression method (ignored when uncompressed)
+    data.push(0); // empty language tag
+    data.push(0); // empty translated keyword
+    data.extend_from_slice(xmp.as_bytes());
+
+    let len: u32 = data
+        .len()
+        .try_into()
+        .map_err(|_| "XMP packet too large for a PNG chunk".to_string())?;
+
+    let mut hasher = crc32fast::Hasher::new();
+    hasher.update(b"iTXt");
+    hasher.update(&data);
+    let crc = hasher.finalize();
+
+    let mut chunk = Vec::with_capacity(data.len() + 12);
+    chunk.extend_from_slice(&len.to_be_bytes());
+    chunk.extend_from_slice(b"iTXt");
+    chunk.extend_from_slice(&data);
+    chunk.extend_from_slice(&crc.to_be_bytes());
+
+    png.splice(iend_start..iend_start, chunk);
+    Ok(())
+}
+
+/// Embed an XMP packet into an encoded TIFF as IFD entry 700.
+///
+/// Rather than widening IFD0 in place — which would push every value offset
+/// after it and require rewriting the whole file — this appends the packet and a
+/// fresh copy of the IFD at the end, then repoints the header at the new IFD.
+/// Existing entries keep their original offsets verbatim, so nothing that worked
+/// before can break. The old IFD is left orphaned, which readers never visit.
+fn insert_xmp_into_tiff(tiff: &mut Vec<u8>, xmp: &str) -> Result<(), String> {
+    const TAG_XMP: u16 = 700;
+    const TYPE_BYTE: u16 = 1;
+
+    if tiff.len() < 8 {
+        return Err("not a TIFF (too short)".to_string());
+    }
+    let le = match &tiff[0..2] {
+        b"II" => true,
+        b"MM" => false,
+        _ => return Err("not a TIFF (bad byte-order mark)".to_string()),
+    };
+    let u16_at = |b: &[u8], o: usize| -> u16 {
+        if le { u16::from_le_bytes([b[o], b[o + 1]]) } else { u16::from_be_bytes([b[o], b[o + 1]]) }
+    };
+    let u32_at = |b: &[u8], o: usize| -> u32 {
+        if le {
+            u32::from_le_bytes([b[o], b[o + 1], b[o + 2], b[o + 3]])
+        } else {
+            u32::from_be_bytes([b[o], b[o + 1], b[o + 2], b[o + 3]])
+        }
+    };
+    let put_u16 = |v: u16| -> [u8; 2] { if le { v.to_le_bytes() } else { v.to_be_bytes() } };
+    let put_u32 = |v: u32| -> [u8; 4] { if le { v.to_le_bytes() } else { v.to_be_bytes() } };
+
+    // 42 is classic TIFF; 43 is BigTIFF, whose 8-byte offsets this doesn't handle.
+    if u16_at(tiff, 2) != 42 {
+        return Err("unsupported TIFF variant (BigTIFF?)".to_string());
+    }
+
+    let ifd_offset = u32_at(tiff, 4) as usize;
+    if ifd_offset + 2 > tiff.len() {
+        return Err("TIFF IFD offset out of range".to_string());
+    }
+    let count = u16_at(tiff, ifd_offset) as usize;
+    let entries_start = ifd_offset + 2;
+    let entries_end = entries_start + count * 12;
+    if entries_end + 4 > tiff.len() {
+        return Err("TIFF IFD truncated".to_string());
+    }
+
+    let entries: Vec<&[u8]> = (0..count)
+        .map(|i| &tiff[entries_start + i * 12..entries_start + (i + 1) * 12])
+        .collect();
+
+    // Already tagged (re-export of an XMP-bearing file): leave it alone rather
+    // than write a second, conflicting entry.
+    if entries.iter().any(|e| u16_at(e, 0) == TAG_XMP) {
+        return Ok(());
+    }
+
+    let next_ifd = u32_at(tiff, entries_end);
+    let entries: Vec<Vec<u8>> = entries.iter().map(|e| e.to_vec()).collect();
+
+    // Values must sit at an even offset per the spec.
+    if tiff.len() % 2 != 0 {
+        tiff.push(0);
+    }
+    let xmp_offset = tiff.len();
+    let xmp_len: u32 = xmp
+        .len()
+        .try_into()
+        .map_err(|_| "XMP packet too large for a TIFF entry".to_string())?;
+    tiff.extend_from_slice(xmp.as_bytes());
+
+    if tiff.len() % 2 != 0 {
+        tiff.push(0);
+    }
+    let new_ifd_offset = tiff.len();
+
+    let mut xmp_entry = Vec::with_capacity(12);
+    xmp_entry.extend_from_slice(&put_u16(TAG_XMP));
+    xmp_entry.extend_from_slice(&put_u16(TYPE_BYTE));
+    xmp_entry.extend_from_slice(&put_u32(xmp_len));
+    xmp_entry.extend_from_slice(&put_u32(xmp_offset as u32));
+
+    // The spec requires entries in ascending tag order.
+    let mut all: Vec<Vec<u8>> = entries;
+    let insert_at = all
+        .iter()
+        .position(|e| u16_at(e, 0) > TAG_XMP)
+        .unwrap_or(all.len());
+    all.insert(insert_at, xmp_entry);
+
+    tiff.extend_from_slice(&put_u16(all.len() as u16));
+    for e in &all {
+        tiff.extend_from_slice(e);
+    }
+    tiff.extend_from_slice(&put_u32(next_ifd));
+
+    // Repoint the header at the IFD we just wrote.
+    let ptr = put_u32(new_ifd_offset as u32);
+    tiff[4..8].copy_from_slice(&ptr);
+    Ok(())
+}
+
+/// Write only the keyword packet for formats where the EXIF path is skipped.
+fn write_xmp_only(image_bytes: &mut Vec<u8>, original_path: &Path, format: &str) {
+    let Some(xmp) = xmp_packet_for_source(original_path) else {
+        return;
+    };
+    let result = match format {
+        "tiff" => insert_xmp_into_tiff(image_bytes, &xmp),
+        _ => Ok(()),
+    };
+    if let Err(e) = result {
+        log::warn!("Failed to write XMP keywords: {}", e);
+    }
+}
+
+/// Splice an XMP APP1 segment into an already-encoded JPEG.
+///
+/// Runs *after* little_exif has written its own segments, so it walks past the
+/// existing APPn block and inserts at the end of it rather than at SOI — putting
+/// it ahead of the EXIF APP1 makes some readers stop before finding the EXIF.
+fn insert_xmp_into_jpeg(jpeg: &mut Vec<u8>, xmp: &str) -> Result<(), String> {
+    const XMP_NS: &[u8] = b"http://ns.adobe.com/xap/1.0/\0";
+
+    if jpeg.len() < 2 || jpeg[0] != 0xFF || jpeg[1] != 0xD8 {
+        return Err("not a JPEG (missing SOI)".to_string());
+    }
+
+    // Walk the APPn/marker segments to find where the header block ends.
+    let mut pos = 2usize;
+    loop {
+        if pos + 4 > jpeg.len() || jpeg[pos] != 0xFF {
+            break;
+        }
+        let marker = jpeg[pos + 1];
+        // SOS/SOF and friends mean the header block is over.
+        if !(0xE0..=0xEF).contains(&marker) && marker != 0xFE {
+            break;
+        }
+        let len = u16::from_be_bytes([jpeg[pos + 2], jpeg[pos + 3]]) as usize;
+        if len < 2 || pos + 2 + len > jpeg.len() {
+            break;
+        }
+        pos += 2 + len;
+    }
+
+    let payload_len = XMP_NS.len() + xmp.len();
+    // A segment's length field is 16-bit and counts itself, so the packet has a
+    // hard ceiling. Extended XMP exists for larger payloads; keywords never come
+    // close, so bail rather than emit a corrupt file.
+    if payload_len + 2 > u16::MAX as usize {
+        return Err("XMP packet too large for a single APP1 segment".to_string());
+    }
+
+    let mut segment = Vec::with_capacity(payload_len + 4);
+    segment.extend_from_slice(&[0xFF, 0xE1]);
+    segment.extend_from_slice(&((payload_len + 2) as u16).to_be_bytes());
+    segment.extend_from_slice(XMP_NS);
+    segment.extend_from_slice(xmp.as_bytes());
+
+    jpeg.splice(pos..pos, segment);
+    Ok(())
+}
+
+#[cfg(test)]
+mod xmp_tests {
+    use super::*;
+
+    /// Minimal but structurally real JPEG: SOI, an APP0/JFIF segment, then EOI.
+    fn tiny_jpeg() -> Vec<u8> {
+        let mut v = vec![0xFF, 0xD8];
+        let jfif: &[u8] = b"JFIF\0\x01\x02\0\0\x01\0\x01\0\0";
+        v.extend_from_slice(&[0xFF, 0xE0]);
+        v.extend_from_slice(&((jfif.len() + 2) as u16).to_be_bytes());
+        v.extend_from_slice(jfif);
+        v.extend_from_slice(&[0xFF, 0xD9]);
+        v
+    }
+
+    #[test]
+    fn inserts_after_existing_app_segments_and_keeps_the_file_intact() {
+        let mut jpeg = tiny_jpeg();
+        let original_len = jpeg.len();
+        insert_xmp_into_jpeg(&mut jpeg, &build_xmp_packet(&["forest".to_string()])).unwrap();
+
+        assert_eq!(&jpeg[0..2], &[0xFF, 0xD8], "SOI must stay first");
+        assert_eq!(&jpeg[jpeg.len() - 2..], &[0xFF, 0xD9], "EOI must stay last");
+        assert!(jpeg.len() > original_len);
+
+        // The APP0 must still precede our APP1.
+        let app0 = jpeg.windows(2).position(|w| w == [0xFF, 0xE0]).unwrap();
+        let app1 = jpeg.windows(2).position(|w| w == [0xFF, 0xE1]).unwrap();
+        assert!(app0 < app1, "XMP segment must come after the existing APP0");
+    }
+
+    #[test]
+    fn declared_segment_length_matches_the_bytes_written() {
+        let mut jpeg = tiny_jpeg();
+        let xmp = build_xmp_packet(&["a".to_string(), "b".to_string()]);
+        insert_xmp_into_jpeg(&mut jpeg, &xmp).unwrap();
+
+        let app1 = jpeg.windows(2).position(|w| w == [0xFF, 0xE1]).unwrap();
+        let declared = u16::from_be_bytes([jpeg[app1 + 2], jpeg[app1 + 3]]) as usize;
+        let expected = b"http://ns.adobe.com/xap/1.0/\0".len() + xmp.len() + 2;
+        assert_eq!(declared, expected, "length field must count itself + payload");
+    }
+
+    #[test]
+    fn round_trips_through_the_apps_own_tag_parser() {
+        let tags = vec!["landscape".to_string(), "black & white".to_string()];
+        let xmp = build_xmp_packet(&tags);
+        // The importer is the real consumer — what we write it must read back.
+        let parsed = crate::file_management::extract_xmp_tags(&xmp);
+        assert_eq!(parsed, tags, "ampersand must survive escape + parse");
+    }
+
+    #[test]
+    fn rejects_non_jpeg_input_instead_of_corrupting_it() {
+        let mut png = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+        assert!(insert_xmp_into_jpeg(&mut png, "<x/>").is_err());
+        assert_eq!(png.len(), 8, "input must be left untouched on error");
+    }
+
+    /// End-to-end: a real `.rrdata` sidecar on disk -> exported JPEG -> tags
+    /// parsed back out. Covers the wiring (`load_primary_metadata().tags`) that
+    /// the unit tests above stub past.
+    #[test]
+    fn sidecar_tags_reach_the_exported_jpeg() {
+        use image::{DynamicImage, RgbImage};
+
+        let dir = std::env::temp_dir().join(format!("rr-xmp-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("frame.jpg");
+
+        // A real source file must exist: the writer bails early otherwise.
+        let img = DynamicImage::ImageRgb8(RgbImage::new(8, 8));
+        img.save(&source).unwrap();
+
+        // Sidecar in the app's own on-disk shape (`<file>.rrdata`).
+        let meta = ImageMetadata {
+            tags: Some(vec!["pizza".to_string(), "black & white".to_string()]),
+            ..Default::default()
+        };
+        std::fs::write(
+            get_primary_sidecar_path(&source),
+            serde_json::to_string(&meta).unwrap(),
+        )
+        .unwrap();
+
+        let mut bytes = std::fs::read(&source).unwrap();
+        write_image_with_metadata(&mut bytes, source.to_str().unwrap(), "jpg", true, false).unwrap();
+
+        let text = String::from_utf8_lossy(&bytes);
+        let parsed = crate::file_management::extract_xmp_tags(&text);
+        assert_eq!(parsed, vec!["pizza".to_string(), "black & white".to_string()]);
+
+        // Still a valid JPEG after the splice.
+        assert_eq!(&bytes[0..2], &[0xFF, 0xD8]);
+        assert!(image::load_from_memory(&bytes).is_ok(), "must still decode");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn keep_metadata_off_writes_no_keywords() {
+        let dir = std::env::temp_dir().join(format!("rr-xmp-off-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("frame.jpg");
+        image::DynamicImage::ImageRgb8(image::RgbImage::new(8, 8)).save(&source).unwrap();
+        let meta = ImageMetadata { tags: Some(vec!["secret".to_string()]), ..Default::default() };
+        std::fs::write(get_primary_sidecar_path(&source), serde_json::to_string(&meta).unwrap()).unwrap();
+
+        let mut bytes = std::fs::read(&source).unwrap();
+        write_image_with_metadata(&mut bytes, source.to_str().unwrap(), "jpg", false, false).unwrap();
+        assert!(!String::from_utf8_lossy(&bytes).contains("secret"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn png_keywords_land_in_an_itxt_chunk_before_iend() {
+        use image::{DynamicImage, RgbImage};
+        let dir = std::env::temp_dir().join(format!("rr-png-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("frame.png");
+        DynamicImage::ImageRgb8(RgbImage::new(8, 8)).save(&source).unwrap();
+
+        let meta = ImageMetadata {
+            tags: Some(vec!["pizza".to_string(), "black & white".to_string()]),
+            ..Default::default()
+        };
+        std::fs::write(
+            get_primary_sidecar_path(&source),
+            serde_json::to_string(&meta).unwrap(),
+        )
+        .unwrap();
+
+        let mut bytes = std::fs::read(&source).unwrap();
+        write_image_with_metadata(&mut bytes, source.to_str().unwrap(), "png", true, false).unwrap();
+
+        let text = String::from_utf8_lossy(&bytes);
+        assert!(text.contains("XML:com.adobe.xmp"), "must use the spec keyword");
+        assert_eq!(
+            crate::file_management::extract_xmp_tags(&text),
+            vec!["pizza".to_string(), "black & white".to_string()]
+        );
+
+        // The chunk must precede IEND, and the file must still decode.
+        let itxt = bytes.windows(4).position(|w| w == b"iTXt").unwrap();
+        let iend = bytes.windows(4).rposition(|w| w == b"IEND").unwrap();
+        assert!(itxt < iend, "iTXt must come before IEND");
+        assert!(image::load_from_memory(&bytes).is_ok(), "PNG must still decode");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn png_chunk_crc_is_valid() {
+        let mut png = {
+            use image::{DynamicImage, RgbImage};
+            let mut buf = std::io::Cursor::new(Vec::new());
+            DynamicImage::ImageRgb8(RgbImage::new(4, 4))
+                .write_to(&mut buf, image::ImageFormat::Png)
+                .unwrap();
+            buf.into_inner()
+        };
+        insert_xmp_into_png(&mut png, &build_xmp_packet(&["x".to_string()])).unwrap();
+
+        let at = png.windows(4).position(|w| w == b"iTXt").unwrap();
+        let len = u32::from_be_bytes([png[at - 4], png[at - 3], png[at - 2], png[at - 1]]) as usize;
+        let mut h = crc32fast::Hasher::new();
+        h.update(&png[at..at + 4 + len]);
+        let stored = u32::from_be_bytes([
+            png[at + 4 + len],
+            png[at + 5 + len],
+            png[at + 6 + len],
+            png[at + 7 + len],
+        ]);
+        assert_eq!(h.finalize(), stored, "CRC must cover type + data");
+    }
+
+    #[test]
+    fn embeddable_formats_are_reported_correctly() {
+        for f in ["jpg", "jpeg", "png", "tiff", "tif", "JPG", "PNG", "TIFF"] {
+            assert!(supports_embedded_xmp(f), "{f} should embed");
+        }
+        // Container surgery not implemented for these — they fall back to a
+        // .xmp sidecar written next to the export.
+        for f in ["webp", "avif", "jxl"] {
+            assert!(!supports_embedded_xmp(f), "{f} should use a sidecar");
+        }
+    }
+
+    #[test]
+    fn a_format_we_cannot_embed_leaves_the_bytes_untouched() {
+        use image::{DynamicImage, RgbImage};
+        let dir = std::env::temp_dir().join(format!("rr-webp-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("frame.png");
+        DynamicImage::ImageRgb8(RgbImage::new(8, 8)).save(&source).unwrap();
+        let meta = ImageMetadata { tags: Some(vec!["t".to_string()]), ..Default::default() };
+        std::fs::write(get_primary_sidecar_path(&source), serde_json::to_string(&meta).unwrap()).unwrap();
+
+        let mut bytes = std::fs::read(&source).unwrap();
+        let before = bytes.clone();
+        write_image_with_metadata(&mut bytes, source.to_str().unwrap(), "webp", true, false).unwrap();
+        assert_eq!(bytes, before, "webp must be left for the sidecar path");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn encode_tiff(w: u32, h: u32) -> Vec<u8> {
+        let mut buf = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgb8(image::RgbImage::new(w, h))
+            .write_to(&mut buf, image::ImageFormat::Tiff)
+            .unwrap();
+        buf.into_inner()
+    }
+
+    #[test]
+    fn tiff_keywords_embed_and_the_image_still_decodes() {
+        let mut tiff = encode_tiff(8, 8);
+        let tags = vec!["pizza".to_string(), "black & white".to_string()];
+        insert_xmp_into_tiff(&mut tiff, &build_xmp_packet(&tags)).unwrap();
+
+        assert_eq!(
+            crate::file_management::extract_xmp_tags(&String::from_utf8_lossy(&tiff)),
+            tags
+        );
+        let decoded = image::load_from_memory(&tiff).expect("TIFF must still decode");
+        assert_eq!(decoded.width(), 8);
+        assert!(has_embedded_xmp(&tiff));
+    }
+
+    #[test]
+    fn tiff_ifd_stays_sorted_and_gains_exactly_one_entry() {
+        let before = encode_tiff(4, 4);
+        let le = &before[0..2] == b"II";
+        let rd16 = |b: &[u8], o: usize| if le {
+            u16::from_le_bytes([b[o], b[o + 1]])
+        } else {
+            u16::from_be_bytes([b[o], b[o + 1]])
+        };
+        let rd32 = |b: &[u8], o: usize| if le {
+            u32::from_le_bytes([b[o], b[o + 1], b[o + 2], b[o + 3]])
+        } else {
+            u32::from_be_bytes([b[o], b[o + 1], b[o + 2], b[o + 3]])
+        };
+
+        let n_before = rd16(&before, rd32(&before, 4) as usize);
+
+        let mut after = before.clone();
+        insert_xmp_into_tiff(&mut after, &build_xmp_packet(&["x".to_string()])).unwrap();
+
+        let ifd = rd32(&after, 4) as usize;
+        let n_after = rd16(&after, ifd);
+        assert_eq!(n_after, n_before + 1, "exactly one new entry");
+
+        let mut tags: Vec<u16> = (0..n_after as usize)
+            .map(|i| rd16(&after, ifd + 2 + i * 12))
+            .collect();
+        let sorted = { let mut t = tags.clone(); t.sort_unstable(); t };
+        assert_eq!(tags, sorted, "IFD entries must stay in ascending tag order");
+        assert!(tags.contains(&700), "XMP tag must be present");
+        tags.dedup();
+        assert_eq!(tags.len(), n_after as usize, "no duplicate tags");
+    }
+
+    #[test]
+    fn tiff_is_not_double_tagged_on_re_export() {
+        let mut tiff = encode_tiff(4, 4);
+        insert_xmp_into_tiff(&mut tiff, &build_xmp_packet(&["one".to_string()])).unwrap();
+        let once = tiff.clone();
+        insert_xmp_into_tiff(&mut tiff, &build_xmp_packet(&["two".to_string()])).unwrap();
+        assert_eq!(tiff, once, "second write must be a no-op, not a rival entry");
+    }
+
+    #[test]
+    fn tiff_rejects_garbage_rather_than_mangling_it() {
+        let mut junk = vec![b'X'; 64];
+        let before = junk.clone();
+        assert!(insert_xmp_into_tiff(&mut junk, "<x/>").is_err());
+        assert_eq!(junk, before);
+    }
+
+    #[test]
+    fn has_embedded_xmp_is_false_for_a_plain_encode() {
+        assert!(!has_embedded_xmp(&encode_tiff(4, 4)));
+    }
 }
