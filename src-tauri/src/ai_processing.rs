@@ -392,26 +392,14 @@ pub async fn get_or_init_ai_models(
     let sky_seg_path = models_dir.join(SKYSEG_FILENAME);
     let depth_path = models_dir.join(DEPTH_FILENAME);
 
-    // CoreML (Neural Engine/GPU) for the heavy vision models; unsupported
-    // subgraphs fall back to CPU automatically. Deliberately NOT used for the
-    // SAM decoder (ms-sized, dynamic prompt shapes partition badly) or LaMa
-    // (FFT layers CoreML can't run — partitioning would slow it down).
-    // CoreML compiles at session creation, so first mask use pays a few
-    // extra seconds once per launch.
-    let coreml_builder = || -> Result<ort::session::builder::SessionBuilder> {
-        let builder = Session::builder()?;
-        #[cfg(target_os = "macos")]
-        let builder = builder.with_execution_providers([
-            ort::execution_providers::CoreMLExecutionProvider::default().build(),
-        ])?;
-        Ok(builder)
-    };
-
-    let sam_encoder = coreml_builder()?.commit_from_file(encoder_path)?;
+    // Tried CoreML here (2026-08): u2netp fails at inference inside the
+    // CoreML EP ("unable to compute the prediction") and the SAM encoder
+    // showed no speedup (34s vs ~similar on CPU). All sessions stay on CPU.
+    let sam_encoder = Session::builder()?.commit_from_file(encoder_path)?;
     let sam_decoder = Session::builder()?.commit_from_file(decoder_path)?;
-    let u2netp = coreml_builder()?.commit_from_file(u2netp_path)?;
-    let sky_seg = coreml_builder()?.commit_from_file(sky_seg_path)?;
-    let depth_anything = coreml_builder()?.commit_from_file(depth_path)?;
+    let u2netp = Session::builder()?.commit_from_file(u2netp_path)?;
+    let sky_seg = Session::builder()?.commit_from_file(sky_seg_path)?;
+    let depth_anything = Session::builder()?.commit_from_file(depth_path)?;
 
     crate::register_exit_handler();
 
