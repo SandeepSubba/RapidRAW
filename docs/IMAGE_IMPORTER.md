@@ -206,14 +206,25 @@ Toggle **Grid ⇄ Viewer**. The viewer has two modes:
 ## 9. Exclude already-imported
 
 The "Exclude already-imported (skip duplicates)" toggle compares the card against the
-**chosen destination folder**, matching by **filename stem** (so a RAW already imported also
-matches its JPEG), recursively. Matches are **hidden from the grid entirely** and excluded
-from import. Requires a destination to be set (that's what it compares against).
+**chosen destination folder** (recursively), matching on two independent signals:
+
+- **Filename stem** — so a RAW already imported also matches its JPEG counterpart.
+- **File content** — a BLAKE3 hash comparison, so photos you have **renamed in the
+  library** after importing still register as duplicates. Hashing only runs when the
+  destination holds a file of exactly the same byte size, so a card full of new photos
+  costs metadata reads alone.
+
+Matches are **hidden from the grid entirely** and excluded from import. Requires a
+destination to be set (that's what it compares against).
 
 > This is distinct from "Group similar": grouping handles *visually similar bursts* (kept
 > visible so you choose); exclude-already-imported handles *photos already in your library*.
 
 ## 10. Import settings & running the import
+
+The **destination defaults to the folder the library is currently showing** (albums are
+virtual, so they never pre-fill), and an explicit choice you make is never overwritten —
+importing into the folder you are looking at needs no picking at all.
 
 The **Import N** button is enabled as soon as photos are selected; if no destination is
 chosen yet, it opens the folder picker first, then proceeds. Settings (gear icon):

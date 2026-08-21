@@ -29,6 +29,12 @@ detail in [`docs/IMAGE_IMPORTER.md`](IMAGE_IMPORTER.md).
   with Ctrl/Shift+click.
 - **Auto lens correction on import** — reads lens metadata and seeds the matching
   correction so imported RAWs open already corrected.
+- **Destination defaults to the current library folder** — the importer opens ready
+  to import into the folder you're viewing (albums excluded); an explicit choice is
+  never overwritten.
+- **Rename-proof duplicate detection** — "exclude already-imported" matches by
+  filename stem *or* file content (size-gated BLAKE3 hash), so photos renamed in the
+  library still register as already imported.
 - **Windows SD-card eject** support from within the importer.
 
 ## Film scanner
@@ -63,6 +69,26 @@ and dated.
 - Runs on **macOS** (`brew install sane-backends`) and **Linux** (`sane-utils`);
   Windows is unsupported (no SANE).
 
+## Tethered shooting
+
+- **Folder-watch tethering (all platforms)** — point RapidRAW at a session folder and
+  anything the camera vendor's app drops there is ingested into the library live.
+- **Direct USB tethering** over libgphoto2 (`tether-usb` build feature; enabled in the
+  macOS/Linux release builds) — camera picker, in-app shutter release, camera-setting
+  sliders, and **live view** when the body supports it. Shutter presses on the camera
+  body download into the same watched session folder. Windows builds ship folder-watch
+  tethering only (libgphoto2 has no Windows port).
+
+## AI assistant
+
+- **Chat assistant panel** that sees the current image and edit state and applies
+  editor adjustments conversationally. Providers: **OpenAI**, **Anthropic (API key)**,
+  or **Claude Code** — the last drives the `claude` CLI so an existing Claude
+  subscription works with no API key.
+- **OCR & metadata extraction** through cloud vision models.
+- **Scan-preview mode** — while the scanner pane is open with a preview, the assistant
+  drives the scanner controls (tone, crop, film settings) instead of the editor.
+
 ## Crop, rotate & perspective
 
 - **Opt-in crop tool** (fork behaviour) — the Crop panel no longer auto-activates a
@@ -74,6 +100,12 @@ and dated.
 - **Guided keystone** — draw reference lines on the image to correct perspective;
   guides are editable, with automatic auto-crop to the corrected frame.
 - **Batch-rotate** selected images with the `[` and `]` shortcuts.
+- **Saved crop ratios** — save any custom width × height (e.g. `2048 × 2292`) as a
+  named preset; saved ratios appear as buttons in the aspect-ratio grid alongside the
+  built-ins, with hover-to-delete.
+- **Last-used ratio remembered** — the crop panel reopens on the ratio and orientation
+  you last picked instead of resetting to the image's native ratio (classically 3:2
+  horizontal) on every image.
 
 ## Masks & AI retouching
 
@@ -99,6 +131,13 @@ and dated.
 - Toggle **Convert ↔ Revert** per image from the library / filmstrip right-click
   menu, with Develop-module tuning. Conversion survives navigation and batch
   revert.
+- **Editor Film panel** — conversion parameters stay re-editable after the scan,
+  in the develop module.
+- **NegaFix-style film-stock profiles** — save conversion parameters per stock
+  (params only; frame-specific bounds never pollute a profile) and apply them at
+  scan time or from the Film panel.
+- **Roll tools in the library** — apply a conversion across a whole roll with batch
+  progress, negative badges on thumbnails, and a negative filter.
 
 ## Auto-correct
 
@@ -111,13 +150,26 @@ and dated.
   shown in **Settings → Controls → Adjustments** and fully remappable.
 - **Blown-highlight handling** — RAW highlights that clip are desaturated toward
   neutral white instead of going magenta/colored.
+- **Keyboard filmstrip selection** — build a multi-image selection from the keyboard
+  in the develop module, without reaching for the mouse.
+
+## Export
+
+- **sRGB ICC profile embedded in JPEG exports** — files are colour-tagged instead of
+  leaving every browser, editor, and phone gallery to guess. The pipeline already
+  renders sRGB, so this states what is true of the pixels; nothing is converted.
+- **Smaller JPEGs at identical quality** — per-image optimized Huffman tables
+  (typically 5–20% smaller on real photos; the decoded image is bit-identical).
+  Full 4:4:4 chroma is kept — no subsampling, colour edges stay sharp.
+- **Keyword tags carried into exports** — library keywords are embedded in the
+  exported file's metadata.
+- **Export naming** — filename templates gain metadata tokens (`{title}`,
+  `{author}`, `{copyright}`, `{comments}`) that mirror the Metadata panel, and the
+  File Naming UI is available for **single-image** export (not just batch).
 
 ## Library & metadata
 
 - **Batch metadata editing** + sync across selected images.
-- **Export naming** — filename templates gain metadata tokens (`{title}`,
-  `{author}`, `{copyright}`, `{comments}`) that mirror the Metadata panel, and the
-  File Naming UI is available for **single-image** export (not just batch).
 - Selection stays on the nearest visible image when a rating filter would hide the
   current one.
 
@@ -143,6 +195,16 @@ and dated.
 - Backend hardening / correctness fixes and module refactors
   (`file_management`, `image_processing`, settings widgets).
 
+## Performance & platform
+
+- **CoreML execution for the AI mask models** on Apple Silicon.
+- **Thin-LTO release profile** — release builds compile ~3–5× faster than upstream's
+  fat-LTO/single-codegen-unit profile, for a runtime cost the GPU-bound pipeline
+  doesn't feel.
+- **OS-native TLS on Windows and macOS** — assistant/network requests use schannel /
+  Secure Transport, matching the system browser on networks that drop rustls's
+  ClientHello (Linux keeps rustls to avoid an OpenSSL dependency).
+
 ---
 
 ## Building & releasing
@@ -151,6 +213,6 @@ and dated.
   toolchain required).
 - **Desktop installers** are built by a fork-specific GitHub Actions workflow
   ([`.github/workflows/release-fork.yml`](../.github/workflows/release-fork.yml)):
-  push a tag like `fork-v1.5.8` (or run it from the Actions tab) and it publishes
+  push a tag like `fork-v1.6.1` (or run it from the Actions tab) and it publishes
   a GitHub Release with unsigned installers for **Windows** (`.exe`), **macOS**
   (`.dmg`, Apple Silicon + Intel), and **Linux** (`.deb` + `.AppImage`).
