@@ -197,7 +197,6 @@ and dated.
 
 ## Performance & platform
 
-- **CoreML execution for the AI mask models** on Apple Silicon.
 - **Thin-LTO release profile** — release builds compile ~3–5× faster than upstream's
   fat-LTO/single-codegen-unit profile, for a runtime cost the GPU-bound pipeline
   doesn't feel.
