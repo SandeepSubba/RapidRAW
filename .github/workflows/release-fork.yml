@@ -65,6 +65,10 @@ jobs:
 
       - name: Add Rust target
         if: matrix.target != ''
+        # Must run inside src-tauri: rust-toolchain.toml pins the toolchain there,
+        # so adding the target at the repo root installs it into the wrong one
+        # ("Target x86_64-apple-darwin is not installed" at build time).
+        working-directory: src-tauri
         run: rustup target add ${{ matrix.target }}
 
       - name: Rust cache
