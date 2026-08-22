@@ -74,10 +74,11 @@ and dated.
 - **Folder-watch tethering (all platforms)** — point RapidRAW at a session folder and
   anything the camera vendor's app drops there is ingested into the library live.
 - **Direct USB tethering** over libgphoto2 (`tether-usb` build feature; enabled in the
-  macOS/Linux release builds) — camera picker, in-app shutter release, camera-setting
-  sliders, and **live view** when the body supports it. Shutter presses on the camera
-  body download into the same watched session folder. Windows builds ship folder-watch
-  tethering only (libgphoto2 has no Windows port).
+  Apple Silicon macOS and Linux release builds) — camera picker, in-app shutter release,
+  camera-setting sliders, and **live view** when the body supports it. Shutter presses
+  on the camera body download into the same watched session folder. Windows and Intel
+  macOS builds ship folder-watch tethering only (no libgphoto2 on Windows; no x86_64
+  libgphoto2 on the arm64 CI runner).
 
 ## AI assistant
 

@@ -42,9 +42,12 @@ jobs:
           # Intel macOS is cross-compiled on an Apple Silicon runner. The dedicated
           # Intel runner (macos-13) is scarce/being retired and can hang in queue,
           # so we target x86_64 from macos-14 instead — no Intel runner needed.
+          # No tether-usb here: Homebrew on the arm64 runner only carries arm64
+          # libgphoto2, so the cross build can't link it — Intel builds ship
+          # folder-watch tethering only, same as Windows.
           - platform: 'macos-14'
             target: 'x86_64-apple-darwin'
-            args: '--target x86_64-apple-darwin --features tether-usb --bundles app,dmg'
+            args: '--target x86_64-apple-darwin --bundles app,dmg'
             label: 'macOS (Intel)'
           - platform: 'ubuntu-22.04'
             target: ''
