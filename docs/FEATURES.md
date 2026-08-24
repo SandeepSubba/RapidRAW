@@ -167,6 +167,10 @@ and dated.
 - **Export naming** — filename templates gain metadata tokens (`{title}`,
   `{author}`, `{copyright}`, `{comments}`) that mirror the Metadata panel, and the
   File Naming UI is available for **single-image** export (not just batch).
+- **Templates are used verbatim** — no silent `_{sequence}` suffix is appended.
+  If two images in a batch actually render the same name, the later ones get
+  `_2`, `_3`, … so nothing is overwritten; templates that already produce unique
+  names are left exactly as written.
 
 ## Library & metadata
 

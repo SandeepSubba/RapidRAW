@@ -457,18 +457,12 @@ export default function ExportPanel({
   const handleExport = async () => {
     if (numImages === 0 || isExporting) return;
 
-    let finalFilenameTemplate = filenameTemplate;
-    if (
-      numImages > 1 &&
-      !filenameTemplate.includes('{sequence}') &&
-      !filenameTemplate.includes('{original_filename}')
-    ) {
-      finalFilenameTemplate = `${filenameTemplate}_{sequence}`;
-      setFilenameTemplate(finalFilenameTemplate);
-    }
-
+    // The template is used exactly as written — no silent _{sequence} append.
+    // The backend disambiguates only when two images actually render the same
+    // name (first keeps it, later ones get _2, _3…), so a template that is
+    // already unique (via {title}, dates, …) stays untouched.
     const exportSettings: ExportSettings = {
-      filenameTemplate: finalFilenameTemplate,
+      filenameTemplate,
       jpegQuality,
       keepMetadata,
       preserveTimestamps,
@@ -502,12 +496,12 @@ export default function ExportPanel({
           // backend so single-image export supports the same tokens as batch.
           suggestedName = await invoke<string>(Invokes.GenerateExportFilename, {
             path: pathsToExport[0],
-            template: finalFilenameTemplate,
+            template: filenameTemplate,
           });
         } catch {
           const originalFilename = pathsToExport[0].split(/[\\/]/).pop() || '';
           const stem = originalFilename.substring(0, originalFilename.lastIndexOf('.')) || originalFilename;
-          suggestedName = finalFilenameTemplate.replace('{original_filename}', stem);
+          suggestedName = filenameTemplate.replace('{original_filename}', stem);
         }
         const outputFileName = `${suggestedName}.${selectedFormat.extensions[0]}`;
 

@@ -1004,6 +1004,11 @@ pub(crate) async fn export_images_impl(
 
         let semaphore = Arc::new(tokio::sync::Semaphore::new(num_threads));
         let mut join_handles = Vec::new();
+        // Output names claimed by this run. Different sources can render the same
+        // stem (a shared {title}, a fixed template with no unique token), and the
+        // writes below would silently clobber each other without a claim check.
+        let used_output_paths: Arc<std::sync::Mutex<std::collections::HashSet<std::path::PathBuf>>> =
+            Arc::new(std::sync::Mutex::new(std::collections::HashSet::new()));
 
         for (global_index, image_path_str, appearance_count, explicit_vc) in export_items {
             if cancellation_token.load(Ordering::SeqCst) {
@@ -1025,6 +1030,7 @@ pub(crate) async fn export_images_impl(
             let settings = settings.clone();
             let cancellation_token_clone = Arc::clone(&cancellation_token);
             let adjustments_mode = adjustments_mode.clone();
+            let used_output_paths = Arc::clone(&used_output_paths);
 
             let handle = tokio::task::spawn_blocking(move || {
                 ensure_export_not_cancelled(&cancellation_token_clone)?;
@@ -1099,6 +1105,43 @@ pub(crate) async fn export_images_impl(
                     }
                 } else {
                     output_folder_path.join(&new_filename)
+                };
+
+                // First claimant keeps the name; later ones get _2, _3… — but only
+                // on an actual collision, so a template that already yields unique
+                // names is used verbatim. Re-exporting over an old file on disk
+                // still overwrites, as it always has.
+                let output_path = {
+                    let mut used = used_output_paths.lock().unwrap();
+                    let mut candidate = output_path;
+                    if used.contains(&candidate) {
+                        let stem = candidate
+                            .file_stem()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or("image")
+                            .to_string();
+                        let ext = candidate
+                            .extension()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let mut n = 2usize;
+                        loop {
+                            let name = if ext.is_empty() {
+                                format!("{stem}_{n}")
+                            } else {
+                                format!("{stem}_{n}.{ext}")
+                            };
+                            let alt = candidate.with_file_name(name);
+                            if !used.contains(&alt) {
+                                candidate = alt;
+                                break;
+                            }
+                            n += 1;
+                        }
+                    }
+                    used.insert(candidate.clone());
+                    candidate
                 };
 
                 let extension = output_format.to_lowercase();
