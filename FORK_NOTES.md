@@ -71,32 +71,41 @@ candidates to be merged upstream; if they are, drop them from the fork.
 
 ## Updating when upstream releases a new version
 
+The branch now carries hundreds of commits including merge commits, so upstream
+syncs are done with a **merge**, not a rebase (a rebase would flatten the
+topology and force-push rewritten history to every machine; the v1.6.2 sync,
+commit `2579cdf1`, is the template):
+
 ```bash
 # 1. Get the latest upstream code
-git fetch origin
+git fetch origin   # origin = upstream in this layout
 
-# 2. Replay our custom commits on top of the new upstream main
+# 2. Merge it into the integration branch
 git checkout integration/all-features
-git rebase origin/main
+git merge origin/main
 
-# 3. If a conflict appears (rare, since our changes are additive), fix the
-#    file, then:
-git add <file>
-git rebase --continue
+# 3. Resolve conflicts. Two recurring rules:
+#    - Where upstream grew a parallel implementation of a feature the fork
+#      already ships (tethering, negative conversion), the fork's version
+#      wins — the film scanner / Film panel / TetherMenu are built on it.
+#    - Where the fork refactored a file upstream keeps editing
+#      (SettingsPanel widgets, image_processing/analysis.rs), keep the
+#      fork's structure and port upstream's new behaviour into it.
 
-# 4. Reinstall deps in case package.json changed upstream, then test
+# 4. Reinstall deps, then verify
 npm install
-npm start
+cd src-tauri && cargo check && cd ..
+npm run build        # vite production bundle
+npm start            # smoke-test the app
 
-# 5. Update the fork
-git push --force-with-lease fork integration/all-features
+# 5. Update the fork (a merge needs no force push)
+git push fork integration/all-features
 ```
 
-Because the feature lives in one additive commit, the usual outcome of step 2
-is a clean replay with no conflicts. If upstream ever restructures
-`keyboardUtils.ts` or `useKeyboardShortcuts.ts`, the only fix-up needed is to
-re-add the `ADJUSTMENT_NUDGES` block and its dispatch loop — both are clearly
-commented in the source.
+Watch the GPU uniform struct when both sides added fields: the Rust struct in
+`image_processing.rs` and its WGSL mirror in `shaders/shader.wgsl` must keep
+identical field order, and the scalar count before the `mat3x3` block must stay
+a multiple of 4 — absorb `_pad_*` slots rather than growing the struct.
 
 ## Build / run
 
