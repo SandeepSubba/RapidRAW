@@ -4,7 +4,16 @@ import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { ClerkProvider } from '@clerk/react';
 import { ToastContainer, toast, Slide } from 'react-toastify';
-import { DndContext, DragOverlay, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
+import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  Modifier,
+  MeasuringStrategy,
+  pointerWithin,
+} from '@dnd-kit/core';
 import clsx from 'clsx';
 
 import TitleBar from './window/TitleBar';
@@ -23,6 +32,7 @@ import MasksPanel from './components/panel/right/MasksPanel';
 import AIPanel from './components/panel/right/AIPanel';
 import AssistantPanel from './components/panel/right/AssistantPanel';
 import PresetsPanel from './components/panel/right/PresetsPanel';
+import TetheringPanel from './components/panel/right/TetheringPanel';
 
 import EditorView from './components/views/EditorView';
 import LibraryView from './components/views/LibraryView';
@@ -31,7 +41,7 @@ import { useImportStore } from './store/useImportStore';
 
 import { ContextMenuProvider } from './context/ContextMenuContext';
 import { useSettingsStore } from './store/useSettingsStore';
-import { useUIStore } from './store/useUIStore';
+import { DEFAULT_BOTTOM_PANEL_HEIGHT, DEFAULT_PANEL_WIDTH, useUIStore } from './store/useUIStore';
 import { useLibraryStore } from './store/useLibraryStore';
 import { useEditorStore } from './store/useEditorStore';
 import { useProcessStore } from './store/useProcessStore';
@@ -100,8 +110,47 @@ const insertChildrenIntoTree = (node: any, targetPath: string, newChildren: any[
   return node;
 };
 
+const imageDragModifier: Modifier = ({ active, activatorEvent, activeNodeRect, transform }) => {
+  if (active?.data?.current?.type === 'library-image' && activatorEvent && activeNodeRect) {
+    const event = activatorEvent as any;
+    const startX = event.clientX ?? event.touches?.[0]?.clientX ?? 0;
+    const startY = event.clientY ?? event.touches?.[0]?.clientY ?? 0;
+
+    if (startX === 0 && startY === 0) return transform;
+
+    const offsetX = startX - activeNodeRect.left - 48;
+    const offsetY = startY - activeNodeRect.top - 48;
+
+    return {
+      ...transform,
+      x: transform.x + offsetX,
+      y: transform.y + offsetY,
+    };
+  }
+  return transform;
+};
+
+function ImageDragOverlayNode({ activeItem }: { activeItem: { path: string; paths: string[] } }) {
+  const url = useProcessStore.getState().thumbnails[activeItem.path];
+  const count = activeItem.paths.length;
+
+  return (
+    <div className="w-24 h-24 rounded-lg shadow-2xl border-2 border-accent relative bg-surface overflow-hidden flex items-center justify-center">
+      {url && <img src={url} className="w-full h-full object-cover" />}
+      {count > 1 && (
+        <div className="absolute top-1 right-1 bg-accent text-button-text text-xs font-bold px-2 py-0.5 rounded-full shadow-md z-10">
+          {count}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function App() {
   const COMPACT_EDITOR_MAX_WIDTH = 900;
+  const ANDROID_PHONE_MAX_WIDTH = 600;
+
+  const [activeImageDragItem, setActiveImageDragItem] = useState<{ path: string; paths: string[] } | null>(null);
 
   const { appSettings, theme, osPlatform, handleSettingsChange } = useSettingsStore(
     useShallow((state) => ({
@@ -236,8 +285,9 @@ function App() {
 
   const isAndroid = osPlatform === 'android';
   const isPortraitViewport = viewportSize.width > 0 && viewportSize.height > viewportSize.width;
-  const isCompactPortrait =
-    viewportSize.width > 0 && viewportSize.width <= COMPACT_EDITOR_MAX_WIDTH && isPortraitViewport;
+  const compactEditorMaxWidth = isAndroid ? ANDROID_PHONE_MAX_WIDTH : COMPACT_EDITOR_MAX_WIDTH;
+  const isCompactPortrait = viewportSize.width > 0 && viewportSize.width <= compactEditorMaxWidth && isPortraitViewport;
+  const useCompactAndroidPanels = isAndroid && isCompactPortrait;
 
   const compactEditorPanelMinHeight = 220;
   const compactEditorPanelMaxHeight =
@@ -433,6 +483,8 @@ function App() {
     handleBatchDenoise,
     handleSaveDenoisedImage,
     handleSaveCollage,
+    handleStartFocusStack,
+    handleSaveFocusStack,
   } = useProductivityActions(handleLibraryRefresh);
 
   const {
@@ -483,6 +535,7 @@ function App() {
     sortedImageList,
     handleBackToLibrary,
     handleDeleteSelected,
+    handleGoHome,
     handleImageSelect,
     handlePasteFiles,
     handleToggleFullScreen,
@@ -704,12 +757,34 @@ function App() {
       window.removeEventListener('pointercancel', stopDrag);
       setIsResizing(false);
     };
+
     document.documentElement.style.cursor =
       stateKey === 'bottom' || stateKey === 'compact' ? 'row-resize' : 'col-resize';
 
     window.addEventListener('pointermove', doDrag, { passive: false });
     window.addEventListener('pointerup', stopDrag);
     window.addEventListener('pointercancel', stopDrag);
+  };
+
+  const createResizeResetHandler = (stateKey: string) => () => {
+    if (stateKey === 'left') {
+      setUI((state) => ({
+        leftPanelWidth: DEFAULT_PANEL_WIDTH,
+        uiVisibility: { ...state.uiVisibility, leftPanel: true },
+      }));
+    } else if (stateKey === 'right') {
+      setUI((state) => ({
+        rightPanelWidth: DEFAULT_PANEL_WIDTH,
+        uiVisibility: { ...state.uiVisibility, rightPanel: true },
+      }));
+    } else if (stateKey === 'bottom') {
+      setUI((state) => ({
+        bottomPanelHeight: DEFAULT_BOTTOM_PANEL_HEIGHT,
+        uiVisibility: { ...state.uiVisibility, filmstrip: true },
+      }));
+    } else if (stateKey === 'compact') {
+      setUI({ compactEditorPanelHeightOverride: null });
+    }
   };
 
   useEffect(() => {
@@ -809,6 +884,8 @@ function App() {
           return <AssistantPanel />;
         case Panel.Presets:
           return <PresetsPanel onNavigateToCommunity={() => setUI({ activeView: 'community' })} />;
+        case Panel.Tethering:
+          return <TetheringPanel onLibraryRefresh={handleLibraryRefresh} onImageSelect={handleImageSelect} />;
         default:
           return null;
       }
@@ -840,7 +917,7 @@ function App() {
   const importStage = useImportStore((state) => state.stage);
   const isScannerActive = isImportViewActive && importStage === 'scanner';
 
-  const shouldHideFolderTree = isAndroid;
+  const shouldHideFolderTree = useCompactAndroidPanels;
   const isWgpuActive =
     activeView === 'editor' &&
     appSettings?.useWgpuRenderer !== false &&
@@ -852,14 +929,54 @@ function App() {
   const handleDragStart = (e: any) => {
     if (e.active.data.current?.type === 'layout-tab') {
       setLayoutDragItem(e.active.data.current.panel as Panel);
+    } else if (e.active.data.current?.type === 'library-image') {
+      const path = e.active.data.current.path;
+      const multiSelected = useLibraryStore.getState().multiSelectedPaths;
+      const paths = multiSelected.includes(path) ? multiSelected : [path];
+      setActiveImageDragItem({ path, paths });
     }
   };
+
   const handleDragEnd = (e: any) => {
     setLayoutDragItem(null);
-    if (e.active.data.current?.type === 'layout-tab' && e.over?.data.current?.type === 'layout-region') {
-      movePanel(e.active.data.current.panel as Panel, e.over.data.current.region as PanelRegion);
+    setActiveImageDragItem(null);
+    const { active, over } = e;
+
+    if (active.data.current?.type === 'layout-tab' && over?.data.current?.type === 'layout-region') {
+      movePanel(active.data.current.panel as Panel, over.data.current.region as PanelRegion);
+    }
+
+    if (active.data.current?.type === 'library-image' && over?.data.current?.type === 'folder') {
+      const targetFolder = over.data.current.path;
+      const sourcePaths = activeImageDragItem?.paths || [active.data.current.path];
+
+      invoke(Invokes.MoveFiles, { sourcePaths, destinationFolder: targetFolder })
+        .then(() => {
+          refreshAllFolderTrees();
+          handleLibraryRefresh();
+          useLibraryStore.getState().setLibrary({ multiSelectedPaths: [] });
+        })
+        .catch((err) => {
+          toast.error(`Failed to move files: ${err}`);
+        });
+    }
+
+    if (active.data.current?.type === 'library-image' && over?.data.current?.type === 'album') {
+      const targetAlbumId = over.data.current.id;
+      const sourcePaths = activeImageDragItem?.paths || [active.data.current.path];
+
+      invoke(Invokes.AddToAlbum, { albumId: targetAlbumId, paths: sourcePaths })
+        .then(() => invoke(Invokes.GetAlbums))
+        .then((updatedTree: any) => {
+          useLibraryStore.getState().setLibrary({ albumTree: updatedTree, multiSelectedPaths: [] });
+          handleLibraryRefresh();
+        })
+        .catch((err) => {
+          toast.error(`Failed to add to album: ${err}`);
+        });
     }
   };
+
   const ActiveOverlayIcon = activeLayoutDragItem ? PANEL_ICONS[activeLayoutDragItem] : null;
   const effectiveLeftWidth = uiVisibility.leftPanel ? leftPanelWidth : 48;
   const effectiveRightWidth = uiVisibility.rightPanel ? rightPanelWidth : 48;
@@ -899,7 +1016,17 @@ function App() {
             [hasMainContent && (isFullScreen ? 'p-0 gap-0' : 'p-2 gap-2')],
           )}
         >
-          <DndContext sensors={layoutSensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+          <DndContext
+            sensors={layoutSensors}
+            onDragStart={handleDragStart}
+            onDragEnd={handleDragEnd}
+            collisionDetection={pointerWithin}
+            measuring={{
+              droppable: {
+                strategy: MeasuringStrategy.Always,
+              },
+            }}
+          >
             <div className="flex flex-row grow h-full min-h-0">
               {!shouldHideFolderTree && hasMainContent && (
                 <SidePanelArea
@@ -909,6 +1036,7 @@ function App() {
                   bottomRegion="leftBottom"
                   renderPanel={renderAppPanel}
                   onWidthChange={createResizeHandler('left', effectiveLeftWidth)}
+                  onWidthReset={createResizeResetHandler('left')}
                   isResizing={isResizing}
                 />
               )}
@@ -938,6 +1066,7 @@ function App() {
                       thumbnailAspectRatio={thumbnailAspectRatio}
                       sortedImageList={sortedImageList}
                       createResizeHandler={createResizeHandler}
+                      createResizeResetHandler={createResizeResetHandler}
                       handleBackToLibrary={handleBackToLibrary}
                       handleEditorContextMenu={handleEditorContextMenu}
                       handleThumbnailContextMenu={handleThumbnailContextMenu}
@@ -1007,7 +1136,7 @@ function App() {
                   </div>
                 )}
               </div>
-              {!isAndroid && hasMainContent && !isScannerActive && (
+              {!useCompactAndroidPanels && hasMainContent && !isScannerActive && (
                 <SidePanelArea
                   side="right"
                   width={effectiveRightWidth}
@@ -1015,16 +1144,18 @@ function App() {
                   bottomRegion="rightBottom"
                   renderPanel={renderAppPanel}
                   onWidthChange={createResizeHandler('right', effectiveRightWidth)}
+                  onWidthReset={createResizeResetHandler('right')}
                   isResizing={isResizing}
                 />
               )}
             </div>
-            <DragOverlay dropAnimation={{ duration: 150, easing: 'cubic-bezier(0.18, 0.67, 0.6, 1.22)' }}>
+            <DragOverlay modifiers={activeImageDragItem ? [imageDragModifier] : undefined} dropAnimation={null}>
               {activeLayoutDragItem && ActiveOverlayIcon ? (
                 <div className="w-10 h-10 bg-surface shadow-2xl rounded-md flex items-center justify-center text-text-primary ring-1 ring-border-color">
                   <ActiveOverlayIcon size={20} />
                 </div>
               ) : null}
+              {activeImageDragItem ? <ImageDragOverlayNode activeItem={activeImageDragItem} /> : null}
             </DragOverlay>
           </DndContext>
         </div>
@@ -1032,6 +1163,8 @@ function App() {
           handleImageSelect={handleImageSelect}
           handleSavePanorama={handleSavePanorama}
           handleStartPanorama={handleStartPanorama}
+          handleStartFocusStack={handleStartFocusStack}
+          handleSaveFocusStack={handleSaveFocusStack}
           handleSaveHdr={handleSaveHdr}
           handleStartHdr={handleStartHdr}
           refreshImageList={handleLibraryRefresh}

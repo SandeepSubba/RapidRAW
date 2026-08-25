@@ -20,6 +20,7 @@ mod denoising;
 mod exif_processing;
 mod export_processing;
 mod file_management;
+mod focus_stacking;
 mod formats;
 mod gpu_processing;
 mod hdr_deghosting;
@@ -375,6 +376,7 @@ fn process_preview_job(
     is_interactive: bool,
     target_resolution: Option<u32>,
     roi: Option<(f32, f32, f32, f32)>,
+    request_analytics: bool,
     compute_waveform: bool,
     active_waveform_channel: Option<&str>,
 ) -> Result<Vec<u8>, String> {
@@ -528,7 +530,7 @@ fn process_preview_job(
     let lut_path = adjustments_clone["lutPath"].as_str();
     let lut = lut_path.and_then(|p| lut_processing::get_or_load_lut(&state, p).ok());
 
-    let wants_analytics = !(is_interactive && pixel_roi.is_some());
+    let wants_analytics = !(is_interactive && pixel_roi.is_some()) && request_analytics;
     let channel_filter = if is_interactive {
         active_waveform_channel.map(|s| s.to_string())
     } else {
@@ -712,6 +714,7 @@ fn start_preview_worker(app_handle: tauri::AppHandle) {
                 job.is_interactive,
                 job.target_resolution,
                 job.roi,
+                job.request_analytics,
                 job.compute_waveform,
                 job.active_waveform_channel.as_deref(),
             ) {
@@ -726,12 +729,14 @@ fn start_preview_worker(app_handle: tauri::AppHandle) {
     });
 }
 
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 async fn apply_adjustments(
     js_adjustments: serde_json::Value,
     is_interactive: bool,
     target_resolution: Option<u32>,
     roi: Option<(f32, f32, f32, f32)>,
+    request_analytics: bool,
     compute_waveform: bool,
     active_waveform_channel: Option<String>,
     state: tauri::State<'_, AppState>,
@@ -740,12 +745,13 @@ async fn apply_adjustments(
 
     {
         let tx_guard = state.preview_worker_tx.lock().unwrap();
-        if let Some(worker_tx) = &*tx_guard {
+        if let Some(worker_tx) = tx_guard.as_ref() {
             let job = PreviewJob {
                 adjustments: js_adjustments,
                 is_interactive,
                 target_resolution,
                 roi,
+                request_analytics,
                 compute_waveform,
                 active_waveform_channel,
                 responder: tx,
@@ -1969,7 +1975,7 @@ fn frontend_ready(
     if let Some(session) = &edit_session {
         log::info!(
             "Frontend is ready, returning external edit session for: {}",
-            &session.source
+            session.source
         );
     }
     Ok(LaunchPayload {
@@ -2048,17 +2054,35 @@ pub fn run() {
             }
         })
         .setup(move |app| {
+            #[cfg(feature = "tethering")]
+            {
+                std::thread::spawn(|| {
+                    match gphoto2::Context::new() {
+                        Ok(context) => {
+                            log::info!("gphoto2 context initialized successfully.");
+                            match gphoto2::Camera::autodetect(&context) {
+                                Ok(cameras) => {
+                                    log::info!("Found {} attached camera(s)", cameras.len());
+                                }
+                                Err(e) => log::warn!("Failed to autodetect cameras: {}", e),
+                            }
+                        }
+                        Err(e) => log::error!("Failed to initialize gphoto2 context: {}", e),
+                    }
+                });
+            }
+
             let state = app.state::<AppState>();
 
             #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
             {
                 match launch_req.clone() {
                     LaunchRequest::EditSession(session) => {
-                        log::info!("Initial launch with external edit session for: {}", &session.source);
+                        log::info!("Initial launch with external edit session for: {}", session.source);
                         *state.pending_edit_session.lock().unwrap() = Some(session);
                     }
                     LaunchRequest::OpenFile(path) => {
-                        log::info!("Initial open: Storing path {} for later.", &path);
+                        log::info!("Initial open: Storing path {} for later.", path);
                         *state.initial_file_path.lock().unwrap() = Some(path);
                     }
                     _ => {}
@@ -2357,6 +2381,7 @@ pub fn run() {
             export_task_token: Arc::new(Mutex::new(None)),
             hdr_result: Arc::new(Mutex::new(None)),
             panorama_result: Arc::new(Mutex::new(None)),
+            focus_stack_result: Arc::new(Mutex::new(None)),
             denoise_result: Arc::new(Mutex::new(None)),
             indexing_task_handle: Mutex::new(None),
             lut_cache: Mutex::new(HashMap::new()),
@@ -2431,6 +2456,8 @@ pub fn run() {
             denoising::apply_denoising,
             denoising::batch_denoise_images,
             denoising::save_denoised_image,
+            focus_stacking::stitch_focus_stack,
+            focus_stacking::save_focus_stack,
             image_loader::load_image,
             image_loader::is_image_cached,
             panorama_stitching::stitch_panorama,

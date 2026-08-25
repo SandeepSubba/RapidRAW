@@ -328,7 +328,7 @@ pub fn downscale_f32_image(image: &DynamicImage, nwidth: u32, nheight: u32) -> D
                     let src_end = row_offset + x_in_end * 3;
                     let src_slice = &src[src_start..src_end];
 
-                    for (&w_x, chunk) in x_wts.iter().zip(src_slice.chunks_exact(3)) {
+                    for (&w_x, chunk) in x_wts.iter().zip(src_slice.as_chunks::<3>().0) {
                         let w = w_x * w_y;
 
                         let r = chunk[0].max(0.0);
@@ -717,7 +717,7 @@ pub fn warp_image_geometry(image: &DynamicImage, params: GeometryParams) -> Dyna
             let y_f = y as f32;
             let mut current_vec = origin_vec + (step_vec_y * y_f);
 
-            for pixel in row_pixel_data.chunks_exact_mut(3) {
+            for pixel in row_pixel_data.as_chunks_mut::<3>().0.iter_mut() {
                 if current_vec.z.abs() > 1e-6 {
                     let inv_z = 1.0 / current_vec.z;
                     let mut src_x = current_vec.x * inv_z;
@@ -841,7 +841,7 @@ pub fn unwarp_image_geometry(warped_image: &DynamicImage, params: GeometryParams
         .for_each(|(y, row_pixel_data)| {
             let y_f = y as f32;
 
-            for (x, pixel) in row_pixel_data.chunks_exact_mut(3).enumerate() {
+            for (x, pixel) in row_pixel_data.as_chunks_mut::<3>().0.iter_mut().enumerate() {
                 let x_f = x as f32;
                 let mut current_x = x_f;
                 let mut current_y = y_f;
@@ -1466,8 +1466,8 @@ pub struct GlobalAdjustments {
     pub tonemapper_mode: u32,
     pub skin_texture: f32,
     pub skin_smoothing_scale: f32,
-    _pad_lut4: f32,
-    _pad_lut5: f32,
+    pub lut_is_scene_referred: u32,
+    _pad_lut3: f32,
 
     _pad_agx1: f32,
     _pad_agx2: f32,
@@ -2150,7 +2150,7 @@ fn get_global_adjustments_from_json(
     let tone_mapper = js_adjustments["toneMapper"].as_str().unwrap_or("basic");
     let (pipe_to_rendering, rendering_to_pipe) = calculate_agx_matrices();
 
-    let (has_lut, lut_intensity) = if is_visible("effects") {
+    let (has_lut, lut_intensity, lut_is_scene_referred) = if is_visible("effects") {
         (
             if js_adjustments["lutPath"].is_string() {
                 1
@@ -2158,9 +2158,17 @@ fn get_global_adjustments_from_json(
                 0
             },
             js_adjustments["lutIntensity"].as_f64().unwrap_or(100.0) as f32 / 100.0,
+            if js_adjustments["lutIsSceneReferred"]
+                .as_bool()
+                .unwrap_or(false)
+            {
+                1
+            } else {
+                0
+            },
         )
     } else {
-        (0, 1.0)
+        (0, 1.0, 0)
     };
 
     GlobalAdjustments {
@@ -2259,8 +2267,8 @@ fn get_global_adjustments_from_json(
             SCALES.skin_smoothing_scale,
             None,
         ),
-        _pad_lut4: 0.0,
-        _pad_lut5: 0.0,
+        lut_is_scene_referred,
+        _pad_lut3: 0.0,
 
         _pad_agx1: 0.0,
         _pad_agx2: 0.0,
@@ -2740,3 +2748,4 @@ fn apply_gentle_detail_enhance(
             }
         });
 }
+

@@ -15,6 +15,7 @@ import { useLibraryStore } from '../../../store/useLibraryStore';
 import { useSettingsStore } from '../../../store/useSettingsStore';
 import { useProcessStore } from '../../../store/useProcessStore';
 import { useLibraryActions } from '../../../hooks/useLibraryActions';
+import { expandGroupedPaths } from '../../../utils/imageGrouping';
 
 interface CameraSetting {
   format?(value: number): string | number;
@@ -42,6 +43,7 @@ interface MetaDataItemProps {
 }
 
 const USER_TAG_PREFIX = 'user:';
+const EMPTY_TAGS: string[] = [];
 
 function formatExifTag(str: string) {
   if (!str) return '';
@@ -238,7 +240,6 @@ export default function MetadataPanel() {
   const [isTagInputFocused, setIsTagInputFocused] = useState(false);
   const selectedImage = useEditorStore((s) => s.selectedImage);
   const multiSelectedPaths = useLibraryStore((s) => s.multiSelectedPaths);
-  const imageList = useLibraryStore((s) => s.imageList);
   const imageRatings = useLibraryStore((s) => s.imageRatings);
   const appSettings = useSettingsStore((s) => s.appSettings);
   const thumbnails = useProcessStore((s) => s.thumbnails);
@@ -246,10 +247,18 @@ export default function MetadataPanel() {
   const { handleRate, handleSetColorLabel, handleTagsChanged, handleUpdateExif } = useLibraryActions();
 
   const rating = selectedImage ? imageRatings[selectedImage.path] || 0 : 0;
-  const tags = selectedImage ? imageList.find((img) => img.path === selectedImage.path)?.tags || [] : [];
+  const tags = useLibraryStore((state) => {
+    if (!selectedImage) return EMPTY_TAGS;
+    return state.imageList.find((img) => img.path === selectedImage.path)?.tags ?? EMPTY_TAGS;
+  });
   const liveThumbnailUrl = selectedImage ? thumbnails[selectedImage.path] : undefined;
 
   const targetPaths = multiSelectedPaths?.length > 0 ? multiSelectedPaths : selectedImage ? [selectedImage.path] : [];
+  const getPathsToUpdate = () => {
+    const { imageList } = useLibraryStore.getState();
+    const groupingMode = useSettingsStore.getState().appSettings?.grouping ?? 'off';
+    return expandGroupedPaths(imageList, targetPaths, groupingMode);
+  };
   const isBatch = targetPaths.length > 1;
 
   // Copy the focused image's creator-detail fields to every selected image.
@@ -272,8 +281,7 @@ export default function MetadataPanel() {
     const cameraGridSettings = cameraGridKeys.map((key) => {
       // ISO is tag 34855 — EXIF 2.2 exposes it as ISOSpeedRatings, 2.3 as
       // PhotographicSensitivity; film scans write ISOSpeedRatings. Read either.
-      const value =
-        key === 'PhotographicSensitivity' ? (exif[key] ?? exif.ISOSpeedRatings ?? exif.ISO) : exif[key];
+      const value = key === 'PhotographicSensitivity' ? (exif[key] ?? exif.ISOSpeedRatings ?? exif.ISO) : exif[key];
       const hasValue = value !== undefined && value !== null && value !== '';
 
       const translatedLabel =
@@ -377,7 +385,8 @@ export default function MetadataPanel() {
     if (newTagValue && !currentTags.some((t) => t.tag === newTagValue)) {
       try {
         const prefixedTag = `${USER_TAG_PREFIX}${newTagValue}`;
-        await invoke(Invokes.AddTagForPaths, { paths: targetPaths, tag: prefixedTag });
+        const pathsToUpdate = getPathsToUpdate();
+        await invoke(Invokes.AddTagForPaths, { paths: pathsToUpdate, tag: prefixedTag });
 
         const newTags = [...currentTags, { tag: newTagValue, isUser: true }];
         handleTagsChanged(targetPaths, newTags);
@@ -391,7 +400,8 @@ export default function MetadataPanel() {
   const handleRemoveTag = async (tagToRemove: { tag: string; isUser: boolean }) => {
     try {
       const prefixedTag = tagToRemove.isUser ? `${USER_TAG_PREFIX}${tagToRemove.tag}` : tagToRemove.tag;
-      await invoke(Invokes.RemoveTagForPaths, { paths: targetPaths, tag: prefixedTag });
+      const pathsToUpdate = getPathsToUpdate();
+      await invoke(Invokes.RemoveTagForPaths, { paths: pathsToUpdate, tag: prefixedTag });
 
       const newTags = currentTags.filter((t) => t.tag !== tagToRemove.tag);
       handleTagsChanged(targetPaths, newTags);
@@ -603,7 +613,8 @@ export default function MetadataPanel() {
                               data-tooltip={t('editor.metadata.author.syncTooltip')}
                               className="flex items-center justify-center gap-2 px-2 py-1.5 bg-bg-secondary/40 hover:bg-card-active border border-surface/50 rounded-md transition-colors text-xs text-text-primary"
                             >
-                              <Copy size={14} /> {t('editor.metadata.author.syncToSelected', { count: targetPaths.length })}
+                              <Copy size={14} />{' '}
+                              {t('editor.metadata.author.syncToSelected', { count: targetPaths.length })}
                             </button>
                           </div>
                         )}
