@@ -1,4 +1,13 @@
-import { type PointerEvent as ReactPointerEvent, useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import {
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+  Component,
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  useMemo,
+} from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -1206,14 +1215,72 @@ function App() {
   );
 }
 
+// A crash during boot (e.g. Clerk's script failing to load when the Mac wakes
+// before Wi-Fi is up) unmounts the whole tree; with frameless windows that
+// leaves an invisible dead app. Show a visible retry screen instead, and
+// remount automatically once the network returns.
+class BootErrorBoundary extends Component<{ children: ReactNode }, { error: unknown; attempt: number }> {
+  state = { error: null as unknown, attempt: 0 };
+
+  static getDerivedStateFromError(error: unknown) {
+    return { error };
+  }
+
+  retry = () => this.setState((s) => ({ error: null, attempt: s.attempt + 1 }));
+
+  componentDidMount() {
+    window.addEventListener('online', this.handleOnline);
+  }
+
+  componentWillUnmount() {
+    window.removeEventListener('online', this.handleOnline);
+  }
+
+  handleOnline = () => {
+    if (this.state.error) this.retry();
+  };
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div
+          style={{
+            height: '100vh',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 16,
+            background: '#1a1a1a',
+            color: '#ddd',
+            fontFamily: 'sans-serif',
+          }}
+        >
+          <p>RapidRAW failed to start — this usually means no network was available at launch.</p>
+          <p style={{ fontSize: 12, opacity: 0.6, maxWidth: 480, textAlign: 'center' }}>{String(this.state.error)}</p>
+          <button
+            onClick={this.retry}
+            style={{ padding: '8px 24px', borderRadius: 6, border: '1px solid #555', background: '#2a2a2a', color: '#ddd' }}
+          >
+            Retry
+          </button>
+        </div>
+      );
+    }
+    return <div key={this.state.attempt} style={{ display: 'contents' }}>{this.props.children}</div>;
+  }
+}
+
 const AppWrapper = () => (
-  <ClerkProvider publishableKey={CLERK_PUBLISHABLE_KEY} routerPush={(to) => {}} routerReplace={(to) => {}}>
-    <ContextMenuProvider>
-      <App />
-      <LiveViewOverlay />
-      <GlobalTooltip />
-    </ContextMenuProvider>
-  </ClerkProvider>
+  <BootErrorBoundary>
+    <ClerkProvider publishableKey={CLERK_PUBLISHABLE_KEY} routerPush={(to) => {}} routerReplace={(to) => {}}>
+      <ContextMenuProvider>
+        <App />
+        <LiveViewOverlay />
+        <GlobalTooltip />
+      </ContextMenuProvider>
+    </ClerkProvider>
+  </BootErrorBoundary>
 );
 
 export default AppWrapper;
