@@ -55,7 +55,7 @@ fn load_for_analysis(
 /// Works even when rawler has no decoder for the file (stripped make/model) or
 /// cannot decode its raw data (e.g. DNG 1.7 lossy 8-bit JPEG raws): previews are
 /// plain JPEG streams referenced by standard tags, independent of the raw payload.
-fn largest_tiff_jpeg_preview(buf: &[u8]) -> Option<DynamicImage> {
+fn largest_tiff_jpeg_preview_bytes(buf: &[u8]) -> Option<&[u8]> {
     let le = match buf.get(..4)? {
         [0x49, 0x49, 0x2A, 0x00] => true,
         [0x4D, 0x4D, 0x00, 0x2A] => false,
@@ -143,24 +143,61 @@ fn largest_tiff_jpeg_preview(buf: &[u8]) -> Option<DynamicImage> {
     }
 
     let (off, len) = best?;
-    let bytes = buf.get(off as usize..(off + len) as usize)?;
+    buf.get(off as usize..(off + len) as usize)
+}
+
+pub fn largest_tiff_jpeg_preview(buf: &[u8]) -> Option<DynamicImage> {
+    let bytes = largest_tiff_jpeg_preview_bytes(buf)?;
     image::load_from_memory_with_format(bytes, image::ImageFormat::Jpeg).ok()
 }
 
+/// Decode a JPEG at the smallest IDCT scale that still covers `max_dim`: a
+/// 720px thumbnail of a 22MP embedded preview becomes a 1/4- or 1/8-scale
+/// decode instead of a full one. Returns None on anything unusual (CMYK,
+/// decode error) so the caller can fall back to the full-quality path.
+fn decode_jpeg_scaled(bytes: &[u8], max_dim: u32) -> Option<DynamicImage> {
+    let mut decoder = jpeg_decoder::Decoder::new(std::io::Cursor::new(bytes));
+    let side = max_dim.min(u16::MAX as u32) as u16;
+    decoder.scale(side, side).ok()?;
+    let pixels = decoder.decode().ok()?;
+    let info = decoder.info()?;
+    let (w, h) = (info.width as u32, info.height as u32);
+    match info.pixel_format {
+        jpeg_decoder::PixelFormat::RGB24 => {
+            image::RgbImage::from_raw(w, h, pixels).map(DynamicImage::ImageRgb8)
+        }
+        jpeg_decoder::PixelFormat::L8 => {
+            image::GrayImage::from_raw(w, h, pixels).map(DynamicImage::ImageLuma8)
+        }
+        _ => None,
+    }
+}
+
 pub fn fast_raw_preview(path: &str) -> Option<DynamicImage> {
-    let img = match try_fast_embedded_preview(path) {
+    fast_raw_preview_scaled(path, None)
+}
+
+/// With `max_dim` set, the embedded preview is decoded at reduced scale — enough
+/// for a thumbnail, far cheaper than a full-resolution JPEG decode. Without it,
+/// behaviour is unchanged (full-quality preview for viewing).
+pub fn fast_raw_preview_scaled(path: &str, max_dim: Option<u32>) -> Option<DynamicImage> {
+    // One lazy mmap; only the embedded JPEG bytes are actually read, so a
+    // folder of large raws on a slow card does not pull every full file.
+    let mapped = std::fs::File::open(path)
+        .ok()
+        .and_then(|f| unsafe { memmap2::Mmap::map(&f).ok() });
+    let preview_bytes: Option<&[u8]> = mapped
+        .as_ref()
+        .and_then(|buf| raf_preview_bytes(buf).or_else(|| largest_tiff_jpeg_preview_bytes(buf)));
+    let decoded = preview_bytes.and_then(|bytes| {
+        max_dim
+            .and_then(|dim| decode_jpeg_scaled(bytes, dim))
+            .or_else(|| image::load_from_memory_with_format(bytes, image::ImageFormat::Jpeg).ok())
+    });
+    let img = match decoded {
         Some(img) => img,
         None => {
-            // Prefer our own IFD walk (largest preview, no decoder needed); fall
-            // back to rawler's extractor for non-TIFF layouts.
-            let mapped = std::fs::File::open(path)
-                .ok()
-                .and_then(|f| unsafe { memmap2::Mmap::map(&f).ok() });
-            match mapped.as_ref().and_then(|m| largest_tiff_jpeg_preview(m)) {
-                Some(img) => img,
-                None => rawler::analyze::extract_preview_pixels(path, &RawDecodeParams::default())
-                    .ok()?,
-            }
+            rawler::analyze::extract_preview_pixels(path, &RawDecodeParams::default()).ok()?
         }
     };
     // Embedded previews are stored unrotated; apply the file's EXIF orientation like
@@ -182,25 +219,24 @@ pub fn fast_raw_preview(path: &str) -> Option<DynamicImage> {
     })
 }
 
-/// Opportunistic, low-I/O embedded-preview extraction. Uses a lazy memory map (no
-/// MAP_POPULATE) and reads only the bytes of the embedded JPEG, so analyzing a folder
-/// of large raws doesn't read every full file off the (often slow) card. Returns None
-/// for layouts it doesn't recognise so the caller can fall back.
+/// Opportunistic, low-I/O embedded-preview extraction for non-TIFF layouts.
+/// Lazily mmaps and reads only the embedded JPEG bytes.
 fn try_fast_embedded_preview(path: &str) -> Option<DynamicImage> {
     let file = std::fs::File::open(path).ok()?;
     let mmap = unsafe { memmap2::Mmap::map(&file).ok()? };
-    let buf: &[u8] = &mmap;
+    let jpeg = raf_preview_bytes(&mmap)?;
+    image::load_from_memory_with_format(jpeg, image::ImageFormat::Jpeg).ok()
+}
 
-    // Fujifilm RAF: 16-byte magic, then a header storing the embedded full-size JPEG
-    // preview's offset/length as big-endian u32s at byte 84/88.
-    if buf.starts_with(b"FUJIFILMCCD-RAW") {
-        let off = u32::from_be_bytes(buf.get(84..88)?.try_into().ok()?) as usize;
-        let len = u32::from_be_bytes(buf.get(88..92)?.try_into().ok()?) as usize;
-        let jpeg = buf.get(off..off.checked_add(len)?)?;
-        return image::load_from_memory_with_format(jpeg, image::ImageFormat::Jpeg).ok();
+/// Fujifilm RAF: 16-byte magic, then a header storing the embedded full-size
+/// JPEG preview offset/length as big-endian u32s at byte 84/88.
+fn raf_preview_bytes(buf: &[u8]) -> Option<&[u8]> {
+    if !buf.starts_with(b"FUJIFILMCCD-RAW") {
+        return None;
     }
-
-    None
+    let off = u32::from_be_bytes(buf.get(84..88)?.try_into().ok()?) as usize;
+    let len = u32::from_be_bytes(buf.get(88..92)?.try_into().ok()?) as usize;
+    buf.get(off..off.checked_add(len)?)
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

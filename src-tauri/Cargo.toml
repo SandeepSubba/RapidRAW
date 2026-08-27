@@ -69,6 +69,9 @@ sysinfo = "0.39.6"
 notify = "6.1"
 gphoto2 = { version = "3", optional = true }
 jpeg-encoder = { version = "0.7.1", features = ["simd"] }
+# Decodes embedded RAW previews at reduced IDCT scale for thumbnails —
+# the image crate (zune-jpeg) has no scaled-decode API.
+jpeg-decoder = "0.3"
 
 [features]
 # Direct USB tethering needs libgphoto2 on the build machine
