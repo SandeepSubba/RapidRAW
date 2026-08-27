@@ -26,6 +26,7 @@ export const FILE_FORMATS: Array<FileFormat> = [
 export const FILENAME_VARIABLES: Array<string> = [
   '{original_filename}',
   '{sequence}',
+  '{sequence:2}',
   '{title}',
   '{author}',
   '{copyright}',
@@ -50,7 +51,9 @@ export function sanitizeFilenameTemplate(template: string | null | undefined): s
   }
   const knownTokens = new Set(FILENAME_VARIABLES);
   const usedTokens = template.match(/\{[^}]+\}/g) ?? [];
-  const hasUnknownToken = usedTokens.some((token) => !knownTokens.has(token));
+  // {sequence:N} carries a user-chosen start number, so it can't be an exact
+  // set member — any all-digit argument is valid.
+  const hasUnknownToken = usedTokens.some((token) => !knownTokens.has(token) && !/^\{sequence:\d+\}$/.test(token));
   return hasUnknownToken ? DEFAULT_FILENAME_TEMPLATE : template;
 }
 

@@ -167,6 +167,11 @@ and dated.
 - **Export naming** — filename templates gain metadata tokens (`{title}`,
   `{author}`, `{copyright}`, `{comments}`) that mirror the Metadata panel, and the
   File Naming UI is available for **single-image** export (not just batch).
+- **`{sequence:START}`** — sequence numbering with a chosen start and padding
+  (`{sequence:002}` → `002, 003, …`), counted **per rendered name**: with
+  `{title}_{sequence:2}`, images sharing a title number `_2, _3, …` and the
+  counter resets for the next title. Bare `{sequence}` still numbers the whole
+  batch.
 - **Templates are used verbatim** — no silent `_{sequence}` suffix is appended.
   If two images in a batch actually render the same name, the later ones get
   `_2`, `_3`, … so nothing is overwritten; templates that already produce unique

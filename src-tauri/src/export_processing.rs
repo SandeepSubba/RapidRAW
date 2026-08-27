@@ -1010,6 +1010,18 @@ pub(crate) async fn export_images_impl(
         let used_output_paths: Arc<std::sync::Mutex<std::collections::HashSet<std::path::PathBuf>>> =
             Arc::new(std::sync::Mutex::new(std::collections::HashSet::new()));
 
+        // "{sequence:START}" numbers per distinct rendered name, resetting for
+        // each new one: {title}_{sequence:2} gives Shirt_2, Shirt_3, Jacket_2.
+        // Names resolve sequentially here, before the parallel tasks, so the
+        // numbering follows selection order deterministically.
+        let batch_template = export_settings
+            .filename_template
+            .clone()
+            .unwrap_or_else(|| "{original_filename}_edited".to_string());
+        let sequence_spec = crate::file_management::parse_sequence_start_token(&batch_template);
+        let mut sequence_groups: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
+
         for (global_index, image_path_str, appearance_count, explicit_vc) in export_items {
             if cancellation_token.load(Ordering::SeqCst) {
                 break;
@@ -1031,6 +1043,32 @@ pub(crate) async fn export_images_impl(
             let cancellation_token_clone = Arc::clone(&cancellation_token);
             let adjustments_mode = adjustments_mode.clone();
             let used_output_paths = Arc::clone(&used_output_paths);
+
+            let precomputed_stem: Option<String> =
+                sequence_spec.as_ref().map(|(token, start, width)| {
+                    const SENTINEL: &str = "\u{1}SEQ\u{1}";
+                    let (source_path, _) = parse_virtual_path(&image_path_str);
+                    let original_path = source_path.as_path();
+                    let file_date = exif_processing::get_creation_date_from_path(original_path);
+                    let with_sentinel = batch_template.replacen(token, SENTINEL, 1);
+                    let mut stem = generate_filename_from_template(
+                        &with_sentinel,
+                        original_path,
+                        global_index + 1,
+                        total_paths,
+                        &file_date,
+                    );
+                    if let Some(vc_id) = explicit_vc {
+                        stem = format!("{}_VC{:02}", stem, vc_id);
+                    } else if appearance_count > 1 {
+                        stem = format!("{}_VC{:02}", stem, appearance_count - 1);
+                    }
+                    let n = sequence_groups
+                        .entry(stem.clone())
+                        .and_modify(|c| *c += 1)
+                        .or_insert(*start);
+                    stem.replacen(SENTINEL, &format!("{:0width$}", *n, width = *width), 1)
+                });
 
             let handle = tokio::task::spawn_blocking(move || {
                 ensure_export_not_cancelled(&cancellation_token_clone)?;
@@ -1066,26 +1104,32 @@ pub(crate) async fn export_images_impl(
                 hydrate_adjustments(&state, &mut js_adjustments);
                 let is_raw = is_raw_file(&source_path_str);
                 let original_path = std::path::Path::new(&source_path_str);
-                let file_date = exif_processing::get_creation_date_from_path(original_path);
 
-                let filename_template = export_settings
-                    .filename_template
-                    .as_deref()
-                    .unwrap_or("{original_filename}_edited");
-
-                let mut new_stem = generate_filename_from_template(
-                    filename_template,
-                    original_path,
-                    global_index + 1,
-                    total_paths,
-                    &file_date,
-                );
-
-                if let Some(vc_id) = explicit_vc {
-                    new_stem = format!("{}_VC{:02}", new_stem, vc_id);
-                } else if appearance_count > 1 {
-                    new_stem = format!("{}_VC{:02}", new_stem, appearance_count - 1);
-                }
+                let new_stem = match precomputed_stem {
+                    // Per-group {sequence:START} numbering was resolved before the
+                    // tasks were spawned (VC suffix included).
+                    Some(stem) => stem,
+                    None => {
+                        let file_date = exif_processing::get_creation_date_from_path(original_path);
+                        let filename_template = export_settings
+                            .filename_template
+                            .as_deref()
+                            .unwrap_or("{original_filename}_edited");
+                        let mut stem = generate_filename_from_template(
+                            filename_template,
+                            original_path,
+                            global_index + 1,
+                            total_paths,
+                            &file_date,
+                        );
+                        if let Some(vc_id) = explicit_vc {
+                            stem = format!("{}_VC{:02}", stem, vc_id);
+                        } else if appearance_count > 1 {
+                            stem = format!("{}_VC{:02}", stem, appearance_count - 1);
+                        }
+                        stem
+                    }
+                };
 
                 let new_filename = format!("{}.{}", new_stem, output_format);
                 let output_path = if is_explicit_file_path && total_paths == 1 {

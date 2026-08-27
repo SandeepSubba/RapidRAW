@@ -3348,6 +3348,18 @@ fn sanitize_filename_component(value: &str) -> String {
         .collect()
 }
 
+/// Finds a "{sequence:START}" token: returns (token text, start, digit width).
+pub fn parse_sequence_start_token(template: &str) -> Option<(String, usize, usize)> {
+    let open = template.find("{sequence:")?;
+    let rest = &template[open + "{sequence:".len()..];
+    let close = rest.find('}')?;
+    let digits = &rest[..close];
+    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    Some((format!("{{sequence:{digits}}}"), digits.parse().ok()?, digits.len()))
+}
+
 pub fn generate_filename_from_template(
     template: &str,
     original_path: &std::path::Path,
@@ -3369,6 +3381,14 @@ pub fn generate_filename_from_template(
     let mut result = template.to_string();
     result = result.replace("{original_filename}", stem);
     result = result.replace("{sequence}", &sequence_str);
+    // "{sequence:START}" — explicit start number; the digits' width sets the
+    // zero-padding ("{sequence:002}" pads to 3). Batch export substitutes this
+    // token itself to number per rendered-name group; everywhere else (single
+    // image, import renaming) it counts globally from START.
+    while let Some((token, start, width)) = parse_sequence_start_token(&result) {
+        let value = format!("{:0width$}", start + sequence.saturating_sub(1), width = width);
+        result = result.replacen(&token, &value, 1);
+    }
     result = result.replace("{YYYY}", &local_date.format("%Y").to_string());
     result = result.replace("{MM}", &local_date.format("%m").to_string());
     result = result.replace("{DD}", &local_date.format("%d").to_string());
@@ -3923,3 +3943,29 @@ mod rename_collision_tests {
         let _ = fs::remove_dir_all(&d);
     }
 }
+
+#[cfg(test)]
+mod sequence_token_tests {
+    use super::parse_sequence_start_token;
+
+    #[test]
+    fn parses_start_and_width() {
+        assert_eq!(
+            parse_sequence_start_token("{title}_{sequence:2}d"),
+            Some(("{sequence:2}".to_string(), 2, 1))
+        );
+        assert_eq!(
+            parse_sequence_start_token("{sequence:0100}"),
+            Some(("{sequence:0100}".to_string(), 100, 4))
+        );
+    }
+
+    #[test]
+    fn rejects_bare_and_malformed_tokens() {
+        assert_eq!(parse_sequence_start_token("{sequence}"), None);
+        assert_eq!(parse_sequence_start_token("{sequence:}"), None);
+        assert_eq!(parse_sequence_start_token("{sequence:2x}"), None);
+        assert_eq!(parse_sequence_start_token("plain name"), None);
+    }
+}
+
