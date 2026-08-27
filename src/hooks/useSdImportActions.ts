@@ -91,6 +91,32 @@ export function computeDefaultKeepers(scannedPaths: string[], suggestions: Culli
   return kept;
 }
 
+// Recompute which scanned photos already exist in the destination, removing them
+// from the keep set. No-op (and clears the set) when the option is off or no
+// destination yet. Module-level so scan completion and the ImportView
+// destination-default effect can trigger it, not just the toggle.
+export async function refreshAlreadyImportedNow(): Promise<void> {
+  const { excludeImported, destinationFolder, scannedPaths, setImport } = useImportStore.getState();
+  if (!excludeImported || !destinationFolder || scannedPaths.length === 0) {
+    setImport({ alreadyImported: new Set() });
+    return;
+  }
+  try {
+    const existing = await invoke<string[]>(Invokes.FindExistingInDestination, {
+      sourcePaths: scannedPaths,
+      destinationFolder,
+    });
+    const set = new Set(existing);
+    setImport((state) => ({
+      alreadyImported: set,
+      keptPaths: new Set([...state.keptPaths].filter((p) => !set.has(p))),
+    }));
+    if (set.size > 0) toast.info(`${set.size} photo(s) already in the destination will be skipped.`);
+  } catch (err) {
+    toast.error(`Failed to check for duplicates: ${err}`);
+  }
+}
+
 export function useSdImportActions() {
   const detectDrives = useCallback(async () => {
     try {
@@ -322,6 +348,9 @@ export function useSdImportActions() {
         scoresReady: false,
         stage: 'review',
       });
+      // The exclude toggle persists across sessions; recompute against the new scan
+      // now, or a toggle already ON shows "0 already in destination" until flipped.
+      refreshAlreadyImportedNow();
       // Best-effort, in the background: load EXIF capture dates so "sort by date" works.
       // The grid renders immediately; date sorting falls back to filename until these land.
       invoke<Record<string, number>>(Invokes.GetCaptureTimes, { paths: scannedPaths })
@@ -347,29 +376,7 @@ export function useSdImportActions() {
     }
   }, [scanSource]);
 
-  // Recompute which scanned photos already exist in the destination, removing them from
-  // the keep set. No-op (and clears the set) when the option is off or no destination yet.
-  const refreshAlreadyImported = useCallback(async () => {
-    const { excludeImported, destinationFolder, scannedPaths, setImport } = useImportStore.getState();
-    if (!excludeImported || !destinationFolder || scannedPaths.length === 0) {
-      setImport({ alreadyImported: new Set() });
-      return;
-    }
-    try {
-      const existing = await invoke<string[]>(Invokes.FindExistingInDestination, {
-        sourcePaths: scannedPaths,
-        destinationFolder,
-      });
-      const set = new Set(existing);
-      setImport((state) => ({
-        alreadyImported: set,
-        keptPaths: new Set([...state.keptPaths].filter((p) => !set.has(p))),
-      }));
-      if (set.size > 0) toast.info(`${set.size} photo(s) already in the destination will be skipped.`);
-    } catch (err) {
-      toast.error(`Failed to check for duplicates: ${err}`);
-    }
-  }, []);
+  const refreshAlreadyImported = useCallback(() => refreshAlreadyImportedNow(), []);
 
   const setExcludeImported = useCallback(
     (on: boolean) => {

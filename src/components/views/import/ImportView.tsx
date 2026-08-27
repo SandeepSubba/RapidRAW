@@ -6,7 +6,7 @@ import { useImportStore } from '../../../store/useImportStore';
 import { useLibraryStore } from '../../../store/useLibraryStore';
 import { useProcessStore } from '../../../store/useProcessStore';
 import { Status } from '../../ui/ExportImportProperties';
-import { useSdImportActions } from '../../../hooks/useSdImportActions';
+import { refreshAlreadyImportedNow, useSdImportActions } from '../../../hooks/useSdImportActions';
 import { useImportKeyboard } from '../../../hooks/useImportKeyboard';
 import SourcePicker from './SourcePicker';
 import ScannerPane from './ScannerPane';
@@ -59,6 +59,8 @@ export default function ImportView() {
     if (useImportStore.getState().destinationFolder) return;
     if (!currentFolderPath || currentFolderPath.startsWith('Album: ')) return;
     useImportStore.getState().setImport({ destinationFolder: currentFolderPath });
+    // The destination just changed under the exclude-duplicates check.
+    refreshAlreadyImportedNow();
   }, [currentFolderPath]);
 
   // Thumbnails are requested lazily per visible cell in CullGroupsGrid (via an
