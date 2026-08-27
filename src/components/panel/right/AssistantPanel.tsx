@@ -26,6 +26,7 @@ import { Invokes } from '../../ui/AppProperties';
 import Text from '../../ui/Text';
 import { TextColors, TextVariants } from '../../../types/typography';
 import { useEditorStore } from '../../../store/useEditorStore';
+import { getOrientedDimensions } from '../../../utils/cropUtils';
 import { useImportStore } from '../../../store/useImportStore';
 import { useScannerStore } from '../../../store/useScannerStore';
 import { rerenderScanPreviewNow } from '../../views/import/ScannerPane';
@@ -168,6 +169,30 @@ function sanitizePatch(raw: any): Record<string, number> {
     out[key] = Math.max(range[0], Math.min(range[1], num));
   }
   return out;
+}
+
+// Validate + clamp a model-proposed crop rectangle (pixels, oriented image
+// space). Returns null for anything degenerate so a hallucinated rect can't
+// blank the image.
+function sanitizeCropPatch(
+  raw: any,
+  imageW: number,
+  imageH: number,
+): { crop: { unit: 'px'; x: number; y: number; width: number; height: number }; aspectRatio: number } | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const n = (v: any) => (typeof v === 'number' ? v : parseFloat(v));
+  let x = Math.round(n(raw.x));
+  let y = Math.round(n(raw.y));
+  let width = Math.round(n(raw.width));
+  let height = Math.round(n(raw.height));
+  if (![x, y, width, height].every(Number.isFinite)) return null;
+  x = Math.min(Math.max(0, x), imageW - 1);
+  y = Math.min(Math.max(0, y), imageH - 1);
+  width = Math.min(width, imageW - x);
+  height = Math.min(height, imageH - y);
+  const MIN_SIDE = 16;
+  if (width < MIN_SIDE || height < MIN_SIDE) return null;
+  return { crop: { unit: 'px', x, y, width, height }, aspectRatio: width / height };
 }
 
 // Scan-preview mode: the pane's own controls, described to the model through
@@ -752,7 +777,18 @@ export default function AssistantPanel() {
       }
       const response: any = await invoke(Invokes.AssistantChat, {
         messages: history,
-        adjustments: scannerMode ? scannerContext(scanState) : currentImage ? adjustments : null,
+        adjustments: scannerMode
+          ? scannerContext(scanState)
+          : currentImage
+            ? {
+                ...adjustments,
+                // Tells the model the pixel space its crop rectangle lives in.
+                _canvas:
+                  currentImage.width && currentImage.height
+                    ? getOrientedDimensions(currentImage.width, currentImage.height, adjustments.orientationSteps ?? 0)
+                    : null,
+              }
+            : null,
         currentMetadata: scannerMode || !currentImage ? null : readCurrentMetadata(currentImage.exif),
         images,
         model: selectedModel || null,
@@ -777,9 +813,25 @@ export default function AssistantPanel() {
       }
 
       const patch = currentImage ? sanitizePatch(response?.adjustments) : {};
-      const hasPatch = Object.keys(patch).length > 0;
+      const orientedDims =
+        currentImage?.width && currentImage?.height
+          ? getOrientedDimensions(currentImage.width, currentImage.height, adjustments?.orientationSteps ?? 0)
+          : null;
+      const cropPatch =
+        currentImage && orientedDims
+          ? sanitizeCropPatch(response?.crop, orientedDims.width, orientedDims.height)
+          : null;
+      const hasPatch = Object.keys(patch).length > 0 || !!cropPatch;
       if (hasPatch) {
-        setAdjustments((prev: any) => ({ ...prev, ...patch }));
+        setAdjustments((prev: any) => ({ ...prev, ...patch, ...(cropPatch ?? {}) }));
+      }
+      if (cropPatch) {
+        toast.success(
+          t('editor.assistant.croppedToast', 'Cropped to {{width}} × {{height}}', {
+            width: cropPatch.crop.width,
+            height: cropPatch.crop.height,
+          }),
+        );
       }
 
       let metaPatch: Record<string, string> | null = null;

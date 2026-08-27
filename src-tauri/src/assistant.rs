@@ -35,6 +35,7 @@ pub struct ImageAttachment {
 pub struct AssistantResponse {
     pub reply: String,
     pub adjustments: Option<Value>,
+    pub crop: Option<Value>,
     pub metadata: Option<Value>,
     pub tags: Option<Value>,
     pub rating: Option<Value>,
@@ -69,6 +70,11 @@ You may also set these TEXT metadata fields (string values, written to the image
 - copyright
 - comments
 
+You may also CROP the image:
+- crop: {"x": N, "y": N, "width": N, "height": N} — a crop rectangle in PIXELS. The current adjustments JSON includes "_canvas": {"width", "height"}, the exact pixel space your rectangle must fit inside (it already accounts for 90-degree orientation). The current crop, if any, is in the "crop" field of the adjustments JSON. The app clamps out-of-bounds values, and the crop is non-destructive (the user can undo or re-crop at any time).
+- For an aspect-ratio request ("square crop", "16:9"), compute the largest centered rectangle of that ratio inside _canvas. For a subject-focused crop, use the attached image to place the rectangle.
+- Physical sizes (inches/cm) only make sense with a known DPI; if the metadata doesn't provide one, pick the requested SHAPE (e.g. 3.75" square = a square) and say you sized it by ratio, not inches.
+
 You may also organize the image:
 - tags: {"add": ["keyword", ...], "remove": ["keyword", ...]} — keyword/tag labels to add or remove
 - rating: an integer 0-5 (star rating; 0 clears it)
@@ -79,10 +85,11 @@ You have permission to edit ALL of the above, including renaming the file. Whate
 
 Rules:
 - ALWAYS respond with a single JSON object and NOTHING else, no markdown, no code fences:
-  {"reply": "<short friendly message>", "adjustments": {<only fields you change>}, "metadata": {<only text fields you change>}, "tags": {"add": [...], "remove": [...]}, "rating": <0-5>, "colorLabel": "<color>", "filename": "<new name without extension>"}
-- Set any field you are NOT changing to null (adjustments, metadata, tags, rating, colorLabel, filename).
+  {"reply": "<short friendly message>", "adjustments": {<only fields you change>}, "crop": {"x": N, "y": N, "width": N, "height": N}, "metadata": {<only text fields you change>}, "tags": {"add": [...], "remove": [...]}, "rating": <0-5>, "colorLabel": "<color>", "filename": "<new name without extension>"}
+- Set any field you are NOT changing to null (adjustments, crop, metadata, tags, rating, colorLabel, filename).
 - Use exactly the lowercase keys listed above (e.g. "title", not "Title").
 - Only include fields you actually want to change; use absolute values within the ranges above.
+- NEVER crop unless the user explicitly asks for a crop.
 - NEVER change adjustments, rating, or colorLabel unless the user EXPLICITLY asks for that kind of change. For a metadata / title / filename / tag request, do NOT touch adjustments, rating, or colorLabel at all — omit them (or set them to null). Applying an unrequested exposure change can black out the image.
 - Take the current adjustments and current metadata (provided below) into account so your changes are sensible.
 - If an image is attached, look at it and base your edits on what you see.
@@ -185,6 +192,7 @@ fn non_empty_object(v: Option<&Value>) -> Option<Value> {
 struct Parsed {
     reply: String,
     adjustments: Option<Value>,
+    crop: Option<Value>,
     metadata: Option<Value>,
     tags: Option<Value>,
     rating: Option<Value>,
@@ -201,6 +209,7 @@ fn extract(v: &Value, original: &str) -> Parsed {
     Parsed {
         reply,
         adjustments: non_empty_object(v.get("adjustments")),
+        crop: non_empty_object(v.get("crop")),
         metadata: non_empty_object(v.get("metadata")),
         tags: non_empty_object(v.get("tags")),
         // Accept a few likely spellings for the color-label key.
@@ -880,6 +889,7 @@ pub async fn assistant_chat(
     Ok(AssistantResponse {
         reply: parsed.reply,
         adjustments: parsed.adjustments,
+        crop: parsed.crop,
         metadata: parsed.metadata,
         tags: parsed.tags,
         rating: parsed.rating,

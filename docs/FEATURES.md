@@ -87,6 +87,10 @@ and dated.
   or **Claude Code** — the last drives the `claude` CLI so an existing Claude
   subscription works with no API key.
 - **OCR & metadata extraction** through cloud vision models.
+- **Cropping from chat** — ask for a square / 16:9 / subject-centred crop and the
+  assistant emits a pixel rectangle that is validated, clamped to the image, and
+  applied as a normal non-destructive crop (undoable, re-editable in the Crop
+  panel).
 - **Scan-preview mode** — while the scanner pane is open with a preview, the assistant
   drives the scanner controls (tone, crop, film settings) instead of the editor.
 
