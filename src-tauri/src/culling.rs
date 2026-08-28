@@ -55,11 +55,15 @@ fn load_for_analysis(
 /// Works even when rawler has no decoder for the file (stripped make/model) or
 /// cannot decode its raw data (e.g. DNG 1.7 lossy 8-bit JPEG raws): previews are
 /// plain JPEG streams referenced by standard tags, independent of the raw payload.
-fn largest_tiff_jpeg_preview_bytes(buf: &[u8]) -> Option<&[u8]> {
-    let le = match buf.get(..4)? {
-        [0x49, 0x49, 0x2A, 0x00] => true,
-        [0x4D, 0x4D, 0x00, 0x2A] => false,
-        _ => return None,
+/// JPEG preview byte ranges found in the TIFF structure, largest first. The
+/// caller tries them in order: the raw sensor track is lossless JPEG (SOF3),
+/// which ordinary JPEG decoders reject, so it falls through to the next
+/// candidate rather than poisoning the pick.
+fn tiff_jpeg_preview_candidates(buf: &[u8]) -> Vec<&[u8]> {
+    let le = match buf.get(..4) {
+        Some([0x49, 0x49, 0x2A, 0x00]) => true,
+        Some([0x4D, 0x4D, 0x00, 0x2A]) => false,
+        _ => return Vec::new(),
     };
     let rd16 = |o: usize| -> Option<u64> {
         let b: [u8; 2] = buf.get(o..o + 2)?.try_into().ok()?;
@@ -78,9 +82,11 @@ fn largest_tiff_jpeg_preview_bytes(buf: &[u8]) -> Option<&[u8]> {
         } as u64)
     };
 
-    // (offset, len) of the biggest JPEG stream seen so far
-    let mut best: Option<(u64, u64)> = None;
-    let mut queue: Vec<u64> = vec![rd32(4)?];
+    let mut found: Vec<(u64, u64)> = Vec::new();
+    let Some(first_ifd) = rd32(4) else {
+        return Vec::new();
+    };
+    let mut queue: Vec<u64> = vec![first_ifd];
     let mut seen = std::collections::HashSet::new();
 
     while let Some(ifd) = queue.pop() {
@@ -121,19 +127,19 @@ fn largest_tiff_jpeg_preview_bytes(buf: &[u8]) -> Option<&[u8]> {
                 _ => {}
             }
         }
-        // Strip-based JPEG previews must be reduced-resolution (254 == 1); the main
-        // raw IFD also uses JPEG compression but is subfile type 0 and undecodable.
+        // Strip-based JPEG candidates: reduced-resolution IFDs (254 == 1) and
+        // IFDs with no subfile type at all — Canon CR2 stores its full-size
+        // preview in IFD0 without tag 254, which a strict `== 1` check skipped,
+        // leaving only the 160px thumbnail (seen as unreadable 35px inspect
+        // crops). Explicit subfile 0 (the marked main raw image) stays out.
         if matches!(compression, 6 | 7)
-            && subfile == 1
+            && subfile != 0
             && let Some((off, len)) = strip
-            && len > best.map_or(0, |b| b.1)
         {
-            best = Some((off, len));
+            found.push((off, len));
         }
-        if let Some((off, len)) = old_jpeg
-            && len > best.map_or(0, |b| b.1)
-        {
-            best = Some((off, len));
+        if let Some((off, len)) = old_jpeg {
+            found.push((off, len));
         }
         if let Some(next) = rd32(ifd as usize + 2 + (n as usize) * 12)
             && next != 0
@@ -142,13 +148,22 @@ fn largest_tiff_jpeg_preview_bytes(buf: &[u8]) -> Option<&[u8]> {
         }
     }
 
-    let (off, len) = best?;
-    buf.get(off as usize..(off + len) as usize)
+    found.sort_by(|a, b| b.1.cmp(&a.1));
+    found
+        .into_iter()
+        .filter_map(|(off, len)| {
+            let end = off.checked_add(len)?;
+            buf.get(off as usize..end as usize)
+        })
+        // A JPEG stream starts with SOI; this skips uncompressed RGB strips.
+        .filter(|bytes| bytes.starts_with(&[0xFF, 0xD8]))
+        .collect()
 }
 
 pub fn largest_tiff_jpeg_preview(buf: &[u8]) -> Option<DynamicImage> {
-    let bytes = largest_tiff_jpeg_preview_bytes(buf)?;
-    image::load_from_memory_with_format(bytes, image::ImageFormat::Jpeg).ok()
+    tiff_jpeg_preview_candidates(buf)
+        .into_iter()
+        .find_map(|bytes| image::load_from_memory_with_format(bytes, image::ImageFormat::Jpeg).ok())
 }
 
 /// Decode a JPEG at the smallest IDCT scale that still covers `max_dim`: a
@@ -173,6 +188,88 @@ fn decode_jpeg_scaled(bytes: &[u8], max_dim: u32) -> Option<DynamicImage> {
     }
 }
 
+#[cfg(test)]
+mod preview_candidate_tests {
+    use super::*;
+
+    fn entry(tag: u16, typ: u16, count: u32, value: u32) -> Vec<u8> {
+        let mut e = Vec::new();
+        e.extend(tag.to_le_bytes());
+        e.extend(typ.to_le_bytes());
+        e.extend(count.to_le_bytes());
+        e.extend(value.to_le_bytes());
+        e
+    }
+
+    fn jpeg_bytes(w: u32, h: u32) -> Vec<u8> {
+        let img = image::RgbImage::from_pixel(w, h, image::Rgb([120, 60, 30]));
+        let mut buf = Vec::new();
+        let mut cur = std::io::Cursor::new(&mut buf);
+        let enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut cur, 80);
+        image::DynamicImage::ImageRgb8(img).write_with_encoder(enc).unwrap();
+        buf
+    }
+
+    /// Canon-CR2-shaped TIFF: IFD0 carries the full preview as a strip JPEG
+    /// WITHOUT tag 254 (the layout the old `subfile == 1` guard rejected),
+    /// IFD1 the 513/514 thumbnail, IFD2 a bigger FFD8+SOF3 blob standing in
+    /// for the undecodable lossless-JPEG raw track.
+    fn build_cr2_like() -> (Vec<u8>, (u32, u32)) {
+        let preview = jpeg_bytes(64, 48);
+        let thumb = jpeg_bytes(16, 12);
+        let mut raw_track = vec![0xFF, 0xD8, 0xFF, 0xC3];
+        raw_track.extend(std::iter::repeat(0xAB).take(preview.len() + thumb.len() + 1000));
+
+        let ifd0_off: u32 = 8;
+        let ifd0_len: u32 = 2 + 12 * 3 + 4;
+        let ifd1_off = ifd0_off + ifd0_len;
+        let ifd1_len: u32 = 2 + 12 * 2 + 4;
+        let ifd2_off = ifd1_off + ifd1_len;
+        let ifd2_len: u32 = 2 + 12 * 3 + 4;
+        let data0 = ifd2_off + ifd2_len;
+        let data1 = data0 + preview.len() as u32;
+        let data2 = data1 + thumb.len() as u32;
+
+        let mut buf = vec![0x49, 0x49, 0x2A, 0x00];
+        buf.extend(ifd0_off.to_le_bytes());
+        buf.extend(3u16.to_le_bytes());
+        buf.extend(entry(259, 3, 1, 6));
+        buf.extend(entry(273, 4, 1, data0));
+        buf.extend(entry(279, 4, 1, preview.len() as u32));
+        buf.extend(ifd1_off.to_le_bytes());
+        buf.extend(2u16.to_le_bytes());
+        buf.extend(entry(513, 4, 1, data1));
+        buf.extend(entry(514, 4, 1, thumb.len() as u32));
+        buf.extend(ifd2_off.to_le_bytes());
+        buf.extend(3u16.to_le_bytes());
+        buf.extend(entry(259, 3, 1, 6));
+        buf.extend(entry(273, 4, 1, data2));
+        buf.extend(entry(279, 4, 1, raw_track.len() as u32));
+        buf.extend(0u32.to_le_bytes());
+        assert_eq!(buf.len() as u32, data0);
+        buf.extend(preview);
+        buf.extend(thumb);
+        buf.extend(raw_track);
+        (buf, (64, 48))
+    }
+
+    #[test]
+    fn canon_layout_full_preview_wins_over_thumb_and_raw_track() {
+        let (buf, dims) = build_cr2_like();
+        let img = largest_tiff_jpeg_preview(&buf).expect("a decodable preview");
+        assert_eq!((img.width(), img.height()), dims);
+    }
+
+    #[test]
+    fn candidates_are_largest_first_and_all_start_with_soi() {
+        let (buf, _) = build_cr2_like();
+        let c = tiff_jpeg_preview_candidates(&buf);
+        assert_eq!(c.len(), 3);
+        assert!(c.windows(2).all(|w| w[0].len() >= w[1].len()));
+        assert!(c.iter().all(|b| b.starts_with(&[0xFF, 0xD8])));
+    }
+}
+
 pub fn fast_raw_preview(path: &str) -> Option<DynamicImage> {
     fast_raw_preview_scaled(path, None)
 }
@@ -186,10 +283,14 @@ pub fn fast_raw_preview_scaled(path: &str, max_dim: Option<u32>) -> Option<Dynam
     let mapped = std::fs::File::open(path)
         .ok()
         .and_then(|f| unsafe { memmap2::Mmap::map(&f).ok() });
-    let preview_bytes: Option<&[u8]> = mapped
+    let candidates: Vec<&[u8]> = mapped
         .as_ref()
-        .and_then(|buf| raf_preview_bytes(buf).or_else(|| largest_tiff_jpeg_preview_bytes(buf)));
-    let decoded = preview_bytes.and_then(|bytes| {
+        .map(|buf| match raf_preview_bytes(buf) {
+            Some(raf) => vec![raf],
+            None => tiff_jpeg_preview_candidates(buf),
+        })
+        .unwrap_or_default();
+    let decoded = candidates.into_iter().find_map(|bytes| {
         max_dim
             .and_then(|dim| decode_jpeg_scaled(bytes, dim))
             .or_else(|| image::load_from_memory_with_format(bytes, image::ImageFormat::Jpeg).ok())
