@@ -698,6 +698,9 @@ export default function AssistantPanel() {
       rename: /\b(rename|renamed|file ?name|file'?s name)\b/.test(recentUserText),
       title: /\btitle\b/.test(recentUserText),
     };
+    // Requests that read text off the image get a hard verification gate in
+    // batch: values are not accepted from the downscaled overview alone.
+    const ocrIntent = /\b(read|ocr|label|code|weight|gms|gsm|extract|text|number)\b/.test(recentUserText);
 
     try {
       if (doBatch) {
@@ -743,8 +746,25 @@ export default function AssistantPanel() {
               });
               if (cancelRef.current) break;
               const region =
-                canvas && round < 3 ? sanitizeCropPatch(response?.inspect, canvas.width, canvas.height) : null;
-              if (!region) break;
+                canvas && round < 5 ? sanitizeCropPatch(response?.inspect, canvas.width, canvas.height) : null;
+              if (!region) {
+                // Accuracy gate: an OCR-style request that proposed values
+                // without a single close-up look gets sent back once.
+                const wroteValues = !!response?.metadata || !!response?.tags || !!response?.filename;
+                if (ocrIntent && canvas && round === 0 && wroteValues) {
+                  itemHistory = [
+                    ...itemHistory,
+                    { role: 'assistant', content: response?.reply || '(values proposed)' },
+                    {
+                      role: 'user',
+                      content:
+                        '[app] Accuracy gate: you proposed values without inspecting. Respond with an "inspect" region covering the text you read (other fields null). After the native-resolution close-up arrives, re-read it character by character and re-emit ALL the values, corrected if needed.',
+                    },
+                  ];
+                  continue;
+                }
+                break;
+              }
               const att: any = await invoke(Invokes.AssistantPrepareRegion, {
                 path,
                 x: region.crop.x,
@@ -827,7 +847,7 @@ export default function AssistantPanel() {
       // Inspect loop: the model may ask to zoom into a region (small text the
       // downscaled attachment can't resolve). Each round crops that region from
       // the original at native resolution and continues the same conversation.
-      const MAX_INSPECT_ROUNDS = 3;
+      const MAX_INSPECT_ROUNDS = 5;
       let loopHistory = history;
       let loopImages = images;
       let response: any;
