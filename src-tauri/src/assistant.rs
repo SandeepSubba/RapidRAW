@@ -32,6 +32,15 @@ pub struct ImageAttachment {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct PreparedImage {
+    pub media_type: String,
+    pub data: String,
+    pub full_width: u32,
+    pub full_height: u32,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AssistantResponse {
     pub reply: String,
     pub adjustments: Option<Value>,
@@ -77,7 +86,7 @@ You may also CROP the image:
 - Physical sizes (inches/cm) only make sense with a known DPI; if the metadata doesn't provide one, pick the requested SHAPE (e.g. 3.75" square = a square) and say you sized it by ratio, not inches.
 
 If fine detail (small text, a label, ruler tick marks) is illegible at the attached resolution, ASK TO ZOOM IN instead of guessing or giving up:
-- inspect: {"x": N, "y": N, "width": N, "height": N} — a region in _canvas pixels you want to see closer. The app will crop that region from the ORIGINAL image at native resolution and send it to you in a follow-up message; then you answer from what you see. Keep "reply" to a short note like "zooming into the ruler…" and set the other action fields null in that turn. You may inspect up to 3 times for one request; make each region as tight as possible around the detail.
+- inspect: {"x": N, "y": N, "width": N, "height": N} — a region in _canvas pixels you want to see closer. The app will crop that region from the ORIGINAL image at native resolution and send it to you in a follow-up message; then you answer from what you see. Keep "reply" to a short note like "zooming into the ruler…" and set the other action fields null in that turn. You may inspect up to 3 times for one request; make each region as tight as possible around the detail. If a value or unit (a weight, "gms", a code) is only PARTIALLY legible, inspect it — never write a guessed or half-read value into tags or metadata.
 
 You may also organize the image:
 - tags: {"add": ["keyword", ...], "remove": ["keyword", ...]} — keyword/tag labels to add or remove

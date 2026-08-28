@@ -1124,7 +1124,7 @@ pub async fn assistant_prepare_image(
     path: String,
     max_dim: Option<u32>,
     app_handle: AppHandle,
-) -> Result<crate::assistant::ImageAttachment, String> {
+) -> Result<crate::assistant::PreparedImage, String> {
     let max_dim = max_dim.unwrap_or(2000).clamp(256, 4000);
     tauri::async_runtime::spawn_blocking(move || {
         // Prefer a full-quality source over the thumbnail pipeline: the model is
@@ -1149,7 +1149,14 @@ pub async fn assistant_prepare_image(
         } else {
             image::open(&source_path).map_err(|e| format!("Failed to decode image: {}", e))?
         };
-        encode_assistant_jpeg(&image, max_dim)
+        let attachment = encode_assistant_jpeg(&image, max_dim)?;
+        Ok(crate::assistant::PreparedImage {
+            media_type: attachment.media_type,
+            data: attachment.data,
+            // Full pre-downscale dimensions: the pixel space inspect regions use.
+            full_width: image.width(),
+            full_height: image.height(),
+        })
     })
     .await
     .map_err(|e| format!("Task failed: {}", e))?

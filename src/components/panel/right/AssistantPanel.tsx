@@ -722,13 +722,48 @@ export default function AssistantPanel() {
               path,
               maxDim: imageMaxDim,
             });
-            const response: any = await invoke(Invokes.AssistantChat, {
-              messages: batchHistory,
-              adjustments: null,
-              currentMetadata: readCurrentMetadata(imageList.find((i) => i.path === path)?.exif || {}),
-              images: [{ mediaType: prepared.mediaType, data: prepared.data }],
-              model: selectedModel || null,
-            });
+            const canvas =
+              prepared.fullWidth && prepared.fullHeight
+                ? { width: prepared.fullWidth, height: prepared.fullHeight }
+                : null;
+            const meta = readCurrentMetadata(imageList.find((i) => i.path === path)?.exif || {});
+            // Same inspect loop as single-image chat: small label text ("gms",
+            // codes) is often illegible at attachment size — let the model pull
+            // a native-resolution region before it commits values to tags.
+            let itemHistory = batchHistory;
+            let itemImages = [{ mediaType: prepared.mediaType, data: prepared.data }];
+            let response: any;
+            for (let round = 0; ; round++) {
+              response = await invoke(Invokes.AssistantChat, {
+                messages: itemHistory,
+                adjustments: canvas ? { _canvas: canvas } : null,
+                currentMetadata: meta,
+                images: itemImages,
+                model: selectedModel || null,
+              });
+              if (cancelRef.current) break;
+              const region =
+                canvas && round < 3 ? sanitizeCropPatch(response?.inspect, canvas.width, canvas.height) : null;
+              if (!region) break;
+              const att: any = await invoke(Invokes.AssistantPrepareRegion, {
+                path,
+                x: region.crop.x,
+                y: region.crop.y,
+                width: region.crop.width,
+                height: region.crop.height,
+                orientationSteps: 0,
+                maxDim: Math.min(imageMaxDim, 1568),
+              });
+              itemHistory = [
+                ...itemHistory,
+                { role: 'assistant', content: response?.reply || '(inspecting)' },
+                {
+                  role: 'user',
+                  content: `[app] Attached is the region x=${region.crop.x} y=${region.crop.y} ${region.crop.width}x${region.crop.height}px you asked to inspect, at native resolution. Continue with this image only.`,
+                },
+              ];
+              itemImages = [{ mediaType: att.mediaType, data: att.data }];
+            }
             if (cancelRef.current) break;
             const { metaPatch, org } = await applyMetaOrg(response, path, intent);
             done += 1;

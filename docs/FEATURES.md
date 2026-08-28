@@ -90,7 +90,7 @@ and dated.
 - **Zoom-to-read (inspect loop)** — when small text or ruler ticks are illegible
   at the attached resolution, the assistant asks the app for a region and gets it
   back cropped from the original at native pixels (up to 3 rounds per request),
-  then answers from what it can actually see. Attachments and batch OCR are also
+  then answers from what it can actually see — in single-image chat and in batch tag/metadata runs alike. Attachments and batch OCR are also
   fed from the full-quality decode at JPEG q90 instead of the 720px thumbnail
   pipeline.
 - **Cropping from chat** — ask for a square / 16:9 / subject-centred crop and the
