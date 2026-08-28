@@ -338,6 +338,10 @@ async function fileToAttachment(file: File, maxDim: number): Promise<Attachment>
 export default function AssistantPanel() {
   const { t } = useTranslation();
   const [input, setInput] = useState('');
+  // Up/Down recall of previously sent messages, shell-style. null = not
+  // navigating; the draft holds whatever was typed before recall started.
+  const [historyIndex, setHistoryIndex] = useState<number | null>(null);
+  const historyDraftRef = useRef('');
   const [attachments, setAttachments] = useState<Array<Attachment>>([]);
   const [models, setModels] = useState<Array<string>>([]);
   const [modelsError, setModelsError] = useState(false);
@@ -773,6 +777,8 @@ export default function AssistantPanel() {
                 height: region.crop.height,
                 orientationSteps: 0,
                 maxDim: Math.min(imageMaxDim, 1568),
+                canvasWidth: canvas?.width,
+                canvasHeight: canvas?.height,
               });
               itemHistory = [
                 ...itemHistory,
@@ -879,6 +885,8 @@ export default function AssistantPanel() {
           height: region.crop.height,
           orientationSteps: adjustments?.orientationSteps ?? 0,
           maxDim: Math.min(imageMaxDim, 1568),
+          canvasWidth: orientedDims?.width,
+          canvasHeight: orientedDims?.height,
         });
         loopHistory = [
           ...loopHistory,
@@ -983,7 +991,35 @@ export default function AssistantPanel() {
     e.stopPropagation();
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
+      setHistoryIndex(null);
       send();
+      return;
+    }
+    // Up/Down recall previously sent messages. Up only enters recall from an
+    // empty input, so it never hijacks caret movement while composing.
+    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+      const st = useAssistantStore.getState();
+      const sent = (st.conversations.find((c) => c.id === st.activeId)?.messages ?? [])
+        .filter((m) => m.role === 'user' && !m.isError)
+        .map((m) => m.content);
+      if (e.key === 'ArrowUp' && (historyIndex !== null || input === '')) {
+        if (sent.length === 0) return;
+        e.preventDefault();
+        if (historyIndex === null) historyDraftRef.current = input;
+        const next = historyIndex === null ? sent.length - 1 : Math.max(0, historyIndex - 1);
+        setHistoryIndex(next);
+        setInput(sent[next]);
+      } else if (e.key === 'ArrowDown' && historyIndex !== null) {
+        e.preventDefault();
+        const next = historyIndex + 1;
+        if (next >= sent.length) {
+          setHistoryIndex(null);
+          setInput(historyDraftRef.current);
+        } else {
+          setHistoryIndex(next);
+          setInput(sent[next]);
+        }
+      }
     }
   };
 
@@ -1314,7 +1350,10 @@ export default function AssistantPanel() {
           </button>
           <textarea
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => {
+              setInput(e.target.value);
+              setHistoryIndex(null);
+            }}
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
             placeholder={t('editor.assistant.placeholder', 'Ask for an edit…')}

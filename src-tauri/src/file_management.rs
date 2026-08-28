@@ -1175,6 +1175,8 @@ pub async fn assistant_prepare_region(
     height: u32,
     orientation_steps: Option<u32>,
     max_dim: Option<u32>,
+    canvas_width: Option<u32>,
+    canvas_height: Option<u32>,
     app_handle: AppHandle,
 ) -> Result<crate::assistant::ImageAttachment, String> {
     let max_dim = max_dim.unwrap_or(1568).clamp(256, 4000);
@@ -1208,10 +1210,23 @@ pub async fn assistant_prepare_region(
             _ => full,
         };
         let (iw, ih) = (oriented.width(), oriented.height());
-        let x = x.min(iw.saturating_sub(1));
-        let y = y.min(ih.saturating_sub(1));
-        let w = width.clamp(1, iw - x);
-        let h = height.clamp(1, ih - y);
+        // The rectangle is expressed in the caller's canvas (the dimensions the
+        // model was told about). The source cropped here can be a different
+        // resolution — e.g. a 720px thumbnail canvas vs the full raw preview —
+        // so scale the rectangle across, or the crop lands in the wrong place
+        // (typically a dark corner) and the model sees a black patch.
+        let sx = canvas_width
+            .filter(|&cw| cw > 0)
+            .map(|cw| iw as f64 / cw as f64)
+            .unwrap_or(1.0);
+        let sy = canvas_height
+            .filter(|&ch| ch > 0)
+            .map(|ch| ih as f64 / ch as f64)
+            .unwrap_or(1.0);
+        let x = ((x as f64 * sx).round() as u32).min(iw.saturating_sub(1));
+        let y = ((y as f64 * sy).round() as u32).min(ih.saturating_sub(1));
+        let w = ((width as f64 * sx).round() as u32).clamp(1, iw - x);
+        let h = ((height as f64 * sy).round() as u32).clamp(1, ih - y);
         let region = oriented.crop_imm(x, y, w, h);
         encode_assistant_jpeg(&region, max_dim)
     })
