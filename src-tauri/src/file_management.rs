@@ -1182,7 +1182,7 @@ pub async fn assistant_prepare_region(
     let max_dim = max_dim.unwrap_or(1568).clamp(256, 4000);
     let steps = orientation_steps.unwrap_or(0) % 4;
     tauri::async_runtime::spawn_blocking(move || {
-        let (source_path, _) = parse_virtual_path(&path);
+        let (source_path, sidecar_path) = parse_virtual_path(&path);
         let source_str = source_path.to_string_lossy().to_string();
 
         // The open editor image is the common case and already fully decoded.
@@ -1201,15 +1201,40 @@ pub async fn assistant_prepare_region(
             None => image::open(&source_path).map_err(|e| format!("Failed to decode: {}", e))?,
         };
 
-        // The rectangle is in display orientation; rotate the source to match
-        // before cropping. A 90-degree rotate is a single copy pass.
+        // Reproduce the VIEW the model was shown, or its rectangle lands in the
+        // wrong place: the attachment is rendered with the sidecar's 90-degree
+        // orientation and crop applied, so a rect for a cropped image measured
+        // against the uncropped frame points at backdrop (seen as black crops
+        // in batch runs). Fine rotation / perspective are not reproduced — a
+        // couple of degrees doesn't move text out of a generously sized rect.
+        let sidecar_adjustments = crate::exif_processing::load_sidecar(&sidecar_path).adjustments;
+        let steps = sidecar_adjustments
+            .get("orientationSteps")
+            .and_then(|v| v.as_u64())
+            .map(|v| (v % 4) as u32)
+            .unwrap_or(steps);
         let oriented = match steps {
             1 => full.rotate90(),
             2 => full.rotate180(),
             3 => full.rotate270(),
             _ => full,
         };
-        let (iw, ih) = (oriented.width(), oriented.height());
+        let view = match sidecar_adjustments.get("crop").filter(|c| c.is_object()) {
+            Some(c) => {
+                let g = |k: &str| c.get(k).and_then(|v| v.as_f64()).unwrap_or(0.0).max(0.0) as u32;
+                let (cx, cy) = (g("x"), g("y"));
+                let (cw, ch) = (g("width"), g("height"));
+                if cw > 0 && ch > 0 && cx < oriented.width() && cy < oriented.height() {
+                    let cw = cw.min(oriented.width() - cx);
+                    let ch = ch.min(oriented.height() - cy);
+                    oriented.crop_imm(cx, cy, cw, ch)
+                } else {
+                    oriented
+                }
+            }
+            None => oriented,
+        };
+        let (iw, ih) = (view.width(), view.height());
         // The rectangle is expressed in the caller's canvas (the dimensions the
         // model was told about). The source cropped here can be a different
         // resolution — e.g. a 720px thumbnail canvas vs the full raw preview —
@@ -1227,7 +1252,7 @@ pub async fn assistant_prepare_region(
         let y = ((y as f64 * sy).round() as u32).min(ih.saturating_sub(1));
         let w = ((width as f64 * sx).round() as u32).clamp(1, iw - x);
         let h = ((height as f64 * sy).round() as u32).clamp(1, ih - y);
-        let region = oriented.crop_imm(x, y, w, h);
+        let region = view.crop_imm(x, y, w, h);
         encode_assistant_jpeg(&region, max_dim)
     })
     .await

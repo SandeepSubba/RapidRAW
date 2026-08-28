@@ -840,13 +840,20 @@ export default function AssistantPanel() {
         currentImage?.width && currentImage?.height
           ? getOrientedDimensions(currentImage.width, currentImage.height, adjustments?.orientationSteps ?? 0)
           : null;
+      // The attached viewer image is the CURRENT VIEW (crop applied), so all
+      // rectangle talk with the model happens in that space.
+      const existingCrop =
+        adjustments?.crop && adjustments.crop.width > 0 && adjustments.crop.height > 0 ? adjustments.crop : null;
+      const viewCanvas = existingCrop
+        ? { width: Math.round(existingCrop.width), height: Math.round(existingCrop.height) }
+        : orientedDims;
       const chatContext = scannerMode
         ? scannerContext(scanState)
         : currentImage
           ? {
               ...adjustments,
               // Tells the model the pixel space its crop / inspect rectangles live in.
-              _canvas: orientedDims,
+              _canvas: viewCanvas,
             }
           : null;
 
@@ -867,8 +874,8 @@ export default function AssistantPanel() {
         });
         if (cancelRef.current) break;
         const region =
-          !scannerMode && currentImage && orientedDims && round < MAX_INSPECT_ROUNDS
-            ? sanitizeCropPatch(response?.inspect, orientedDims.width, orientedDims.height)
+          !scannerMode && currentImage && viewCanvas && round < MAX_INSPECT_ROUNDS
+            ? sanitizeCropPatch(response?.inspect, viewCanvas.width, viewCanvas.height)
             : null;
         if (!region) break;
         addMessage({
@@ -885,8 +892,8 @@ export default function AssistantPanel() {
           height: region.crop.height,
           orientationSteps: adjustments?.orientationSteps ?? 0,
           maxDim: Math.min(imageMaxDim, 1568),
-          canvasWidth: orientedDims?.width,
-          canvasHeight: orientedDims?.height,
+          canvasWidth: viewCanvas?.width,
+          canvasHeight: viewCanvas?.height,
         });
         loopHistory = [
           ...loopHistory,
@@ -918,9 +925,21 @@ export default function AssistantPanel() {
       }
 
       const patch = currentImage ? sanitizePatch(response?.adjustments) : {};
+      const viewCropPatch =
+        currentImage && viewCanvas ? sanitizeCropPatch(response?.crop, viewCanvas.width, viewCanvas.height) : null;
+      // A rect proposed inside the current view refines the existing crop, so
+      // offset it back into absolute (oriented full-image) coordinates.
       const cropPatch =
-        currentImage && orientedDims
-          ? sanitizeCropPatch(response?.crop, orientedDims.width, orientedDims.height)
+        viewCropPatch && orientedDims
+          ? (() => {
+              const baseX = existingCrop ? Math.round(existingCrop.x) : 0;
+              const baseY = existingCrop ? Math.round(existingCrop.y) : 0;
+              const x = Math.min(baseX + viewCropPatch.crop.x, orientedDims.width - 1);
+              const y = Math.min(baseY + viewCropPatch.crop.y, orientedDims.height - 1);
+              const width = Math.min(viewCropPatch.crop.width, orientedDims.width - x);
+              const height = Math.min(viewCropPatch.crop.height, orientedDims.height - y);
+              return { crop: { unit: 'px' as const, x, y, width, height }, aspectRatio: width / height };
+            })()
           : null;
       const hasPatch = Object.keys(patch).length > 0 || !!cropPatch;
       if (hasPatch) {

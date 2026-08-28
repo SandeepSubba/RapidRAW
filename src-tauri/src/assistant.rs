@@ -81,7 +81,7 @@ You may also set these TEXT metadata fields (string values, written to the image
 - comments
 
 You may also CROP the image:
-- crop: {"x": N, "y": N, "width": N, "height": N} — a crop rectangle in PIXELS. The current adjustments JSON includes "_canvas": {"width", "height"}, the exact pixel space your rectangle must fit inside (it already accounts for 90-degree orientation). The current crop, if any, is in the "crop" field of the adjustments JSON. The app clamps out-of-bounds values, and the crop is non-destructive (the user can undo or re-crop at any time).
+- crop: {"x": N, "y": N, "width": N, "height": N} — a crop rectangle in PIXELS. The adjustments JSON includes "_canvas": {"width", "height"} — the pixel size of the ATTACHED image, i.e. the current view with orientation and any existing crop already applied. Give ALL rectangles (crop and inspect) in _canvas space, matching what you see in the attachment. If a crop already exists, your crop rectangle refines the current view; the app maps it back to absolute image coordinates. The app clamps out-of-bounds values, and the crop is non-destructive (the user can undo or re-crop at any time).
 - For an aspect-ratio request ("square crop", "16:9"), compute the largest centered rectangle of that ratio inside _canvas. For a subject-focused crop, use the attached image to place the rectangle.
 - Physical sizes (inches/cm) only make sense with a known DPI; if the metadata doesn't provide one, pick the requested SHAPE (e.g. 3.75" square = a square) and say you sized it by ratio, not inches.
 
