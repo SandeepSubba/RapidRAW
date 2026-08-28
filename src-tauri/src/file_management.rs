@@ -1125,22 +1125,117 @@ pub async fn assistant_prepare_image(
     max_dim: Option<u32>,
     app_handle: AppHandle,
 ) -> Result<crate::assistant::ImageAttachment, String> {
-    use base64::Engine as _;
     let max_dim = max_dim.unwrap_or(2000).clamp(256, 4000);
     tauri::async_runtime::spawn_blocking(move || {
-        let state = app_handle.state::<AppState>();
-        let gpu_context = gpu_processing::get_or_init_gpu_context(&state, &app_handle).ok();
-        let image = generate_thumbnail_data(&path, gpu_context.as_ref(), None, &app_handle)
-            .map_err(|e| format!("Failed to decode image: {}", e))?;
-        let jpeg = encode_thumbnail(&image, max_dim).map_err(|e| format!("Failed to encode image: {}", e))?;
-        let data = base64::engine::general_purpose::STANDARD.encode(&jpeg);
-        Ok(crate::assistant::ImageAttachment {
-            media_type: "image/jpeg".to_string(),
-            data,
-        })
+        // Prefer a full-quality source over the thumbnail pipeline: the model is
+        // often asked to read text off the image, and generate_thumbnail_data
+        // caps unedited raws at the thumbnail resolution (~720px). Edited images
+        // still go through the thumbnail path so their edits are visible.
+        let (source_path, sidecar_path) = parse_virtual_path(&path);
+        let has_edits = fs::read_to_string(&sidecar_path)
+            .ok()
+            .and_then(|c| serde_json::from_str::<ImageMetadata>(&c).ok())
+            .map(|m| !m.adjustments.is_null())
+            .unwrap_or(false);
+        let source_str = source_path.to_string_lossy().to_string();
+        let image = if has_edits {
+            let state = app_handle.state::<AppState>();
+            let gpu_context = gpu_processing::get_or_init_gpu_context(&state, &app_handle).ok();
+            generate_thumbnail_data(&path, gpu_context.as_ref(), None, &app_handle)
+                .map_err(|e| format!("Failed to decode image: {}", e))?
+        } else if is_raw_file(&source_str) {
+            crate::culling::fast_raw_preview(&source_str)
+                .ok_or_else(|| "Failed to extract raw preview".to_string())?
+        } else {
+            image::open(&source_path).map_err(|e| format!("Failed to decode image: {}", e))?
+        };
+        encode_assistant_jpeg(&image, max_dim)
     })
     .await
     .map_err(|e| format!("Task failed: {}", e))?
+}
+
+/// Crop a region (in oriented display pixels, the assistant's `_canvas` space)
+/// out of the currently loaded editor image at native resolution, for the
+/// assistant's inspect loop — reading small text the downscaled attachment
+/// can't resolve.
+#[tauri::command]
+pub async fn assistant_prepare_region(
+    path: String,
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+    orientation_steps: Option<u32>,
+    max_dim: Option<u32>,
+    app_handle: AppHandle,
+) -> Result<crate::assistant::ImageAttachment, String> {
+    let max_dim = max_dim.unwrap_or(1568).clamp(256, 4000);
+    let steps = orientation_steps.unwrap_or(0) % 4;
+    tauri::async_runtime::spawn_blocking(move || {
+        let (source_path, _) = parse_virtual_path(&path);
+        let source_str = source_path.to_string_lossy().to_string();
+
+        // The open editor image is the common case and already fully decoded.
+        let state = app_handle.state::<AppState>();
+        let loaded: Option<std::sync::Arc<image::DynamicImage>> = {
+            let guard = state.original_image.lock().unwrap();
+            guard
+                .as_ref()
+                .filter(|l| l.path == path || l.path == source_str)
+                .map(|l| l.image.clone())
+        };
+        let full: image::DynamicImage = match loaded {
+            Some(arc) => (*arc).clone(),
+            None if is_raw_file(&source_str) => crate::culling::fast_raw_preview(&source_str)
+                .ok_or_else(|| "Failed to extract raw preview".to_string())?,
+            None => image::open(&source_path).map_err(|e| format!("Failed to decode: {}", e))?,
+        };
+
+        // The rectangle is in display orientation; rotate the source to match
+        // before cropping. A 90-degree rotate is a single copy pass.
+        let oriented = match steps {
+            1 => full.rotate90(),
+            2 => full.rotate180(),
+            3 => full.rotate270(),
+            _ => full,
+        };
+        let (iw, ih) = (oriented.width(), oriented.height());
+        let x = x.min(iw.saturating_sub(1));
+        let y = y.min(ih.saturating_sub(1));
+        let w = width.clamp(1, iw - x);
+        let h = height.clamp(1, ih - y);
+        let region = oriented.crop_imm(x, y, w, h);
+        encode_assistant_jpeg(&region, max_dim)
+    })
+    .await
+    .map_err(|e| format!("Task failed: {}", e))?
+}
+
+/// JPEG at quality 90 — the assistant reads text off these, and the thumbnail
+/// encoder's q75 visibly smears small glyphs.
+fn encode_assistant_jpeg(
+    image: &image::DynamicImage,
+    max_dim: u32,
+) -> Result<crate::assistant::ImageAttachment, String> {
+    use base64::Engine as _;
+    let (w, h) = (image.width(), image.height());
+    let scaled = if w.max(h) > max_dim {
+        image.thumbnail(max_dim, max_dim)
+    } else {
+        image.clone()
+    };
+    let mut buf = Vec::new();
+    let mut cursor = std::io::Cursor::new(&mut buf);
+    let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut cursor, 90);
+    scaled
+        .to_rgb8()
+        .write_with_encoder(encoder)
+        .map_err(|e| format!("Failed to encode image: {}", e))?;
+    Ok(crate::assistant::ImageAttachment {
+        media_type: "image/jpeg".to_string(),
+        data: base64::engine::general_purpose::STANDARD.encode(&buf),
+    })
 }
 
 pub fn start_thumbnail_workers(app_handle: tauri::AppHandle) {

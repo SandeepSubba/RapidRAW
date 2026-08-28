@@ -36,6 +36,7 @@ pub struct AssistantResponse {
     pub reply: String,
     pub adjustments: Option<Value>,
     pub crop: Option<Value>,
+    pub inspect: Option<Value>,
     pub metadata: Option<Value>,
     pub tags: Option<Value>,
     pub rating: Option<Value>,
@@ -75,6 +76,9 @@ You may also CROP the image:
 - For an aspect-ratio request ("square crop", "16:9"), compute the largest centered rectangle of that ratio inside _canvas. For a subject-focused crop, use the attached image to place the rectangle.
 - Physical sizes (inches/cm) only make sense with a known DPI; if the metadata doesn't provide one, pick the requested SHAPE (e.g. 3.75" square = a square) and say you sized it by ratio, not inches.
 
+If fine detail (small text, a label, ruler tick marks) is illegible at the attached resolution, ASK TO ZOOM IN instead of guessing or giving up:
+- inspect: {"x": N, "y": N, "width": N, "height": N} — a region in _canvas pixels you want to see closer. The app will crop that region from the ORIGINAL image at native resolution and send it to you in a follow-up message; then you answer from what you see. Keep "reply" to a short note like "zooming into the ruler…" and set the other action fields null in that turn. You may inspect up to 3 times for one request; make each region as tight as possible around the detail.
+
 You may also organize the image:
 - tags: {"add": ["keyword", ...], "remove": ["keyword", ...]} — keyword/tag labels to add or remove
 - rating: an integer 0-5 (star rating; 0 clears it)
@@ -85,8 +89,8 @@ You have permission to edit ALL of the above, including renaming the file. Whate
 
 Rules:
 - ALWAYS respond with a single JSON object and NOTHING else, no markdown, no code fences:
-  {"reply": "<short friendly message>", "adjustments": {<only fields you change>}, "crop": {"x": N, "y": N, "width": N, "height": N}, "metadata": {<only text fields you change>}, "tags": {"add": [...], "remove": [...]}, "rating": <0-5>, "colorLabel": "<color>", "filename": "<new name without extension>"}
-- Set any field you are NOT changing to null (adjustments, crop, metadata, tags, rating, colorLabel, filename).
+  {"reply": "<short friendly message>", "adjustments": {<only fields you change>}, "crop": {"x": N, "y": N, "width": N, "height": N}, "inspect": {"x": N, "y": N, "width": N, "height": N}, "metadata": {<only text fields you change>}, "tags": {"add": [...], "remove": [...]}, "rating": <0-5>, "colorLabel": "<color>", "filename": "<new name without extension>"}
+- Set any field you are NOT changing to null (adjustments, crop, inspect, metadata, tags, rating, colorLabel, filename).
 - Use exactly the lowercase keys listed above (e.g. "title", not "Title").
 - Only include fields you actually want to change; use absolute values within the ranges above.
 - NEVER crop unless the user explicitly asks for a crop.
@@ -193,6 +197,7 @@ struct Parsed {
     reply: String,
     adjustments: Option<Value>,
     crop: Option<Value>,
+    inspect: Option<Value>,
     metadata: Option<Value>,
     tags: Option<Value>,
     rating: Option<Value>,
@@ -210,6 +215,7 @@ fn extract(v: &Value, original: &str) -> Parsed {
         reply,
         adjustments: non_empty_object(v.get("adjustments")),
         crop: non_empty_object(v.get("crop")),
+        inspect: non_empty_object(v.get("inspect")),
         metadata: non_empty_object(v.get("metadata")),
         tags: non_empty_object(v.get("tags")),
         // Accept a few likely spellings for the color-label key.
@@ -890,6 +896,7 @@ pub async fn assistant_chat(
         reply: parsed.reply,
         adjustments: parsed.adjustments,
         crop: parsed.crop,
+        inspect: parsed.inspect,
         metadata: parsed.metadata,
         tags: parsed.tags,
         rating: parsed.rating,

@@ -2469,6 +2469,7 @@ pub fn run() {
             mask_generation::generate_mask_overlay,
             file_management::update_exif_fields,
             file_management::assistant_prepare_image,
+            file_management::assistant_prepare_region,
             file_management::get_supported_file_types,
             file_management::read_exif_for_paths,
             file_management::list_images_in_dir,

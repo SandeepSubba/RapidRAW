@@ -775,24 +775,66 @@ export default function AssistantPanel() {
           if (viewer) images = [viewer];
         }
       }
-      const response: any = await invoke(Invokes.AssistantChat, {
-        messages: history,
-        adjustments: scannerMode
-          ? scannerContext(scanState)
-          : currentImage
-            ? {
-                ...adjustments,
-                // Tells the model the pixel space its crop rectangle lives in.
-                _canvas:
-                  currentImage.width && currentImage.height
-                    ? getOrientedDimensions(currentImage.width, currentImage.height, adjustments.orientationSteps ?? 0)
-                    : null,
-              }
-            : null,
-        currentMetadata: scannerMode || !currentImage ? null : readCurrentMetadata(currentImage.exif),
-        images,
-        model: selectedModel || null,
-      });
+      const orientedDims =
+        currentImage?.width && currentImage?.height
+          ? getOrientedDimensions(currentImage.width, currentImage.height, adjustments?.orientationSteps ?? 0)
+          : null;
+      const chatContext = scannerMode
+        ? scannerContext(scanState)
+        : currentImage
+          ? {
+              ...adjustments,
+              // Tells the model the pixel space its crop / inspect rectangles live in.
+              _canvas: orientedDims,
+            }
+          : null;
+
+      // Inspect loop: the model may ask to zoom into a region (small text the
+      // downscaled attachment can't resolve). Each round crops that region from
+      // the original at native resolution and continues the same conversation.
+      const MAX_INSPECT_ROUNDS = 3;
+      let loopHistory = history;
+      let loopImages = images;
+      let response: any;
+      for (let round = 0; ; round++) {
+        response = await invoke(Invokes.AssistantChat, {
+          messages: loopHistory,
+          adjustments: chatContext,
+          currentMetadata: scannerMode || !currentImage ? null : readCurrentMetadata(currentImage.exif),
+          images: loopImages,
+          model: selectedModel || null,
+        });
+        if (cancelRef.current) break;
+        const region =
+          !scannerMode && currentImage && orientedDims && round < MAX_INSPECT_ROUNDS
+            ? sanitizeCropPatch(response?.inspect, orientedDims.width, orientedDims.height)
+            : null;
+        if (!region) break;
+        addMessage({
+          id: nextMessageId(),
+          role: 'assistant',
+          content: response?.reply || t('editor.assistant.inspecting', 'Zooming in for a closer look…'),
+        });
+        if (!currentImage) break;
+        const att: any = await invoke(Invokes.AssistantPrepareRegion, {
+          path: currentImage.path,
+          x: region.crop.x,
+          y: region.crop.y,
+          width: region.crop.width,
+          height: region.crop.height,
+          orientationSteps: adjustments?.orientationSteps ?? 0,
+          maxDim: Math.min(imageMaxDim, 1568),
+        });
+        loopHistory = [
+          ...loopHistory,
+          { role: 'assistant', content: response?.reply || '(inspecting)' },
+          {
+            role: 'user',
+            content: `[app] Attached is the region x=${region.crop.x} y=${region.crop.y} ${region.crop.width}x${region.crop.height}px you asked to inspect, at native resolution. Continue the user's request and answer from what you can now see.`,
+          },
+        ];
+        loopImages = [{ mediaType: att.mediaType, data: att.data }];
+      }
 
       if (cancelRef.current) {
         addMessage({ id: nextMessageId(), role: 'assistant', content: t('editor.assistant.stoppedShort', 'Stopped.') });
@@ -813,10 +855,6 @@ export default function AssistantPanel() {
       }
 
       const patch = currentImage ? sanitizePatch(response?.adjustments) : {};
-      const orientedDims =
-        currentImage?.width && currentImage?.height
-          ? getOrientedDimensions(currentImage.width, currentImage.height, adjustments?.orientationSteps ?? 0)
-          : null;
       const cropPatch =
         currentImage && orientedDims
           ? sanitizeCropPatch(response?.crop, orientedDims.width, orientedDims.height)
