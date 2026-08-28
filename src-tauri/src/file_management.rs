@@ -1162,6 +1162,127 @@ pub async fn assistant_prepare_image(
     .map_err(|e| format!("Task failed: {}", e))?
 }
 
+/// Reproduce the VIEW the assistant was shown: the sidecar's 90-degree
+/// orientation, then its crop. A rectangle for a cropped/rotated image
+/// measured against the raw frame otherwise points at backdrop (seen as
+/// black inspect crops in batch runs). Fine rotation / perspective are not
+/// reproduced — a couple of degrees doesn't move text out of a generously
+/// sized rect.
+fn view_for_adjustments(
+    full: image::DynamicImage,
+    adjustments: &serde_json::Value,
+    fallback_steps: u32,
+) -> image::DynamicImage {
+    let steps = adjustments
+        .get("orientationSteps")
+        .and_then(|v| v.as_u64())
+        .map(|v| (v % 4) as u32)
+        .unwrap_or(fallback_steps % 4);
+    let oriented = match steps {
+        1 => full.rotate90(),
+        2 => full.rotate180(),
+        3 => full.rotate270(),
+        _ => full,
+    };
+    match adjustments.get("crop").filter(|c| c.is_object()) {
+        Some(c) => {
+            let g = |k: &str| c.get(k).and_then(|v| v.as_f64()).unwrap_or(0.0).max(0.0) as u32;
+            let (cx, cy) = (g("x"), g("y"));
+            let (cw, ch) = (g("width"), g("height"));
+            if cw > 0 && ch > 0 && cx < oriented.width() && cy < oriented.height() {
+                let cw = cw.min(oriented.width() - cx);
+                let ch = ch.min(oriented.height() - cy);
+                oriented.crop_imm(cx, cy, cw, ch)
+            } else {
+                oriented
+            }
+        }
+        None => oriented,
+    }
+}
+
+/// Scale a rectangle from the caller's canvas (the dimensions the model was
+/// told about) into the view's own pixel space, clamped inside it. The two can
+/// differ by resolution — a 720px thumbnail canvas against a full raw preview.
+fn map_canvas_rect(
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+    canvas_width: Option<u32>,
+    canvas_height: Option<u32>,
+    view_width: u32,
+    view_height: u32,
+) -> (u32, u32, u32, u32) {
+    let sx = canvas_width
+        .filter(|&cw| cw > 0)
+        .map(|cw| view_width as f64 / cw as f64)
+        .unwrap_or(1.0);
+    let sy = canvas_height
+        .filter(|&ch| ch > 0)
+        .map(|ch| view_height as f64 / ch as f64)
+        .unwrap_or(1.0);
+    let x = ((x as f64 * sx).round() as u32).min(view_width.saturating_sub(1));
+    let y = ((y as f64 * sy).round() as u32).min(view_height.saturating_sub(1));
+    let w = ((width as f64 * sx).round() as u32).clamp(1, view_width - x);
+    let h = ((height as f64 * sy).round() as u32).clamp(1, view_height - y);
+    (x, y, w, h)
+}
+
+#[cfg(test)]
+mod assistant_view_tests {
+    use super::{map_canvas_rect, view_for_adjustments};
+    use image::DynamicImage;
+
+    // The user's AI226024 sidecar: rotated 90 degrees and cropped.
+    #[test]
+    fn rotated_and_cropped_sidecar_yields_the_crop_dims() {
+        let full = DynamicImage::new_rgb8(5760, 3840);
+        let adj = serde_json::json!({
+            "orientationSteps": 1,
+            "crop": { "x": 832, "y": 2480, "width": 2378, "height": 2662, "unit": "px" }
+        });
+        let view = view_for_adjustments(full, &adj, 0);
+        assert_eq!((view.width(), view.height()), (2378, 2662));
+    }
+
+    // The user's AI228788/89/93 sidecars: rotated, no crop.
+    #[test]
+    fn rotated_uncropped_sidecar_swaps_dimensions() {
+        let full = DynamicImage::new_rgb8(5760, 3840);
+        let adj = serde_json::json!({ "orientationSteps": 1, "crop": null });
+        let view = view_for_adjustments(full, &adj, 0);
+        assert_eq!((view.width(), view.height()), (3840, 5760));
+    }
+
+    #[test]
+    fn view_pixels_match_a_library_rotate_then_crop() {
+        let mut img = image::RgbImage::new(8, 6);
+        img.put_pixel(5, 2, image::Rgb([255, 0, 0]));
+        let full = DynamicImage::ImageRgb8(img);
+        let oriented = full.rotate90();
+        let adj = serde_json::json!({
+            "orientationSteps": 1,
+            "crop": { "x": 1, "y": 2, "width": 3, "height": 4 }
+        });
+        let view = view_for_adjustments(full, &adj, 0);
+        let reference = oriented.crop_imm(1, 2, 3, 4);
+        assert_eq!(view.to_rgb8().as_raw(), reference.to_rgb8().as_raw());
+    }
+
+    #[test]
+    fn thumbnail_canvas_rect_scales_into_the_full_view() {
+        // 643x720 thumbnail canvas against the 2378x2662 cropped view.
+        let (x, y, w, h) = map_canvas_rect(100, 200, 50, 40, Some(643), Some(720), 2378, 2662);
+        assert_eq!((x, y, w, h), (370, 739, 185, 148));
+    }
+
+    #[test]
+    fn missing_canvas_means_no_scaling() {
+        assert_eq!(map_canvas_rect(10, 20, 30, 40, None, None, 100, 100), (10, 20, 30, 40));
+    }
+}
+
 /// Crop a region (in oriented display pixels, the assistant's `_canvas` space)
 /// out of the currently loaded editor image at native resolution, for the
 /// assistant's inspect loop — reading small text the downscaled attachment
@@ -1201,57 +1322,10 @@ pub async fn assistant_prepare_region(
             None => image::open(&source_path).map_err(|e| format!("Failed to decode: {}", e))?,
         };
 
-        // Reproduce the VIEW the model was shown, or its rectangle lands in the
-        // wrong place: the attachment is rendered with the sidecar's 90-degree
-        // orientation and crop applied, so a rect for a cropped image measured
-        // against the uncropped frame points at backdrop (seen as black crops
-        // in batch runs). Fine rotation / perspective are not reproduced — a
-        // couple of degrees doesn't move text out of a generously sized rect.
         let sidecar_adjustments = crate::exif_processing::load_sidecar(&sidecar_path).adjustments;
-        let steps = sidecar_adjustments
-            .get("orientationSteps")
-            .and_then(|v| v.as_u64())
-            .map(|v| (v % 4) as u32)
-            .unwrap_or(steps);
-        let oriented = match steps {
-            1 => full.rotate90(),
-            2 => full.rotate180(),
-            3 => full.rotate270(),
-            _ => full,
-        };
-        let view = match sidecar_adjustments.get("crop").filter(|c| c.is_object()) {
-            Some(c) => {
-                let g = |k: &str| c.get(k).and_then(|v| v.as_f64()).unwrap_or(0.0).max(0.0) as u32;
-                let (cx, cy) = (g("x"), g("y"));
-                let (cw, ch) = (g("width"), g("height"));
-                if cw > 0 && ch > 0 && cx < oriented.width() && cy < oriented.height() {
-                    let cw = cw.min(oriented.width() - cx);
-                    let ch = ch.min(oriented.height() - cy);
-                    oriented.crop_imm(cx, cy, cw, ch)
-                } else {
-                    oriented
-                }
-            }
-            None => oriented,
-        };
-        let (iw, ih) = (view.width(), view.height());
-        // The rectangle is expressed in the caller's canvas (the dimensions the
-        // model was told about). The source cropped here can be a different
-        // resolution — e.g. a 720px thumbnail canvas vs the full raw preview —
-        // so scale the rectangle across, or the crop lands in the wrong place
-        // (typically a dark corner) and the model sees a black patch.
-        let sx = canvas_width
-            .filter(|&cw| cw > 0)
-            .map(|cw| iw as f64 / cw as f64)
-            .unwrap_or(1.0);
-        let sy = canvas_height
-            .filter(|&ch| ch > 0)
-            .map(|ch| ih as f64 / ch as f64)
-            .unwrap_or(1.0);
-        let x = ((x as f64 * sx).round() as u32).min(iw.saturating_sub(1));
-        let y = ((y as f64 * sy).round() as u32).min(ih.saturating_sub(1));
-        let w = ((width as f64 * sx).round() as u32).clamp(1, iw - x);
-        let h = ((height as f64 * sy).round() as u32).clamp(1, ih - y);
+        let view = view_for_adjustments(full, &sidecar_adjustments, steps);
+        let (x, y, w, h) =
+            map_canvas_rect(x, y, width, height, canvas_width, canvas_height, view.width(), view.height());
         let region = view.crop_imm(x, y, w, h);
         encode_assistant_jpeg(&region, max_dim)
     })

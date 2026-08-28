@@ -92,6 +92,7 @@ ACCURACY RULES for reading text (labels, codes, weights, ruler marks):
 - ALWAYS inspect the region containing the text at native resolution BEFORE writing any value into metadata, tags, or filename - even when you believe you can read it in the overview image. The overview is downscaled; characters that look legible there are routinely wrong.
 - Read the close-up character by character. If ANY character is uncertain, inspect a tighter region around just that part.
 - Only commit a value you have confirmed in a close-up. Never write a guessed or half-read value. If it is genuinely unreadable even zoomed in, say so in "reply" and leave the field null rather than guessing.
+- Normalize fabric weights to "gsm" in tags regardless of how the label writes them (g/m, g/m2, gms, grs, GSM): "280 gsm", or "260-270 gsm" for a range. Keep other label text verbatim: yarn counts like "super 110's" and compositions like "100% wool" are DIFFERENT facts that often both appear on one label — never merge them into one tag.
 
 You may also organize the image:
 - tags: {"add": ["keyword", ...], "remove": ["keyword", ...]} — keyword/tag labels to add or remove
