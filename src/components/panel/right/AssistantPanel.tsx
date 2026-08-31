@@ -174,6 +174,16 @@ function sanitizePatch(raw: any): Record<string, number> {
 // Validate + clamp a model-proposed crop rectangle (pixels, oriented image
 // space). Returns null for anything degenerate so a hallucinated rect can't
 // blank the image.
+// `inspect: {"target": "label"}` asks the app to locate the printed tag itself
+// rather than supplying coordinates. Accepted loosely — models reach for
+// "auto"/"tag" as readily as the documented "label".
+function wantsLabelInspect(inspect: any): boolean {
+  const target = inspect?.target;
+  if (typeof target !== 'string') return false;
+  const t = target.trim().toLowerCase();
+  return t === 'label' || t === 'tag' || t === 'auto';
+}
+
 function sanitizeCropPatch(
   raw: any,
   imageW: number,
@@ -749,6 +759,28 @@ export default function AssistantPanel() {
                 model: selectedModel || null,
               });
               if (cancelRef.current) break;
+              const wantsLabel = wantsLabelInspect(response?.inspect);
+              if (wantsLabel && canvas && round < 5) {
+                const lab: any = await invoke(Invokes.AssistantPrepareLabel, {
+                  path,
+                  orientationSteps: 0,
+                  maxDim: Math.min(imageMaxDim, 1568),
+                  canvasWidth: canvas?.width,
+                  canvasHeight: canvas?.height,
+                });
+                itemHistory = [
+                  ...itemHistory,
+                  { role: 'assistant', content: response?.reply || '(inspecting the label)' },
+                  {
+                    role: 'user',
+                    content: lab?.found
+                      ? `[app] Attached is the label the app detected at x=${lab.x} y=${lab.y} ${lab.width}x${lab.height}px, cropped at native resolution. Read it character by character and continue with this image only. If a line is still unclear, inspect a tighter region inside that rectangle.`
+                      : `[app] No label-like card was found in this frame, so the whole view is attached instead. Say so rather than guessing, or inspect explicit coordinates.`,
+                  },
+                ];
+                itemImages = [{ mediaType: lab.mediaType, data: lab.data }];
+                continue;
+              }
               const region =
                 canvas && round < 5 ? sanitizeCropPatch(response?.inspect, canvas.width, canvas.height) : null;
               if (!region) {
@@ -789,6 +821,7 @@ export default function AssistantPanel() {
                 },
               ];
               itemImages = [{ mediaType: att.mediaType, data: att.data }];
+              continue;
             }
             if (cancelRef.current) break;
             const { metaPatch, org } = await applyMetaOrg(response, path, intent);
@@ -873,35 +906,55 @@ export default function AssistantPanel() {
           model: selectedModel || null,
         });
         if (cancelRef.current) break;
+        const wantsLabel = wantsLabelInspect(response?.inspect);
         const region =
-          !scannerMode && currentImage && viewCanvas && round < MAX_INSPECT_ROUNDS
+          !scannerMode && currentImage && viewCanvas && round < MAX_INSPECT_ROUNDS && !wantsLabel
             ? sanitizeCropPatch(response?.inspect, viewCanvas.width, viewCanvas.height)
             : null;
-        if (!region) break;
+        const canInspectLabel =
+          wantsLabel && !scannerMode && !!currentImage && round < MAX_INSPECT_ROUNDS;
+        if (!region && !canInspectLabel) break;
         addMessage({
           id: nextMessageId(),
           role: 'assistant',
           content: response?.reply || t('editor.assistant.inspecting', 'Zooming in for a closer look…'),
         });
         if (!currentImage) break;
-        const att: any = await invoke(Invokes.AssistantPrepareRegion, {
-          path: currentImage.path,
-          x: region.crop.x,
-          y: region.crop.y,
-          width: region.crop.width,
-          height: region.crop.height,
-          orientationSteps: adjustments?.orientationSteps ?? 0,
-          maxDim: Math.min(imageMaxDim, 1568),
-          canvasWidth: viewCanvas?.width,
-          canvasHeight: viewCanvas?.height,
-        });
+
+        let att: any;
+        let note: string;
+        if (canInspectLabel) {
+          // The app locates the card itself — the model picking coordinates off
+          // the downscaled overview tends to bracket the QR block instead.
+          const lab: any = await invoke(Invokes.AssistantPrepareLabel, {
+            path: currentImage.path,
+            orientationSteps: adjustments?.orientationSteps ?? 0,
+            maxDim: Math.min(imageMaxDim, 1568),
+            canvasWidth: viewCanvas?.width,
+            canvasHeight: viewCanvas?.height,
+          });
+          att = lab;
+          note = lab?.found
+            ? `[app] Attached is the label the app detected at x=${lab.x} y=${lab.y} ${lab.width}x${lab.height}px, cropped at native resolution. Read it character by character. If one line is still unclear, inspect a tighter region inside that rectangle.`
+            : `[app] No label-like card was found, so the whole view is attached instead. Say so, and inspect explicit coordinates if you can see where the text is.`;
+        } else {
+          att = await invoke(Invokes.AssistantPrepareRegion, {
+            path: currentImage.path,
+            x: region!.crop.x,
+            y: region!.crop.y,
+            width: region!.crop.width,
+            height: region!.crop.height,
+            orientationSteps: adjustments?.orientationSteps ?? 0,
+            maxDim: Math.min(imageMaxDim, 1568),
+            canvasWidth: viewCanvas?.width,
+            canvasHeight: viewCanvas?.height,
+          });
+          note = `[app] Attached is the region x=${region!.crop.x} y=${region!.crop.y} ${region!.crop.width}x${region!.crop.height}px you asked to inspect, at native resolution. Continue the user's request and answer from what you can now see.`;
+        }
         loopHistory = [
           ...loopHistory,
           { role: 'assistant', content: response?.reply || '(inspecting)' },
-          {
-            role: 'user',
-            content: `[app] Attached is the region x=${region.crop.x} y=${region.crop.y} ${region.crop.width}x${region.crop.height}px you asked to inspect, at native resolution. Continue the user's request and answer from what you can now see.`,
-          },
+          { role: 'user', content: note },
         ];
         loopImages = [{ mediaType: att.mediaType, data: att.data }];
       }

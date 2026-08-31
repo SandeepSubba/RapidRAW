@@ -1287,6 +1287,106 @@ mod assistant_view_tests {
 /// out of the currently loaded editor image at native resolution, for the
 /// assistant's inspect loop — reading small text the downscaled attachment
 /// can't resolve.
+/// The crop the assistant gets back when it asks to inspect the label.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LabelCrop {
+    pub media_type: String,
+    pub data: String,
+    /// False when nothing card-like was found; the payload is then the whole
+    /// view, so the model still gets something to look at rather than an error.
+    pub found: bool,
+    /// Where the crop came from, in the caller's canvas space, so the model can
+    /// narrow it further with a normal inspect if the detector picked wrong.
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
+/// Find the printed label in the frame and return a native-resolution crop of it.
+///
+/// Detection beats asking the model for coordinates: off a downscaled overview it
+/// routinely brackets the QR block instead of the text, wasting most of the
+/// close-up's pixel budget on a barcode.
+#[tauri::command]
+pub async fn assistant_prepare_label(
+    path: String,
+    orientation_steps: Option<u32>,
+    max_dim: Option<u32>,
+    canvas_width: Option<u32>,
+    canvas_height: Option<u32>,
+    app_handle: AppHandle,
+) -> Result<LabelCrop, String> {
+    let max_dim = max_dim.unwrap_or(1568).clamp(256, 4000);
+    let steps = orientation_steps.unwrap_or(0) % 4;
+    tauri::async_runtime::spawn_blocking(move || {
+        let (source_path, sidecar_path) = parse_virtual_path(&path);
+        let source_str = source_path.to_string_lossy().to_string();
+
+        let state = app_handle.state::<AppState>();
+        let loaded: Option<std::sync::Arc<image::DynamicImage>> = {
+            let guard = state.original_image.lock().unwrap();
+            guard
+                .as_ref()
+                .filter(|l| l.path == path || l.path == source_str)
+                .map(|l| l.image.clone())
+        };
+        let full: image::DynamicImage = match loaded {
+            Some(arc) => (*arc).clone(),
+            None if is_raw_file(&source_str) => crate::culling::fast_raw_preview(&source_str)
+                .ok_or_else(|| "Failed to extract raw preview".to_string())?,
+            None => image::open(&source_path).map_err(|e| format!("Failed to decode: {}", e))?,
+        };
+
+        // Same view the model was shown, so the reported rectangle is meaningful
+        // in its `_canvas` space.
+        let sidecar_adjustments = crate::exif_processing::load_sidecar(&sidecar_path).adjustments;
+        let view = view_for_adjustments(full, &sidecar_adjustments, steps);
+        let (iw, ih) = (view.width(), view.height());
+
+        let detected = crate::label_detect::detect_label_region(&view);
+        let (region, found, rect) = match detected {
+            Some(r) => (view.crop_imm(r.x, r.y, r.width, r.height), true, r),
+            None => (
+                view.clone(),
+                false,
+                crate::label_detect::Rect {
+                    x: 0,
+                    y: 0,
+                    width: iw,
+                    height: ih,
+                },
+            ),
+        };
+
+        // Report the rectangle in the space the model reasons in, not the
+        // source's own resolution, which may differ (a 720px thumbnail canvas
+        // vs the full raw preview).
+        let sx = canvas_width
+            .filter(|&cw| cw > 0)
+            .map(|cw| cw as f64 / iw as f64)
+            .unwrap_or(1.0);
+        let sy = canvas_height
+            .filter(|&ch| ch > 0)
+            .map(|ch| ch as f64 / ih as f64)
+            .unwrap_or(1.0);
+
+        let attachment = encode_assistant_jpeg(&region, max_dim)?;
+        Ok(LabelCrop {
+            media_type: attachment.media_type,
+            data: attachment.data,
+            found,
+            x: (rect.x as f64 * sx).round() as u32,
+            y: (rect.y as f64 * sy).round() as u32,
+            width: (rect.width as f64 * sx).round() as u32,
+            height: (rect.height as f64 * sy).round() as u32,
+        })
+    })
+    .await
+    .map_err(|e| format!("Task failed: {}", e))?
+}
+
 #[tauri::command]
 pub async fn assistant_prepare_region(
     path: String,
