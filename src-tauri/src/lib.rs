@@ -23,6 +23,7 @@ mod file_management;
 mod focus_stacking;
 mod formats;
 mod gpu_processing;
+mod guided_perspective;
 mod hdr_deghosting;
 mod icc;
 mod image_loader;
@@ -55,7 +56,6 @@ use std::io::Write;
 use std::panic;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::thread;
 
 use std::borrow::Cow;
 use std::sync::{Arc, Mutex};
@@ -63,12 +63,9 @@ use std::time::Duration;
 
 use base64::{Engine as _, engine::general_purpose};
 use image::codecs::jpeg::JpegEncoder;
-use image::{DynamicImage, GenericImageView, ImageBuffer, ImageFormat, Luma, RgbImage, Rgba};
+use image::{DynamicImage, GenericImageView, ImageBuffer, ImageFormat, Luma, RgbImage};
 use image_hdr::hdr_merge_images;
 use image_hdr::input::HDRInput;
-use imageproc::drawing::draw_line_segment_mut;
-use imageproc::edges::canny;
-use imageproc::hough::{LineDetectionOptions, detect_lines};
 use imgref::ImgRef;
 use mozjpeg_rs::{Encoder, Preset};
 use rgb::{FromSlice, RGBA8};
@@ -79,24 +76,19 @@ use tauri::{Emitter, Manager, ipc::Response};
 use tempfile::NamedTempFile;
 use tokio::sync::Mutex as TokioMutex;
 
-#[cfg(target_os = "linux")]
-use webkit2gtk_nvidia_quirk::{
-    ApplyWorkaroundOptions, WorkaroundKind, apply_workaround_with_options, needs_workaround,
-};
-
 use crate::cache_utils::{
-    DecodedImageCache, GEOMETRY_KEYS, calculate_full_job_hash, calculate_geometry_hash,
-    calculate_transform_hash, calculate_visual_hash,
+    DecodedImageCache, calculate_full_job_hash, calculate_geometry_hash, calculate_transform_hash,
+    calculate_visual_hash,
 };
 use crate::file_management::{parse_virtual_path, read_file_mapped};
 use crate::formats::is_raw_file;
 use crate::hdr_deghosting::{align_hdr_frames, assert_uniform_dimensions, load_hdr_frames};
 use crate::image_loader::{composite_patches_on_image, load_and_composite};
 use crate::image_processing::{
-    Crop, GeometryParams, RenderRequest, apply_coarse_rotation, apply_cpu_default_raw_processing,
-    apply_flip, apply_geometry_warp, apply_linear_to_srgb, downscale_f32_image,
-    get_all_adjustments_from_json, get_or_init_gpu_context, process_and_get_dynamic_image,
-    resolve_tonemapper_override, resolve_tonemapper_override_from_handle, warp_image_geometry,
+    Crop, RenderRequest, apply_coarse_rotation, apply_cpu_default_raw_processing, apply_flip,
+    apply_geometry_warp, apply_linear_to_srgb, downscale_f32_image, get_all_adjustments_from_json,
+    get_or_init_gpu_context, process_and_get_dynamic_image, resolve_tonemapper_override,
+    resolve_tonemapper_override_from_handle, warp_image_geometry,
 };
 use crate::mask_generation::{
     MaskDefinition, generate_mask_bitmap, get_cached_or_generate_mask,
@@ -170,46 +162,52 @@ pub fn generate_transformed_preview(
 ) -> Result<(DynamicImage, f32, (f32, f32)), String> {
     let transform_hash = calculate_transform_hash(adjustments);
 
-    {
-        let cache_lock = state.full_transformed_cache.lock().unwrap();
-        if let Some((hash, dim, img, scale, offset)) = cache_lock.as_ref() {
-            if *hash == transform_hash && *dim == preview_dim {
-                return Ok(((**img).clone(), *scale, *offset));
+    let (transformed_full_res, unscaled_crop_offset) = {
+        let mut cache_lock = state
+            .full_transformed_cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if let Some((hash, img, offset)) = cache_lock.as_ref() {
+            if *hash == transform_hash {
+                (Arc::clone(img), *offset)
+            } else {
+                let (arc_img, offset) = compute_full_transformed_res(loaded_image, adjustments)?;
+                *cache_lock = Some((transform_hash, Arc::clone(&arc_img), offset));
+                (arc_img, offset)
             }
+        } else {
+            let (arc_img, offset) = compute_full_transformed_res(loaded_image, adjustments)?;
+            *cache_lock = Some((transform_hash, Arc::clone(&arc_img), offset));
+            (arc_img, offset)
         }
-    }
+    };
 
-    let (preview_base, scale_for_gpu, unscaled_crop_offset) =
-        compute_preview_transformed(loaded_image, adjustments, preview_dim)?;
-    let arc_img = Arc::new(preview_base);
+    let (full_res_w, full_res_h) = transformed_full_res.dimensions();
 
-    *state.full_transformed_cache.lock().unwrap() = Some((
-        transform_hash,
-        preview_dim,
-        Arc::clone(&arc_img),
-        scale_for_gpu,
-        unscaled_crop_offset,
-    ));
+    let final_preview_base = if full_res_w > preview_dim || full_res_h > preview_dim {
+        downscale_f32_image(&transformed_full_res, preview_dim, preview_dim)
+    } else {
+        (*transformed_full_res).clone()
+    };
 
-    Ok(((*arc_img).clone(), scale_for_gpu, unscaled_crop_offset))
+    let scale_for_gpu = if full_res_w > 0 {
+        final_preview_base.width() as f32 / full_res_w as f32
+    } else {
+        1.0
+    };
+
+    Ok((final_preview_base, scale_for_gpu, unscaled_crop_offset))
 }
 
-// The geometry warp is scale-invariant (see build_transform_matrices: the perspective row
-// scales as ref_dim/height, offsets scale with width/height). So warping a source that has
-// already been downscaled to preview resolution is visually identical to warping full-res and
-// then downscaling — but avoids allocating a full-res (~300MB) f32 warp buffer per edit and
-// makes the warp itself ~10x cheaper. The returned offset is kept in full-res pixels and
-// scale_for_gpu = downscale factor, so `offset * scale` stays in preview-space px as before.
-fn compute_preview_transformed(
+fn compute_full_transformed_res(
     loaded_image: &LoadedImage,
     adjustments: &serde_json::Value,
-    preview_dim: u32,
-) -> Result<(DynamicImage, f32, (f32, f32)), String> {
+) -> Result<(Arc<DynamicImage>, (f32, f32)), String> {
     let has_patches = adjustments
         .get("aiPatches")
         .and_then(|v| v.as_array())
         .is_some_and(|a| !a.is_empty());
-    let patched: Cow<DynamicImage> = if has_patches {
+    let patched_original_image = if has_patches {
         Cow::Owned(
             composite_patches_on_image(&loaded_image.image, adjustments)
                 .map_err(|e| format!("Failed to composite AI patches: {}", e))?,
@@ -218,53 +216,8 @@ fn compute_preview_transformed(
         Cow::Borrowed(loaded_image.image.as_ref())
     };
 
-    let (full_w, full_h) = patched.dimensions();
-
-    // The displayed preview is bounded by the *cropped* output, so size the source so the
-    // cropped result fills the preview box (matches the old full-res behavior's resolution).
-    let crop_max = adjustments.get("crop").and_then(|c| {
-        let w = c.get("width")?.as_f64()?;
-        let h = c.get("height")?.as_f64()?;
-        (w > 0.0 && h > 0.0).then(|| w.max(h) as f32)
-    });
-    let target_max = crop_max.unwrap_or(full_w.max(full_h) as f32);
-    let s = preview_dim as f32 / target_max;
-
-    if s < 0.98 {
-        // Fast path: downscale the source, then warp at preview resolution.
-        let small_w = (full_w as f32 * s).round().max(1.0) as u32;
-        let small_h = (full_h as f32 * s).round().max(1.0) as u32;
-        let small_src = downscale_f32_image(patched.as_ref(), small_w, small_h);
-
-        let mut adj = adjustments.clone();
-        if let Some(crop) = adj.get_mut("crop").and_then(|c| c.as_object_mut()) {
-            for k in ["x", "y", "width", "height"] {
-                if let Some(v) = crop.get(k).and_then(|v| v.as_f64()) {
-                    crop[k] = serde_json::json!(v * s as f64);
-                }
-            }
-        }
-
-        let (out, off_small) = apply_all_transformations(Cow::Owned(small_src), &adj);
-        // Report the offset in full-res pixels so downstream `offset * scale` == preview px.
-        let offset = (off_small.0 / s, off_small.1 / s);
-        return Ok((out.into_owned(), s, offset));
-    }
-
-    // Slow path (small image or tight crop): warp at native resolution, then downscale to fit.
-    let (transformed, offset) = apply_all_transformations(patched, adjustments);
-    let (tw, th) = transformed.dimensions();
-    let out = if tw > preview_dim || th > preview_dim {
-        downscale_f32_image(transformed.as_ref(), preview_dim, preview_dim)
-    } else {
-        transformed.into_owned()
-    };
-    let scale = if tw > 0 {
-        out.width() as f32 / tw as f32
-    } else {
-        1.0
-    };
-    Ok((out, scale, offset))
+    let (transformed_img, offset) = apply_all_transformations(patched_original_image, adjustments);
+    Ok((Arc::new(transformed_img.into_owned()), offset))
 }
 
 #[tauri::command]
@@ -303,7 +256,10 @@ pub fn get_cached_full_warped_image(
     let geo_hash = calculate_geometry_hash(js_adjustments);
 
     {
-        let cache_lock = state.full_warped_cache.lock().unwrap();
+        let cache_lock = state
+            .full_warped_cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         if let Some((hash, img)) = cache_lock.as_ref()
             && *hash == geo_hash
         {
@@ -322,7 +278,10 @@ pub fn get_cached_full_warped_image(
     let warped_arc = Arc::new(warped_image);
 
     {
-        let mut cache_lock = state.full_warped_cache.lock().unwrap();
+        let mut cache_lock = state
+            .full_warped_cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         *cache_lock = Some((geo_hash, Arc::clone(&warped_arc)));
     }
 
@@ -334,13 +293,18 @@ async fn update_wgpu_transform(
     payload: WgpuTransformPayload,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
-    let context = match state.gpu_context.lock().unwrap().as_ref() {
+    let context = match state
+        .gpu_context
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+    {
         Some(c) => c.clone(),
         None => return Ok(()),
     };
 
     tokio::task::spawn_blocking(move || {
-        let mut display_lock = context.display.lock().unwrap();
+        let mut display_lock = context.display.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(display) = display_lock.as_mut() {
             display.apply_pending_size(&context);
             display.latest_transform.rect = [payload.x, payload.y, payload.width, payload.height];
@@ -411,7 +375,10 @@ fn process_preview_job(
         _ => (if has_roi { 1.4_f32 } else { 1.0_f32 }, 75_u8),
     };
 
-    let mut cached_preview_lock = state.cached_preview.lock().unwrap();
+    let mut cached_preview_lock = state
+        .cached_preview
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
 
     let base_valid = cached_preview_lock
         .as_ref()
@@ -429,7 +396,10 @@ fn process_preview_job(
             cached.unscaled_crop_offset,
         )
     } else {
-        *state.gpu_image_cache.lock().unwrap() = None;
+        *state
+            .gpu_image_cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = None;
 
         let (base, scale, offset) =
             generate_transformed_preview(&state, &loaded_image, &adjustments_clone, preview_dim)?;
@@ -459,7 +429,10 @@ fn process_preview_job(
         };
 
         if is_interactive && base_valid {
-            *state.gpu_image_cache.lock().unwrap() = None;
+            *state
+                .gpu_image_cache
+                .lock()
+                .unwrap_or_else(|e| e.into_inner()) = None;
         }
 
         small
@@ -772,11 +745,11 @@ async fn apply_adjustments(
 }
 
 #[tauri::command]
-fn generate_uncropped_preview(
+async fn generate_uncropped_preview(
     js_adjustments: serde_json::Value,
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
     app_handle: tauri::AppHandle,
-) -> Result<(), String> {
+) -> Result<String, String> {
     let context = get_or_init_gpu_context(&state, &app_handle)?;
     let mut adjustments_clone = js_adjustments.clone();
     hydrate_adjustments(&state, &mut adjustments_clone);
@@ -796,73 +769,75 @@ fn generate_uncropped_preview(
         .fetch_add(1, Ordering::SeqCst)
         + 1;
 
-    thread::spawn(move || {
+    tokio::task::spawn_blocking(move || {
         let state = app_handle.state::<AppState>();
         if state.uncropped_preview_generation.load(Ordering::SeqCst) != my_generation {
-            return; // a newer request already superseded this one
+            return Err("Superseded".to_string()); // a newer request replaced this one
         }
         let path = loaded_image.path.clone();
         let is_raw = loaded_image.is_raw;
-        let unique_hash = calculate_full_job_hash(&path, &adjustments_clone);
-        let has_patches = adjustments_clone
-            .get("aiPatches")
-            .and_then(|v| v.as_array())
-            .is_some_and(|a| !a.is_empty());
-        let patched_image = if has_patches {
-            Cow::Owned(
-                composite_patches_on_image(&loaded_image.image, &adjustments_clone).unwrap_or_else(
-                    |e| {
-                        eprintln!("Failed to composite patches for uncropped preview: {}", e);
-                        loaded_image.image.as_ref().clone()
-                    },
-                ),
-            )
-        } else {
-            Cow::Borrowed(loaded_image.image.as_ref())
+        let visual_hash = calculate_visual_hash(&path, &adjustments_clone);
+
+        let pre_geometry_base = {
+            let mut cache = state.geometry_cache.lock().unwrap();
+            if let Some(cached) = cache.get(&visual_hash).cloned() {
+                cached
+            } else {
+                let has_patches = adjustments_clone
+                    .get("aiPatches")
+                    .and_then(|v| v.as_array())
+                    .is_some_and(|a| !a.is_empty());
+                let patched_image = if has_patches {
+                    Cow::Owned(
+                        composite_patches_on_image(&loaded_image.image, &adjustments_clone)
+                            .unwrap_or_else(|_| loaded_image.image.as_ref().clone()),
+                    )
+                } else {
+                    Cow::Borrowed(loaded_image.image.as_ref())
+                };
+
+                let blurred_image =
+                    crate::lens_blur::apply_lens_blur(patched_image, &adjustments_clone);
+
+                let settings = load_settings(app_handle.clone()).unwrap_or_default();
+                let target_dim = (settings.editor_preview_resolution.unwrap_or(1920) as f32) as u32;
+
+                let downscaled = downscale_f32_image(&blurred_image, target_dim, target_dim);
+
+                if cache.len() > 5 {
+                    cache.clear();
+                }
+                cache.insert(visual_hash, downscaled.clone());
+                downscaled
+            }
         };
 
-        let settings = load_settings(app_handle.clone()).unwrap_or_default();
-        let preview_dim = settings.editor_preview_resolution.unwrap_or(1920);
-
-        // Warp at preview resolution: downscale the source FIRST, then warp. The
-        // keystone/geometry homography is scale-invariant, so this is visually
-        // identical to warping full-res and downscaling — but avoids the ~300MB
-        // full-res f32 warp buffer and is ~10x cheaper. There is no crop here, so
-        // the whole (downscaled) frame maps to ~preview_dim.
-        let (full_w, full_h) = patched_image.dimensions();
-        let s = (preview_dim as f32 / full_w.max(full_h) as f32).min(1.0);
-        let warp_input: Cow<DynamicImage> = if s < 0.98 {
-            let sw = (full_w as f32 * s).round().max(1.0) as u32;
-            let sh = (full_h as f32 * s).round().max(1.0) as u32;
-            Cow::Owned(downscale_f32_image(patched_image.as_ref(), sw, sh))
+        let scale_for_gpu = if loaded_image.image.width() > 0 {
+            pre_geometry_base.width() as f32 / loaded_image.image.width() as f32
         } else {
-            patched_image
+            1.0
         };
 
-        let warped_image = apply_geometry_warp(warp_input, &adjustments_clone);
-        let blurred_image = crate::lens_blur::apply_lens_blur(warped_image, &adjustments_clone);
+        let params = crate::image_processing::get_geometry_params_from_json(&adjustments_clone);
+        let mut adjusted_params = params;
+        adjusted_params.lens_vignette_amount *= if is_raw { 0.4 } else { 0.8 };
 
+        let warped_image = warp_image_geometry(&pre_geometry_base, adjusted_params);
         let orientation_steps = adjustments_clone["orientationSteps"].as_u64().unwrap_or(0) as u8;
-        let coarse_rotated_image = apply_coarse_rotation(blurred_image, orientation_steps);
+        let flipped_image = apply_flip(
+            apply_coarse_rotation(Cow::Owned(warped_image), orientation_steps),
+            adjustments_clone["flipHorizontal"]
+                .as_bool()
+                .unwrap_or(false),
+            adjustments_clone["flipVertical"].as_bool().unwrap_or(false),
+        )
+        .into_owned();
 
-        let flip_horizontal = adjustments_clone["flipHorizontal"]
-            .as_bool()
-            .unwrap_or(false);
-        let flip_vertical = adjustments_clone["flipVertical"].as_bool().unwrap_or(false);
-
-        let flipped_image =
-            apply_flip(coarse_rotated_image, flip_horizontal, flip_vertical).into_owned();
-
-        // scale_for_gpu maps full-res coords -> this preview (used for masks).
-        // Since we downscaled the source by s before warping, that factor is s.
-        let processing_base = flipped_image;
-        let scale_for_gpu = if s < 0.98 { s } else { 1.0 };
+        let (preview_width, preview_height) = flipped_image.dimensions();
 
         if state.uncropped_preview_generation.load(Ordering::SeqCst) != my_generation {
-            return; // superseded while we were warping
+            return Err("Superseded".to_string());
         }
-
-        let (preview_width, preview_height) = processing_base.dimensions();
 
         let mask_definitions: Vec<MaskDefinition> = adjustments_clone
             .get("masks")
@@ -885,16 +860,19 @@ fn generate_uncropped_preview(
             .collect();
 
         let tm_override = resolve_tonemapper_override_from_handle(&app_handle, is_raw);
-        let uncropped_adjustments =
+        let mut uncropped_adjustments =
             get_all_adjustments_from_json(&adjustments_clone, is_raw, tm_override);
+        uncropped_adjustments.global.show_clipping = 0;
         let lut_path = adjustments_clone["lutPath"].as_str();
         let lut = lut_path.and_then(|p| lut_processing::get_or_load_lut(&state, p).ok());
+
+        let full_hash = calculate_full_job_hash(&path, &adjustments_clone);
 
         if let Ok(processed_image) = process_and_get_dynamic_image(
             &context,
             &state,
-            &processing_base,
-            unique_hash,
+            &flipped_image,
+            full_hash,
             RenderRequest {
                 adjustments: uncropped_adjustments,
                 mask_bitmaps: &mask_bitmaps,
@@ -905,278 +883,21 @@ fn generate_uncropped_preview(
         ) {
             let (width, height) = processed_image.dimensions();
             let rgb_pixels = processed_image.to_rgb8().into_vec();
-            match Encoder::new(Preset::BaselineFastest)
+
+            if let Ok(bytes) = Encoder::new(Preset::BaselineFastest)
                 .quality(80)
                 .encode_rgb(&rgb_pixels, width, height)
             {
-                Ok(bytes) => {
-                    let base64_str = general_purpose::STANDARD.encode(&bytes);
-                    let data_url = format!("data:image/jpeg;base64,{}", base64_str);
-                    let _ = app_handle.emit("preview-update-uncropped", data_url);
-                }
-                Err(e) => {
-                    log::error!("Failed to encode uncropped preview with mozjpeg-rs: {}", e);
-                }
+                let base64_str = general_purpose::STANDARD.encode(&bytes);
+                let data_url = format!("data:image/jpeg;base64,{}", base64_str);
+                return Ok(data_url);
             }
         }
-    });
 
-    Ok(())
-}
-
-#[tauri::command]
-fn generate_original_transformed_preview(
-    js_adjustments: serde_json::Value,
-    target_resolution: Option<u32>,
-    state: tauri::State<AppState>,
-    app_handle: tauri::AppHandle,
-) -> Result<String, String> {
-    let loaded_image = state
-        .original_image
-        .lock()
-        .unwrap()
-        .clone()
-        .ok_or("No original image loaded")?;
-
-    let mut adjustments_clone = js_adjustments.clone();
-
-    if let Some(obj) = adjustments_clone.as_object_mut() {
-        obj.insert(
-            "lensBlurEnabled".to_string(),
-            serde_json::Value::Bool(false),
-        );
-    }
-
-    hydrate_adjustments(&state, &mut adjustments_clone);
-
-    let mut image_for_preview = loaded_image.image.as_ref().clone();
-    if loaded_image.is_raw {
-        apply_cpu_default_raw_processing(&mut image_for_preview);
-    }
-
-    let (transformed_full_res, _unscaled_crop_offset) =
-        apply_all_transformations(Cow::Borrowed(&image_for_preview), &adjustments_clone);
-
-    let settings = load_settings(app_handle).unwrap_or_default();
-    let default_dim = settings.editor_preview_resolution.unwrap_or(1920);
-    let preview_dim = target_resolution.unwrap_or(default_dim);
-
-    let (w, h) = transformed_full_res.dimensions();
-    let transformed_image = if w > preview_dim || h > preview_dim {
-        downscale_f32_image(transformed_full_res.as_ref(), preview_dim, preview_dim)
-    } else {
-        transformed_full_res.into_owned()
-    };
-
-    let (width, height) = transformed_image.dimensions();
-    let rgb_pixels = transformed_image.to_rgb8().into_vec();
-
-    let bytes = Encoder::new(Preset::BaselineFastest)
-        .quality(80)
-        .encode_rgb(&rgb_pixels, width, height)
-        .map_err(|e| format!("Failed to encode with mozjpeg-rs: {}", e))?;
-
-    let base64_str = general_purpose::STANDARD.encode(&bytes);
-    Ok(format!("data:image/jpeg;base64,{}", base64_str))
-}
-
-#[tauri::command]
-async fn preview_geometry_transform(
-    params: GeometryParams,
-    js_adjustments: serde_json::Value,
-    show_lines: bool,
-    state: tauri::State<'_, AppState>,
-    app_handle: tauri::AppHandle,
-) -> Result<String, String> {
-    let (loaded_image_path, is_raw) = {
-        let guard = state.original_image.lock().unwrap();
-        let loaded = guard.as_ref().ok_or("No image loaded")?;
-        (loaded.path.clone(), loaded.is_raw)
-    };
-
-    let visual_hash = calculate_visual_hash(&loaded_image_path, &js_adjustments);
-
-    let base_image_to_warp = {
-        let maybe_cached_image = state
-            .geometry_cache
-            .lock()
-            .unwrap()
-            .get(&visual_hash)
-            .cloned();
-
-        if let Some(cached_image) = maybe_cached_image {
-            cached_image
-        } else {
-            let context = get_or_init_gpu_context(&state, &app_handle)?;
-
-            let original_image = {
-                let guard = state.original_image.lock().unwrap();
-                let loaded = guard.as_ref().ok_or("No image loaded")?;
-                loaded.image.clone()
-            };
-
-            let settings = load_settings(app_handle.clone()).unwrap_or_default();
-            let interactive_divisor = 1.5;
-            let final_preview_dim = settings.editor_preview_resolution.unwrap_or(1920);
-            let target_dim = (final_preview_dim as f32 / interactive_divisor) as u32;
-
-            let preview_base = tokio::task::spawn_blocking(move || -> DynamicImage {
-                downscale_f32_image(&original_image, target_dim, target_dim)
-            })
-            .await
-            .map_err(|e| e.to_string())?;
-
-            let mut temp_adjustments = js_adjustments.clone();
-            hydrate_adjustments(&state, &mut temp_adjustments);
-
-            if let Some(obj) = temp_adjustments.as_object_mut() {
-                obj.insert("crop".to_string(), serde_json::Value::Null);
-                obj.insert("rotation".to_string(), serde_json::json!(0.0));
-                obj.insert("orientationSteps".to_string(), serde_json::json!(0));
-                obj.insert("flipHorizontal".to_string(), serde_json::json!(false));
-                obj.insert("flipVertical".to_string(), serde_json::json!(false));
-                obj.insert("lensBlurEnabled".to_string(), serde_json::json!(false));
-                for key in GEOMETRY_KEYS {
-                    match *key {
-                        "transformScale"
-                        | "lensDistortionAmount"
-                        | "lensVignetteAmount"
-                        | "lensTcaAmount" => {
-                            obj.insert(key.to_string(), serde_json::json!(100.0));
-                        }
-                        "lensDistortionParams" | "lensMaker" | "lensModel" => {
-                            obj.insert(key.to_string(), serde_json::Value::Null);
-                        }
-                        "lensDistortionEnabled" | "lensTcaEnabled" | "lensVignetteEnabled" => {
-                            obj.insert(key.to_string(), serde_json::json!(true));
-                        }
-                        _ => {
-                            obj.insert(key.to_string(), serde_json::json!(0.0));
-                        }
-                    }
-                }
-            }
-
-            let tm_override = resolve_tonemapper_override_from_handle(&app_handle, is_raw);
-            let all_adjustments =
-                get_all_adjustments_from_json(&temp_adjustments, is_raw, tm_override);
-            let lut_path = temp_adjustments["lutPath"].as_str();
-            let lut = lut_path.and_then(|p| lut_processing::get_or_load_lut(&state, p).ok());
-            let mask_bitmaps = Vec::new();
-
-            let processed_base = process_and_get_dynamic_image(
-                &context,
-                &state,
-                &preview_base,
-                visual_hash,
-                RenderRequest {
-                    adjustments: all_adjustments,
-                    mask_bitmaps: &mask_bitmaps,
-                    lut,
-                    roi: None,
-                },
-                "preview_geometry_transform_base_gen",
-            )?;
-
-            let mut cache = state.geometry_cache.lock().unwrap();
-            if cache.len() > 5 {
-                cache.clear();
-            }
-            cache.insert(visual_hash, processed_base.clone());
-
-            processed_base
-        }
-    };
-
-    let final_image = tokio::task::spawn_blocking(move || -> DynamicImage {
-        let mut adjusted_params = params;
-
-        if is_raw {
-            // approximate linear vignetting correction on gamma-baked & tonemapped geometry preview
-            adjusted_params.lens_vignette_amount *= 0.4;
-        } else {
-            adjusted_params.lens_vignette_amount *= 0.8;
-        }
-
-        let warped_image = warp_image_geometry(&base_image_to_warp, adjusted_params);
-        let orientation_steps = js_adjustments["orientationSteps"].as_u64().unwrap_or(0) as u8;
-        let flip_horizontal = js_adjustments["flipHorizontal"].as_bool().unwrap_or(false);
-        let flip_vertical = js_adjustments["flipVertical"].as_bool().unwrap_or(false);
-
-        let coarse_rotated_image =
-            apply_coarse_rotation(Cow::Owned(warped_image), orientation_steps);
-        let flipped_image =
-            apply_flip(coarse_rotated_image, flip_horizontal, flip_vertical).into_owned();
-
-        if show_lines {
-            let gray_image = flipped_image.to_luma8();
-            let mut visualization = flipped_image.to_rgba8();
-            let edges = canny(&gray_image, 50.0, 100.0);
-
-            let min_dim = gray_image.width().min(gray_image.height());
-
-            let options = LineDetectionOptions {
-                vote_threshold: (min_dim as f32 * 0.24) as u32,
-                suppression_radius: 15,
-            };
-
-            let lines = detect_lines(&edges, options);
-
-            for line in lines {
-                let angle_deg = line.angle_in_degrees as f32;
-                let angle_norm = angle_deg % 180.0;
-                let alignment_threshold = 0.5;
-                let is_vertical =
-                    angle_norm < alignment_threshold || angle_norm > (180.0 - alignment_threshold);
-                let is_horizontal = (angle_norm - 90.0).abs() < alignment_threshold;
-
-                let color = if is_vertical || is_horizontal {
-                    Rgba([0, 255, 0, 255])
-                } else {
-                    Rgba([255, 0, 0, 255])
-                };
-
-                let r = line.r;
-                let theta_rad = angle_deg.to_radians();
-                let a = theta_rad.cos();
-                let b = theta_rad.sin();
-                let x0 = a * r;
-                let y0 = b * r;
-
-                let dist = (visualization.width().max(visualization.height()) * 2) as f32;
-
-                let x1 = x0 + dist * (-b);
-                let y1 = y0 + dist * (a);
-                let x2 = x0 - dist * (-b);
-                let y2 = y0 - dist * (a);
-
-                draw_line_segment_mut(&mut visualization, (x1, y1), (x2, y2), color);
-                draw_line_segment_mut(
-                    &mut visualization,
-                    (x1 + a, y1 + b),
-                    (x2 + a, y2 + b),
-                    color,
-                );
-            }
-
-            DynamicImage::ImageRgba8(visualization)
-        } else {
-            flipped_image
-        }
+        Err("Failed to process uncropped preview".to_string())
     })
     .await
-    .map_err(|e| e.to_string())?;
-
-    let (width, height) = final_image.dimensions();
-    let rgb_pixels = final_image.to_rgb8().into_vec();
-
-    let bytes = Encoder::new(Preset::BaselineFastest)
-        .quality(75)
-        .encode_rgb(&rgb_pixels, width, height)
-        .map_err(|e| format!("Failed to encode with mozjpeg-rs: {}", e))?;
-
-    let base64_str = general_purpose::STANDARD.encode(&bytes);
-    Ok(format!("data:image/jpeg;base64,{}", base64_str))
+    .map_err(|e| format!("Task execution failed: {}", e))?
 }
 
 pub fn get_original_image(
@@ -1242,7 +963,8 @@ fn generate_preset_preview(
         .collect();
 
     let tm_override = resolve_tonemapper_override_from_handle(&app_handle, is_raw);
-    let all_adjustments = get_all_adjustments_from_json(&js_adjustments, is_raw, tm_override);
+    let mut all_adjustments = get_all_adjustments_from_json(&js_adjustments, is_raw, tm_override);
+    all_adjustments.global.show_clipping = 0;
     let lut_path = js_adjustments["lutPath"].as_str();
     let lut = lut_path.and_then(|p| lut_processing::get_or_load_lut(&state, p).ok());
 
@@ -1688,7 +1410,9 @@ async fn generate_preview_for_path(
             .collect();
 
         let tm_override = resolve_tonemapper_override(&settings, is_raw);
-        let all_adjustments = get_all_adjustments_from_json(&js_adjustments, is_raw, tm_override);
+        let mut all_adjustments =
+            get_all_adjustments_from_json(&js_adjustments, is_raw, tm_override);
+        all_adjustments.global.show_clipping = 0;
         let lut_path = js_adjustments["lutPath"].as_str();
         let lut = lut_path.and_then(|p| lut_processing::get_or_load_lut(&state, p).ok());
         let unique_hash = calculate_full_job_hash(&source_path_str, &js_adjustments);
@@ -1991,11 +1715,18 @@ pub fn run() {
         .stack_size(8 * 1024 * 1024)
         .build_global();
 
-    let mut builder = tauri::Builder::default();
-
     let args: Vec<String> = std::env::args().skip(1).collect();
     let launch_req = parse_launch_args(&args);
     let is_headless = matches!(launch_req, LaunchRequest::HeadlessExport(_));
+
+    let mut builder = tauri::Builder::default();
+
+    #[cfg(target_os = "linux")]
+    {
+        if !is_headless {
+            builder = builder.plugin(tauri_plugin_wayland_nvidia_quirk::init());
+        }
+    }
 
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
@@ -2055,7 +1786,7 @@ pub fn run() {
             }
         })
         .setup(move |app| {
-            #[cfg(feature = "tethering")]
+            #[cfg(feature = "tether-usb")]
             {
                 std::thread::spawn(|| {
                     match gphoto2::Context::new() {
@@ -2091,6 +1822,10 @@ pub fn run() {
             }
 
             let app_handle = app.handle().clone();
+
+            if let Ok(cache_dir) = app_handle.path().app_cache_dir() {
+                crate::exif_processing::initialize_cache_dir(cache_dir);
+            }
 
             {
                 let disks_app_handle = app_handle.clone();
@@ -2138,7 +1873,6 @@ pub fn run() {
 
                 #[cfg(target_os = "linux")]
                 {
-                    apply_workaround_with_options(ApplyWorkaroundOptions::default());
                     if settings.linux_gpu_optimization.unwrap_or(false) {
                         std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
                         std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
@@ -2175,14 +1909,15 @@ pub fn run() {
                 && backend != "auto" {
                     log::info!("Applied processing backend setting: {}", backend);
                 }
+
             #[cfg(target_os = "linux")]
             if settings.linux_gpu_optimization.unwrap_or(false) {
                 log::info!("Applied Linux Compatibility Mode (forced software compositing).");
             } else {
-                match needs_workaround() {
-                    WorkaroundKind::None => {}
-                    kind => log::info!("Applied Nvidia workaround: {:?}", kind),
-                }
+                log::info!(
+                    "Wayland Nvidia quirk status: {:?}",
+                    tauri_plugin_wayland_nvidia_quirk::status()
+                );
             }
 
             if let LaunchRequest::HeadlessExport(session) = launch_req {
@@ -2414,10 +2149,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             apply_adjustments,
             generate_preview_for_path,
-            generate_original_transformed_preview,
             generate_preset_preview,
             generate_uncropped_preview,
-            preview_geometry_transform,
             get_log_file_path,
             frontend_log,
             save_collage,
@@ -2454,6 +2187,8 @@ pub fn run() {
             ai_commands::generate_full_image_depth_map,
             inpainting::invoke_generative_replace_with_mask_def,
             inpainting::generate_manual_cleanup_patch,
+            inpainting::generate_liquify_patch,
+            inpainting::generate_retouch_patch,
             denoising::apply_denoising,
             denoising::batch_denoise_images,
             denoising::save_denoised_image,
@@ -2499,6 +2234,7 @@ pub fn run() {
             file_management::save_presets,
             file_management::get_or_create_internal_library_root,
             file_management::reset_adjustments_for_paths,
+            file_management::apply_auto_lens_correction_to_paths,
             file_management::apply_auto_adjustments_to_paths,
             file_management::handle_import_presets_from_file,
             file_management::handle_import_legacy_presets_from_file,
@@ -2554,26 +2290,48 @@ pub fn run() {
             scanning::scan_rerender_preview,
             scanning::scan_start,
             scanning::scan_cancel,
+            guided_perspective::calculate_guided_perspective,
+            app_settings::is_tethering_supported,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(#[allow(unused_variables)] |app_handle, event| {
             match event {
                 #[cfg(target_os = "macos")]
-                tauri::RunEvent::Opened { urls } => {
-                    if let Some(url) = urls.first()
-                        && let Ok(path) = url.to_file_path()
-                        && let Some(path_str) = path.to_str()
-                    {
-                        let state = app_handle.state::<AppState>();
-                        *state.initial_file_path.lock().unwrap() = Some(path_str.to_string());
-                        log::info!("macOS open: Stored path {} for later.", path_str);
-                        // Also forward to the running frontend: files opened while the
-                        // app is already up (Finder "Open With", `open -g`) previously
-                        // went nowhere because only the startup path consumed this.
-                        let _ = app_handle.emit("open-with-file", path_str);
-                    }
-                }
+				tauri::RunEvent::Opened { urls } => {
+				    if let Some(url) = urls.first()
+				        && let Ok(path) = url.to_file_path()
+				        && let Some(path_str) = path.to_str()
+				    {
+				        let state = app_handle.state::<AppState>();
+
+				        if state
+				            .window_setup_complete
+				            .load(std::sync::atomic::Ordering::Relaxed)
+				        {
+				            if let Some(window) = app_handle.get_webview_window("main") {
+				                let _ = window.unminimize();
+				                let _ = window.show();
+				                let _ = window.set_focus();
+				            }
+
+				            log::info!("macOS runtime open: Opening {}.", path_str);
+
+				            emit_launch_request(
+				                app_handle,
+				                LaunchRequest::OpenFile(path_str.to_string()),
+				            );
+				        } else {
+				            *state.initial_file_path.lock().unwrap() =
+				                Some(path_str.to_string());
+
+				            log::info!(
+				                "macOS initial open: Stored path {} for later.",
+				                path_str
+				            );
+				        }
+				    }
+				}
                 tauri::RunEvent::ExitRequested { api, .. } => {
                     api.prevent_exit();
 

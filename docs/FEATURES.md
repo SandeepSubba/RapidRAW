@@ -106,10 +106,13 @@ and dated.
   crop; a crop icon toggles it on. The panel shows the *cropped* result until you
   activate the tool, consistent with every other module.
 - **Rotate by dragging outside the crop** (Lightroom / Capture One style).
-- **Inline perspective / keystone controls** in the Crop & Rotate panel, with
-  live sliders that commit on drag release.
-- **Guided keystone** — draw reference lines on the image to correct perspective;
-  guides are editable, with automatic auto-crop to the corrected frame.
+- **Geometry / perspective controls** in the Crop & Rotate panel (upstream v1.6.3
+  accordion). The fork pairs every perspective slider change with an automatic
+  zoom (`fitScaleForParams`) that hides the black wedges — no manual scale needed.
+- **Guided perspective** — draw reference lines on the image to correct
+  perspective (upstream v1.6.3 Rust homography solver, replacing the fork's TS
+  guided keystone). Guides persist in the sidecar and stay editable; the solver
+  auto-crops to the corrected frame.
 - **Batch-rotate** selected images with the `[` and `]` shortcuts.
 - **Saved crop ratios** — save any custom width × height (e.g. `2048 × 2292`) as a
   named preset; saved ratios appear as buttons in the aspect-ratio grid alongside the

@@ -1,5 +1,14 @@
 # Upstream v1.6.3 — retirement analysis & merge plan
 
+> **Executed.** The merge landed on `integration/all-features` following this
+> plan; §5 was decided as **keep the fork's overwrite-on-re-export** (upstream's
+> `.exists()` never-clobber pass was dropped). §1's keystone retirement and
+> §4's mandatory ports are in — see the "v1.6.3 sync notes" section of
+> `FORK_NOTES.md` for what changed where. One §4 item turned out moot:
+> upstream's `compute_max_inscribed_crop` is *not* dead in the released code —
+> the guided solver applies it natively, so only the manual-slider auto-crop
+> (`fitScaleForParams`) needed porting.
+
 Analysis of CyberTimon's v1.6.3 (86 commits since our last sync at `9776d550`)
 against this fork's feature set, done **before** merging, to decide what fork
 code can be retired. Three parallel code-level comparisons (perspective /

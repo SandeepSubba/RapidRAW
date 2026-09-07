@@ -6,7 +6,7 @@ import { ImageDimensions } from '../hooks/useImageRenderSize';
 import { ToolType } from '../components/panel/right/Masks';
 import { OverlayMode } from '../components/panel/right/CropPanel';
 
-export interface InteractivePatch {
+interface InteractivePatch {
   url: string;
   normX: number;
   normY: number;
@@ -34,7 +34,6 @@ interface EditorState {
   // Previews & Overlays
   finalPreviewUrl: string | null;
   uncroppedAdjustedPreviewUrl: string | null;
-  transformedOriginalUrl: string | null;
   interactivePatch: InteractivePatch | null;
   showOriginal: boolean;
 
@@ -63,12 +62,11 @@ interface EditorState {
   overlayRotation: number;
   isStraightenActive: boolean;
   isWbPickerActive: boolean;
+  isGuidedPerspectiveActive: boolean;
   liveRotation: number | null;
   brushSettings: BrushSettings | null;
 
   // Guided keystone: drawn reference lines in normalized (0..1) image coords
-  guidedKeystoneActive: boolean;
-  keystoneLines: Array<{ x1: number; y1: number; x2: number; y2: number }>;
 
   // Masks & AI
   activeMaskContainerId: string | null;
@@ -130,12 +128,10 @@ export const useEditorStore = create<EditorState>((set) => ({
   isRotationActive: false,
   overlayMode: 'thirds',
   overlayRotation: 0,
-  transformedOriginalUrl: null,
   isStraightenActive: false,
   isWbPickerActive: false,
+  isGuidedPerspectiveActive: false,
   liveRotation: null,
-  guidedKeystoneActive: false,
-  keystoneLines: [],
 
   copiedSectionAdjustments: null,
   copiedMask: null,

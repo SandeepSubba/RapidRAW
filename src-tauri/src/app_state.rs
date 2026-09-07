@@ -133,8 +133,8 @@ impl MetadataManager {
     }
 }
 
-// (transform_hash, preview_dim, preview-resolution transformed image, scale_for_gpu, unscaled_crop_offset)
-pub type TransformedImageCache = (u64, u32, Arc<DynamicImage>, f32, (f32, f32));
+pub type ThumbnailGeometryEntry = (u64, Arc<DynamicImage>, f32);
+pub type TransformedImageCache = (u64, Arc<DynamicImage>, (f32, f32));
 
 pub struct AppState {
     pub window_setup_complete: AtomicBool,
@@ -162,7 +162,7 @@ pub struct AppState {
     pub mask_cache: Mutex<HashMap<u64, GrayImage>>,
     pub patch_cache: Mutex<HashMap<String, serde_json::Value>>,
     pub geometry_cache: Mutex<HashMap<u64, DynamicImage>>,
-    pub thumbnail_geometry_cache: Mutex<HashMap<String, (u64, DynamicImage, f32)>>,
+    pub thumbnail_geometry_cache: Mutex<HashMap<String, ThumbnailGeometryEntry>>,
     pub lens_db: Mutex<Option<Arc<LensDatabase>>>,
     pub load_image_generation: Arc<AtomicUsize>,
     // Bumped on every uncropped-preview request so stale in-flight jobs (from a

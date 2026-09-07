@@ -10,7 +10,7 @@ import {
 
 export type SwitcherPlacement = 'bottom' | 'right' | 'left' | 'top';
 
-export interface CollapsibleSectionsState {
+interface CollapsibleSectionsState {
   basic: boolean;
   color: boolean;
   curves: boolean;
@@ -19,7 +19,12 @@ export interface CollapsibleSectionsState {
   film: boolean;
 }
 
-export interface ConfirmModalState {
+export interface CropSectionsState {
+  transform: boolean;
+  lens: boolean;
+}
+
+interface ConfirmModalState {
   confirmText?: string;
   confirmVariant?: string;
   isOpen: boolean;
@@ -28,12 +33,12 @@ export interface ConfirmModalState {
   title?: string;
 }
 
-export interface CollageModalState {
+interface CollageModalState {
   isOpen: boolean;
   sourceImages: Array<Pick<ImageFile, 'path'>>;
 }
 
-export interface PanoramaModalState {
+interface PanoramaModalState {
   error: string | null;
   finalImageBase64: string | null;
   isOpen: boolean;
@@ -42,7 +47,7 @@ export interface PanoramaModalState {
   stitchingSourcePaths: Array<string>;
 }
 
-export interface FocusStackModalState {
+interface FocusStackModalState {
   error: string | null;
   finalImageBase64: string | null;
   depthMapBase64: string | null;
@@ -52,7 +57,7 @@ export interface FocusStackModalState {
   sourcePaths: Array<string>;
 }
 
-export interface HdrModalState {
+interface HdrModalState {
   error: string | null;
   finalImageBase64: string | null;
   isOpen: boolean;
@@ -61,7 +66,7 @@ export interface HdrModalState {
   stitchingSourcePaths: Array<string>;
 }
 
-export interface DenoiseModalState {
+interface DenoiseModalState {
   isOpen: boolean;
   isProcessing: boolean;
   previewBase64: string | null;
@@ -73,7 +78,7 @@ export interface DenoiseModalState {
 }
 
 
-export interface CullingModalState {
+interface CullingModalState {
   isOpen: boolean;
   suggestions: CullingSuggestions | null;
   progress: { current: number; total: number; stage: string } | null;
@@ -81,7 +86,7 @@ export interface CullingModalState {
   pathsToCull: Array<string>;
 }
 
-export const ALL_PANELS: Panel[] = [
+const ALL_PANELS: Panel[] = [
   Panel.Metadata,
   Panel.FolderTree,
   Panel.Export,
@@ -93,7 +98,7 @@ export const ALL_PANELS: Panel[] = [
   Panel.Presets,
 ];
 
-export const DEFAULT_PANEL_DEFAULT_REGIONS: Record<Panel, PanelRegion> = {
+const DEFAULT_PANEL_DEFAULT_REGIONS: Record<Panel, PanelRegion> = {
   [Panel.Metadata]: 'leftTop',
   [Panel.FolderTree]: 'leftTop',
   [Panel.Export]: 'leftTop',
@@ -233,6 +238,7 @@ interface UIState {
   renderedPanel: Panel | null;
   slideDirection: number;
   collapsibleSectionsState: CollapsibleSectionsState;
+  cropSectionsState: CropSectionsState;
 
   isCreateFolderModalOpen: boolean;
   isRenameFolderModalOpen: boolean;
@@ -315,6 +321,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   renderedPanel: Panel.Adjustments,
   slideDirection: 1,
   collapsibleSectionsState: { basic: true, color: false, curves: true, details: false, effects: false, film: true },
+  cropSectionsState: { transform: false, lens: false },
 
   isCreateFolderModalOpen: false,
   isRenameFolderModalOpen: false,

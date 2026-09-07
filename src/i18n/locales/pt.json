@@ -178,6 +178,7 @@
     },
     "editor": {
       "autoAdjust": "Ajuste Automático",
+      "autoLensCorrection": "Correção automática de lente",
       "cancel": "Cancelar",
       "colorLabel": "Rótulo de Cor",
       "confirmReset": "Confirmar Redefinição",
@@ -245,6 +246,8 @@
       "autoAdjust_many": "Ajustar Imagens Automaticamente",
       "autoAdjust_one": "Ajustar Imagem Automaticamente",
       "autoAdjust_other": "Ajustar Imagens Automaticamente",
+      "autoLensCorrection_one": "Correção automática de lente",
+      "autoLensCorrection_other": "Correção automática de lente",
       "collage_many": "Criar Colagem",
       "collage_one": "Emoldurar Imagem",
       "collage_other": "Criar Colagem",
@@ -382,11 +385,22 @@
       "generatingDepthMap": "A calcular mapa de profundidade IA...",
       "generativeEditTitle": "Edição Generativa",
       "inpaintingTitle": "Preenchimento",
+      "liquify": {
+        "mode": "Modo Dissolver",
+        "modes": {
+          "expand": "Inchar",
+          "pinch": "Encolher",
+          "push": "Empurrar",
+          "twirl": "Redemoinho"
+        }
+      },
       "manualCleanupTitle": "Limpeza Manual",
       "noImageSelected": "Nenhuma imagem selecionada.",
       "params": {
         "feather": "Difusão",
-        "grow": "Expandir"
+        "grow": "Expandir",
+        "intensity": "Intensidade",
+        "pressure": "Pressão"
       },
       "patches": {
         "aiEdit": "Edição de IA {{count}}",
@@ -402,10 +416,14 @@
         "heal_one": "Restaurar {{count}}",
         "heal_other": "Restaurar {{count}}",
         "invertedName": "{{name}} Invertido",
+        "liquify": "Dissolver {{count}}",
+        "liquify_one": "Dissolver {{count}}",
+        "liquify_other": "Dissolver {{count}}",
         "quickErase": "Apagamento Rápido {{count}}",
         "quickErase_many": "Apagamento Rápido {{count}}",
         "quickErase_one": "Apagamento Rápido {{count}}",
-        "quickErase_other": "Apagamento Rápido {{count}}"
+        "quickErase_other": "Apagamento Rápido {{count}}",
+        "retouch": "Retoque {{count}}"
       },
       "resetInpaintingTooltip": "Redefinir Preenchimento",
       "settings": {
@@ -426,7 +444,8 @@
         "quickEraseDesc": "Preencher seleção para remover o objeto.",
         "selectionPropertiesTitle": "Propriedades da Seleção",
         "useBasicInpaint": "Usar preenchimento básico"
-      }
+      },
+      "touchUpTitle": "Retoques"
     },
     "crop": {
       "aspectRatioHeading": "Proporção de Tela",
@@ -543,6 +562,16 @@
       "exporting": "Exportando…",
       "savesTo": "Edição externa — salva em"
     },
+    "guided": {
+      "cancel": "Cancelar",
+      "drawingActive": "Desenho ativo",
+      "hint": "Desenhe ao longo das bordas da sua foto que devem ser verticais ou horizontais.",
+      "linesStatus": "Linhas guias ativas",
+      "toast": {
+        "angleRejected": "O ângulo da linha está muito longe da horizontal ou vertical",
+        "maxLines": "São permitidas no máximo 2 linhas verticais e 2 horizontais"
+      }
+    },
     "layout": {
       "split": "Dividir"
     },
@@ -575,6 +604,8 @@
         "switchToSubtract": "Mudar para Subtrair"
       },
       "addNewMask": "Adicionar Nova Máscara",
+      "aiTitle": "Seleções de IA",
+      "basicTitle": "Ferramentas Básicas",
       "brush": {
         "brush": "Pincel",
         "eraser": "Borracha",
@@ -583,7 +614,6 @@
         "size": "Tamanho do Pincel"
       },
       "comingSoon": "Em Breve",
-      "createNewTitle": "Criar Nova Máscara",
       "depthRange": {
         "far": "Longe",
         "near": "Perto",
@@ -608,6 +638,7 @@
         "maskName_one": "Máscara {{count}}",
         "maskName_other": "Máscara {{count}}"
       },
+      "rangeTitle": "Intervalos e Global",
       "resetMaskingTooltip": "Redefinir Mascaramento",
       "settings": {
         "aiModelDownloading": "Baixando Modelo de IA: ",
@@ -630,8 +661,7 @@
       "tooltips": {
         "addToCurrent": "Adicionar {{name}} à Máscara Atual ou Criar Nova (Botão Direito)",
         "createNew": "Criar Nova Máscara de {{name}}",
-        "selectNewSourcePoint": "{{modifier}} + Clique para selecionar um novo ponto de origem",
-        "showMore": "Mostrar Mais Tipos de Máscara"
+        "selectNewSourcePoint": "{{modifier}} + Clique para selecionar um novo ponto de origem"
       }
     },
     "metadata": {
@@ -777,6 +807,12 @@
       "mb": "MB",
       "tb": "TB"
     },
+    "destination": {
+      "customFolder": "Pasta personalizada",
+      "originalFolder": "Pasta da imagem original",
+      "subfolder": "Subpasta",
+      "subfolderPlaceholder": "ex. final, WebP"
+    },
     "dialog": {
       "saveEditedImageTitle": "Salvar Imagem Editada",
       "selectFolderTitle": "Selecionar Pasta para Exportar {{count}} Imagem(ns)",
@@ -811,6 +847,7 @@
     },
     "sections": {
       "advanced": "Avançado",
+      "destination": "Destino",
       "fileNaming": "Nomeação de Arquivos",
       "fileSettings": "Configurações de Arquivo",
       "imageSizing": "Dimensionamento de Imagem",
@@ -1095,11 +1132,13 @@
       "foreground": "Primeiro Plano",
       "heal": "Restaurar",
       "linear": "Linear",
+      "liquify": "Dissolver",
       "luminance": "Luminância",
       "others": "Outros",
       "quickErase": "Apagamento Rápido",
       "quickEraser": "Borracha Rápida",
       "radial": "Radial",
+      "retouch": "Retoque",
       "sky": "Céu",
       "subject": "Motivo"
     }
@@ -1166,6 +1205,7 @@
         "curves": "Curvas",
         "exposureToneMapper": "Exposição e Mapeador de Tons",
         "grain": "Granulação",
+        "guidedPerspective": "Perspectiva guiada",
         "halationGlow": "Halo e Brilho",
         "hueShift": "Deslocamento de matiz global",
         "lensCorrection": "Correção de Lente",
@@ -1420,7 +1460,10 @@
       "cancel": "Cancelar",
       "compareTooltip": "Segure para Comparar",
       "distortion": "Distorção",
+      "geometry": "Geometria",
+      "guided": "Perspectiva guiada",
       "horizontal": "Horizontal",
+      "manual": "Transformação manual",
       "maskWarning": "A transformação atualiza a geometria base. Máscaras existentes podem mudar, e máscaras de IA devem ser regeneradas.",
       "offset": "Deslocamento",
       "original": "Original",
@@ -1467,6 +1510,9 @@
       "speed": "Velocidade",
       "title": "Controles do Mouse",
       "zoom": "Multiplicador de Velocidade de Zoom",
+      "zoomClick": "Zoom da foto para 100%",
+      "zoomClickDesc": "Ampliar foto no editor para 100% ao clicar",
+      "zoomClickInfo": "Clique na foto para ampliar instantaneamente para 100% (pixels 1:1) para avaliar a nitidez e o ruído. Quando desativado, clicar aproxima gradualmente.",
       "zoomDesc": "Ajuste a rapidez com que a tela aumenta e diminui o zoom ao usar a roda de rolagem ou o gesto de pinça."
     },
     "data": {
@@ -1708,6 +1754,8 @@
       "livePreviewQualityDesc": "Controla a resolução e a compressão da imagem ao arrastar controles deslizantes. Qualidade mais baixa melhora significativamente a capacidade de resposta.",
       "livePreviews": "Visualizações Interativas ao Vivo",
       "livePreviewsDesc": "Atualize a visualização imediatamente ao arrastar os controles deslizantes. Desative isso se a interface parecer lenta durante os ajustes.",
+      "mediumThumbnailRes": "Resolução da miniatura do editor",
+      "mediumThumbnailResDesc": "Resolução da visualização exibida enquanto as imagens completas carregam no editor.",
       "modes": {
         "dynamic": "Dinâmico",
         "static": "Resolução Fixa"
@@ -1756,6 +1804,8 @@
       "renderScaleDesc": "Dimensiona a resolução de renderização em relação à sua tela. Valores mais baixos melhoram o desempenho em telas de alta resolução ao custo de alguma nitidez.",
       "restartRequired": "As alterações no mecanismo de processamento exigem uma reinicialização do aplicativo para entrarem em vigor.",
       "saveRelaunch": "Salvar e Reiniciar",
+      "smallThumbnailRes": "Resolução das miniaturas da grade",
+      "smallThumbnailResDesc": "Resolução das miniaturas exibidas na grade da biblioteca.",
       "staticDesc": "O editor renderiza a imagem em uma resolução fixa. Esse modo é o mais rápido e consistente, tornando-o ideal para hardware de baixo desempenho, onde o desempenho suave é priorizado sobre o zoom com pixels perfeitos.",
       "staticPreviewRes": "Resolução de Visualização Estática",
       "staticPreviewResDesc": "Define a resolução para visualizações estáticas como modo de corte, correção de lente e ferramentas de perspectiva. Não afeta a visualização principal do editor.",

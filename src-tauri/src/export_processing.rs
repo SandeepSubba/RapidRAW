@@ -73,6 +73,10 @@ pub struct ExportSettings {
     pub export_masks: bool,
     #[serde(default)]
     pub preserve_folders: bool,
+    #[serde(default)]
+    pub destination_type: Option<String>,
+    #[serde(default)]
+    pub subfolder: Option<String>,
 }
 
 #[derive(Clone)]
@@ -470,6 +474,15 @@ fn process_image_for_export_pipeline(
 
 fn set_timestamps_from_exif(src: &Path, dst: &Path) {
     let capture_dt = exif_processing::get_creation_date_from_path(src);
+
+    if capture_dt.timestamp() <= 0 {
+        let now = filetime::FileTime::now();
+        if let Err(e) = filetime::set_file_times(dst, now, now) {
+            log::warn!("Could not set timestamps on '{}': {}", dst.display(), e);
+        }
+        return;
+    }
+
     let ft = filetime::FileTime::from_unix_time(
         capture_dt.timestamp(),
         capture_dt.timestamp_subsec_nanos(),
@@ -519,7 +532,8 @@ fn save_image_with_metadata(
     let embedded_check = image_bytes.clone();
 
     #[cfg(not(target_os = "android"))]
-    fs::write(output_path, image_bytes).map_err(|e| e.to_string())?;
+    fs::write(output_path, image_bytes)
+        .map_err(|e| format!("Failed to write file to '{}': {}", output_path.display(), e))?;
 
     // TIFF, WebP, AVIF and JXL each need container surgery to carry an XMP
     // packet, so their keywords ride alongside in a .xmp sidecar — the standard
@@ -1132,24 +1146,56 @@ pub(crate) async fn export_images_impl(
                 };
 
                 let new_filename = format!("{}.{}", new_stem, output_format);
-                let output_path = if is_explicit_file_path && total_paths == 1 {
-                    output_folder_path
-                } else if export_settings.preserve_folders {
-                    if let Some(rel_dir) = relative_export_dir_for_preserved_folders(
-                        source_path.as_path(),
-                        &base_origin_folders,
-                    ) {
-                        let full_dir = output_folder_path.join(rel_dir);
-                        if let Err(e) = std::fs::create_dir_all(&full_dir) {
-                            log::warn!("Failed to create export subdirectory: {}", e);
+
+                let output_path =
+                    if export_settings.destination_type.as_deref() == Some("originalFolder") {
+                        let mut dir = source_path
+                            .parent()
+                            .unwrap_or(std::path::Path::new(""))
+                            .to_path_buf();
+                        if let Some(sub) = &export_settings.subfolder {
+                            let mut trimmed = sub.trim();
+
+                            while trimmed.starts_with('/') || trimmed.starts_with('\\') {
+                                trimmed = &trimmed[1..];
+                            }
+
+                            if !trimmed.is_empty() {
+                                dir = dir.join(trimmed);
+                            }
                         }
-                        full_dir.join(&new_filename)
+
+                        if let Err(e) = std::fs::create_dir_all(&dir) {
+                            return Err(format!(
+                                "Failed to create export subdirectory '{}': {}",
+                                dir.display(),
+                                e
+                            ));
+                        }
+
+                        dir.join(&new_filename)
+                    } else if is_explicit_file_path && total_paths == 1 {
+                        output_folder_path.clone()
+                    } else if export_settings.preserve_folders {
+                        if let Some(rel_dir) = relative_export_dir_for_preserved_folders(
+                            source_path.as_path(),
+                            &base_origin_folders,
+                        ) {
+                            let full_dir = output_folder_path.join(rel_dir);
+                            if let Err(e) = std::fs::create_dir_all(&full_dir) {
+                                return Err(format!(
+                                    "Failed to create export subdirectory '{}': {}",
+                                    full_dir.display(),
+                                    e
+                                ));
+                            }
+                            full_dir.join(&new_filename)
+                        } else {
+                            output_folder_path.join(&new_filename)
+                        }
                     } else {
                         output_folder_path.join(&new_filename)
-                    }
-                } else {
-                    output_folder_path.join(&new_filename)
-                };
+                    };
 
                 // First claimant keeps the name; later ones get _2, _3… — but only
                 // on an actual collision, so a template that already yields unique
@@ -1484,6 +1530,8 @@ pub async fn run_headless_export(
         watermark: None,
         export_masks: false,
         preserve_folders: true,
+        destination_type: None,
+        subfolder: None,
     };
 
     let mut custom_adjustments = None;

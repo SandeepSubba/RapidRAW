@@ -107,6 +107,38 @@ Watch the GPU uniform struct when both sides added fields: the Rust struct in
 identical field order, and the scalar count before the `mat3x3` block must stay
 a multiple of 4 — absorb `_pad_*` slots rather than growing the struct.
 
+### v1.6.3 sync notes
+
+The v1.6.3 merge (see `docs/UPSTREAM-1.6.3-PLAN.md` for the full per-feature
+analysis) retired fork code in favour of upstream equivalents:
+
+- **Guided keystone → guided perspective.** The fork's TS solver UI
+  (`GuidedKeystoneOverlay.tsx`, `keystoneLines`/`guidedKeystoneActive` store
+  fields, `solveKeystone` usage in CropPanel) is gone; upstream's
+  `guided_perspective.rs` Rust homography (persisted, re-editable guides,
+  native `compute_max_inscribed_crop` auto-crop) replaces it.
+  `src/utils/keystone.ts` stays: `fitScaleForParams` still auto-zooms the
+  manual perspective sliders and old sidecars (wired into the Geometry
+  accordion's V/H onChange and a CropPanel effect), and the solver tests
+  document the shared homography math.
+- **Export claim-set semantics kept.** Upstream 27f27c3b added an
+  `output_path.exists()` check (never overwrite files already on disk).
+  The fork deliberately overwrites on re-export (web-export workflow), so
+  only the fork's in-run `used_output_paths` claim set survives; upstream's
+  `used_paths` pass was dropped during the merge.
+- **Thumbnails split small/medium** (upstream): grid uses
+  `smallThumbnailResolution`, filmstrip/preview `mediumThumbnailResolution`.
+  The RAW fast path still goes through the fork's
+  `fast_raw_preview_scaled` (IDCT-scaled embedded preview), now honouring
+  upstream's `always_decode_raw_thumbnails` setting.
+- **Uncropped preview**: upstream's `geometry_cache` pipeline adopted; the
+  fork's generation-counter coalescing was re-injected on top.
+- **EXIF caches**: primary `.rrdata`-embedded EXIF (with the fork's
+  UserComment healing) is consulted first, then upstream's new `.rrcache`;
+  legacy `.rrexif` files still migrate into the primary sidecar.
+- `is_tethering_supported` is implemented on the fork's `tether-usb`
+  feature (upstream keys it on their `tethering` feature).
+
 ## Build / run
 
 ```bash

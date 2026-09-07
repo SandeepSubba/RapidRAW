@@ -5,7 +5,7 @@ import clsx from 'clsx';
 import { useDroppable, useDndMonitor } from '@dnd-kit/core';
 import { DEFAULT_PANEL_SECTION_HEIGHT, SwitcherPlacement, useUIStore } from '../../store/useUIStore';
 import { Panel, PanelRegion } from '../ui/AppProperties';
-import PanelSwitcher from './PanelSwitcher';
+import PanelSwitcher, { MobilePanelSwitcher } from './PanelSwitcher';
 
 const COLLAPSE_THRESHOLD = 200;
 
@@ -21,6 +21,7 @@ interface SidePanelAreaProps {
   // Panels to treat as absent (e.g. the assistant while the film scanner is
   // open); a region left empty by this collapses entirely.
   hiddenPanels?: Panel[];
+  showAdditionalTabs?: boolean;
 }
 
 function RegionDroppableContainer({
@@ -323,6 +324,7 @@ export default function SidePanelArea({
   onWidthReset,
   isResizing,
   hiddenPanels,
+  showAdditionalTabs = false,
 }: SidePanelAreaProps) {
   const panelLayout = useUIStore((s) => s.panelLayout);
   const isFullScreen = useUIStore((s) => s.isFullScreen);
@@ -335,7 +337,8 @@ export default function SidePanelArea({
 
   const topHeight = useUIStore((s) => (side === 'left' ? s.leftTopHeight : s.rightTopHeight));
   const setUI = useUIStore((s) => s.setUI);
-
+  const activePanel = useUIStore((s) => s.activePanel);
+  const setPanel = useUIStore((s) => s.setPanel);
   const colContainerRef = useRef<HTMLDivElement>(null);
 
   const handleVerticalResize = useCallback(
@@ -393,6 +396,50 @@ export default function SidePanelArea({
 
   const isCollapsed = width < COLLAPSE_THRESHOLD;
   const shouldAnimateWidth = !isInstantTransition && (!isResizing || isCollapsed);
+
+  if (showAdditionalTabs) {
+    return (
+      <div
+        className={clsx(
+          'flex shrink-0 h-full relative overflow-hidden',
+          isFullScreen ? 'w-0 opacity-0 pointer-events-none' : 'opacity-100',
+          shouldAnimateWidth && 'transition-all duration-300 ease-in-out',
+        )}
+        style={{ width: isFullScreen ? 0 : width }}
+      >
+        <div
+          className="shrink-0 w-2 my-auto h-full cursor-col-resize z-20"
+          onPointerDown={onWidthChange}
+          onDoubleClick={onWidthReset}
+        />
+        <div className="flex-1 min-w-0 min-h-0 flex bg-bg-secondary rounded-lg overflow-hidden border border-surface">
+          <div
+            className={clsx(
+              'relative flex-1 min-w-0 min-h-0 transition-opacity duration-200',
+              isCollapsed ? 'opacity-0 pointer-events-none' : 'opacity-100 pointer-events-auto',
+            )}
+          >
+            {activePanel && (
+              <div className="absolute inset-0 overflow-y-auto custom-scrollbar">{renderPanel(activePanel)}</div>
+            )}
+          </div>
+          <MobilePanelSwitcher
+            activePanel={activePanel}
+            onPanelSelect={(id) => {
+              setPanel(id);
+              if (isCollapsed) {
+                setUI((s) => ({
+                  uiVisibility: { ...s.uiVisibility, rightPanel: true },
+                  rightPanelWidth: s.rightPanelWidth < 250 ? 350 : s.rightPanelWidth,
+                }));
+              }
+            }}
+            placement="right"
+          />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
