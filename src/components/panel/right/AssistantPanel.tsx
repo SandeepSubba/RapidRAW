@@ -681,11 +681,37 @@ export default function AssistantPanel() {
       ? outgoing.length === 0
       : !doBatch && outgoing.length === 0 && !!currentImage && !!viewerUrl;
 
+    // Prohibitions ("don't scan or ocr these") are read across the WHOLE
+    // conversation plus the message being sent: a standing rule must not scroll
+    // out of a recent-turns window and silently re-enable scanning. Computed
+    // here, before the badge, so the count can reflect what is really sent.
+    const priorUserText = (() => {
+      const s = useAssistantStore.getState();
+      const msgs = s.conversations.find((c) => c.id === s.activeId)?.messages ?? [];
+      return msgs.filter((m) => m.role === 'user').map((m) => m.content);
+    })();
+    const PROHIBITION =
+      /\b(?:don'?t|do(?:es)? not|cannot|can'?t|never|no|not|without|avoid|skip|stop)\b[^.!?]{0,40}?\b(?:scan(?:ning)?|ocr|inspect|zoom|read(?:ing)?|attach|send)\b/;
+    const lastUserText = (text || '').toLowerCase();
+    // A later explicit request to look lifts the standing rule, so one "don't
+    // scan" cannot mute OCR for the rest of the session.
+    const latestAsksToScan =
+      !PROHIBITION.test(lastUserText) && /\b(scan|ocr|read|inspect|zoom in|look at)\b/.test(lastUserText);
+    const forbidsScanning =
+      PROHIBITION.test([...priorUserText, text].join('\n').toLowerCase()) && !latestAsksToScan;
+
     const userMessage: AssistantMessage = {
       id: nextMessageId(),
       role: 'user',
       content: text || t('editor.assistant.imageOnly', '(image)'),
-      imageCount: doBatch ? selectedPaths.length : outgoing.length + (willAttachViewer ? 1 : 0),
+      // Count what is actually sent: with scanning ruled out nothing is
+      // attached, and showing "4 image(s)" made it look like the app had
+      // ignored the instruction.
+      imageCount: doBatch
+        ? forbidsScanning
+          ? 0
+          : selectedPaths.length
+        : outgoing.length + (willAttachViewer ? 1 : 0),
     };
     addMessage(userMessage);
     setInput('');
@@ -702,20 +728,12 @@ export default function AssistantPanel() {
     // Infer what the user wants written, scanning recent user turns so "do it
     // again"/"do the same" follow-ups inherit the intent from earlier messages.
     // Used to mirror title<->filename when a weak model fills only one of them.
-    const userTurns = activeMessages.filter((m) => m.role === 'user');
-    const recentUserText = userTurns
+    const recentUserText = activeMessages
+      .filter((m) => m.role === 'user')
       .slice(-8)
       .map((m) => m.content)
       .join('\n')
       .toLowerCase();
-    // Prohibitions are read across the WHOLE conversation, not the recent
-    // window: "never OCR these" is a standing rule, and letting it scroll out of
-    // an 8-turn window silently re-enabled scanning the user had ruled out.
-    const allUserText = userTurns
-      .map((m) => m.content)
-      .join('\n')
-      .toLowerCase();
-    const lastUserText = (userTurns[userTurns.length - 1]?.content || '').toLowerCase();
     const intent = {
       rename: /\b(rename|renamed|file ?name|file'?s name)\b/.test(recentUserText),
       title: /\btitle\b/.test(recentUserText),
@@ -729,14 +747,6 @@ export default function AssistantPanel() {
     // Arriving as an "[app]" turn it looks precisely like an injection, and the
     // model rightly refused it. So an explicit prohibition wins over the
     // keywords.
-    const PROHIBITION =
-      /\b(?:don'?t|do(?:es)? not|cannot|can'?t|never|no|not|without|avoid|skip|stop)\b[^.!?]{0,40}?\b(?:scan(?:ning)?|ocr|inspect|zoom|read(?:ing)?|attach|send)\b/;
-    // A later explicit request to look at the image lifts the standing rule —
-    // otherwise one "don't scan" would mute OCR for the rest of the session with
-    // no way back short of a new conversation.
-    const latestAsksToScan =
-      !PROHIBITION.test(lastUserText) && /\b(scan|ocr|read|inspect|zoom in|look at)\b/.test(lastUserText);
-    const forbidsScanning = PROHIBITION.test(allUserText) && !latestAsksToScan;
     const ocrIntent =
       !forbidsScanning &&
       /\b(read|ocr|label|code|weight|gms|gsm|extract|text|number)\b/.test(recentUserText);
@@ -787,19 +797,26 @@ export default function AssistantPanel() {
             // Same inspect loop as single-image chat: small label text ("gms",
             // codes) is often illegible at attachment size — let the model pull
             // a native-resolution region before it commits values to tags.
-            // Stated before the image so a sequence rule is in hand as the model
-            // reads it. 1-based to match how people count ("every two images").
-            const positionNote =
-              `[app] Batch position: image ${batchIndex} of ${paths.length}. File on disk: ${name}.` +
-              (previousOutcome ? ` Previous image (${batchIndex - 1} of ${paths.length}) ended as: ${previousOutcome}.` : '') +
-              ` If the user's instruction counts images or continues a sequence, use this position — you cannot infer it from the image itself.`;
-            let itemHistory = [...batchHistory, { role: 'user', content: positionNote }];
+            // Batch position rides in the structured context, NOT as an "[app]"
+            // pseudo-user turn. Appended text claiming to be from the app is
+            // indistinguishable from an injection — the model flagged exactly
+            // that and refused it, rightly. The context payload is app-supplied
+            // by construction and the field is documented in the system prompt,
+            // so it carries authority a fabricated user message cannot.
+            // 1-based, matching how people count ("every two images").
+            const batchContext = {
+              index: batchIndex,
+              total: paths.length,
+              file: name,
+              ...(previousOutcome ? { previous: previousOutcome } : {}),
+            };
+            let itemHistory = batchHistory;
             let itemImages = prepared ? [{ mediaType: prepared.mediaType, data: prepared.data }] : [];
             let response: any;
             for (let round = 0; ; round++) {
               response = await invoke(Invokes.AssistantChat, {
                 messages: itemHistory,
-                adjustments: canvas ? { _canvas: canvas } : null,
+                adjustments: { ...(canvas ? { _canvas: canvas } : {}), _batch: batchContext },
                 currentMetadata: meta,
                 images: itemImages,
                 model: selectedModel || null,
