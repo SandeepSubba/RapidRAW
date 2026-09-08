@@ -859,6 +859,15 @@ export const useKeyboardShortcuts = ({
         document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA';
       if (isInputFocused) return;
 
+      // Highlighted text means a plain copy is intended — assistant replies are
+      // select-text, and selecting one leaves focus on the body rather than an
+      // input, so Ctrl+C fell through to copy_adjustments. That action calls
+      // preventDefault, so the native copy never ran and the clipboard silently
+      // kept whatever it held before.
+      const selection = window.getSelection();
+      const hasTextSelection = !!selection && !selection.isCollapsed && selection.toString().trim().length > 0;
+      if (hasTextSelection && (event.ctrlKey || event.metaKey) && event.code === 'KeyC') return;
+
       for (const builtin of builtinShortcuts) {
         if (builtin.match(event, state)) {
           builtin.execute(event, state);
