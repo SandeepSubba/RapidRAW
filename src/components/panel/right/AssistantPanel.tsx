@@ -747,6 +747,20 @@ export default function AssistantPanel() {
     // Arriving as an "[app]" turn it looks precisely like an injection, and the
     // model rightly refused it. So an explicit prohibition wins over the
     // keywords.
+    // "increase the number after every two images" is arithmetic over a
+    // sequence, and asking the model to carry a counter across independent
+    // per-image calls gave it one chance to drift per image. When it repeated a
+    // name the collision handler dutifully appended -001, -002 … -035, turning a
+    // mistake into a plausible-looking file. The app computes these names
+    // instead; the model is left to read the tag and decide content.
+    const NUMBER_WORDS: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5 };
+    const numberingRule = recentUserText.match(
+      /(?:increase|increment|bump|advance|change)[^.!?]{0,40}?after\s+(?:every\s+)?(one|two|three|four|five|\d+)\s*(?:image|photo|shot|frame)/,
+    );
+    const imagesPerNumber = numberingRule
+      ? (NUMBER_WORDS[numberingRule[1]] ?? parseInt(numberingRule[1], 10)) || null
+      : null;
+
     const ocrIntent =
       !forbidsScanning &&
       /\b(read|ocr|label|code|weight|gms|gsm|extract|text|number)\b/.test(recentUserText);
@@ -775,6 +789,10 @@ export default function AssistantPanel() {
         // Position and the previous result are carried across explicitly.
         let batchIndex = 0;
         let previousOutcome: string | null = null;
+        // Seeded from the name the model gives the FIRST image, so a code it
+        // read off that tag still sets the series; every later name is computed,
+        // not proposed.
+        let numberSeed: { prefix: string; value: number; digits: number } | null = null;
         for (const path of paths) {
           if (cancelRef.current) break;
           batchIndex += 1;
@@ -887,6 +905,39 @@ export default function AssistantPanel() {
               continue;
             }
             if (cancelRef.current) break;
+
+            // App-assigned numbering. The first image seeds the series from
+            // whatever the model named it; from then on the name is derived from
+            // the batch position, so a 200-image run is exact by construction and
+            // a single wrong guess cannot cascade.
+            if (imagesPerNumber) {
+              const proposed = typeof response?.filename === 'string' ? response.filename : '';
+              if (!numberSeed) {
+                const m = proposed.match(/^(.*?)(\d+)$/);
+                if (m) numberSeed = { prefix: m[1], value: parseInt(m[2], 10), digits: m[2].length };
+              }
+              if (numberSeed) {
+                const step = Math.floor((batchIndex - 1) / imagesPerNumber);
+                const within = (batchIndex - 1) % imagesPerNumber;
+                const stem =
+                  numberSeed.prefix + String(numberSeed.value + step).padStart(numberSeed.digits, '0');
+                // Second and later images of a group repeat the number with a
+                // suffix — the same shape the collision handler produced, now
+                // chosen deliberately rather than as a side effect of a clash.
+                const assigned = within === 0 ? stem : `${stem}-${String(within).padStart(3, '0')}`;
+                response = {
+                  ...response,
+                  filename: assigned,
+                  // Keep the title on the number, not the suffix: both images of
+                  // a pair are the same product.
+                  metadata:
+                    intent.title && response?.metadata
+                      ? { ...response.metadata, ImageDescription: stem }
+                      : response?.metadata,
+                };
+              }
+            }
+
             const { metaPatch, org } = await applyMetaOrg(response, path, intent);
             done += 1;
             // Carry forward what actually landed on disk, not what the model
