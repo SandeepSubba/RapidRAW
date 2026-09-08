@@ -702,53 +702,99 @@ export default function AssistantPanel() {
     // Infer what the user wants written, scanning recent user turns so "do it
     // again"/"do the same" follow-ups inherit the intent from earlier messages.
     // Used to mirror title<->filename when a weak model fills only one of them.
-    const recentUserText = activeMessages
-      .filter((m) => m.role === 'user')
+    const userTurns = activeMessages.filter((m) => m.role === 'user');
+    const recentUserText = userTurns
       .slice(-8)
       .map((m) => m.content)
       .join('\n')
       .toLowerCase();
+    // Prohibitions are read across the WHOLE conversation, not the recent
+    // window: "never OCR these" is a standing rule, and letting it scroll out of
+    // an 8-turn window silently re-enabled scanning the user had ruled out.
+    const allUserText = userTurns
+      .map((m) => m.content)
+      .join('\n')
+      .toLowerCase();
+    const lastUserText = (userTurns[userTurns.length - 1]?.content || '').toLowerCase();
     const intent = {
       rename: /\b(rename|renamed|file ?name|file'?s name)\b/.test(recentUserText),
       title: /\btitle\b/.test(recentUserText),
     };
     // Requests that read text off the image get a hard verification gate in
     // batch: values are not accepted from the downscaled overview alone.
-    const ocrIntent = /\b(read|ocr|label|code|weight|gms|gsm|extract|text|number)\b/.test(recentUserText);
+    //
+    // A user forbidding OCR names it to do so ("don't scan or ocr these"), which
+    // a bare keyword match reads as asking for it — the gate then fired and told
+    // the model to inspect, contradicting the user's own standing instruction.
+    // Arriving as an "[app]" turn it looks precisely like an injection, and the
+    // model rightly refused it. So an explicit prohibition wins over the
+    // keywords.
+    const PROHIBITION =
+      /\b(?:don'?t|do(?:es)? not|cannot|can'?t|never|no|not|without|avoid|skip|stop)\b[^.!?]{0,40}?\b(?:scan(?:ning)?|ocr|inspect|zoom|read(?:ing)?|attach|send)\b/;
+    // A later explicit request to look at the image lifts the standing rule —
+    // otherwise one "don't scan" would mute OCR for the rest of the session with
+    // no way back short of a new conversation.
+    const latestAsksToScan =
+      !PROHIBITION.test(lastUserText) && /\b(scan|ocr|read|inspect|zoom in|look at)\b/.test(lastUserText);
+    const forbidsScanning = PROHIBITION.test(allUserText) && !latestAsksToScan;
+    const ocrIntent =
+      !forbidsScanning &&
+      /\b(read|ocr|label|code|weight|gms|gsm|extract|text|number)\b/.test(recentUserText);
 
     try {
       if (doBatch) {
         const paths = [...selectedPaths];
         // Nudge the model to act on the attached image only, so it OCRs each
-        // image's own label instead of reusing values from earlier ones.
+        // image's own label instead of reusing values from earlier ones. When
+        // the user has ruled scanning out, the nudge drops the OCR half rather
+        // than ordering the very thing they forbade.
+        const batchNudge = forbidsScanning
+          ? 'Apply the workflow to THIS image only; do not reuse values from other images.'
+          : 'Apply the workflow to the ATTACHED image only. Read/OCR its own label; do not reuse values from other images.';
         const batchHistory = history.map((m, i) =>
           i === history.length - 1 && m.role === 'user'
-            ? {
-                ...m,
-                content: `${m.content}\n\nApply the workflow to the ATTACHED image only. Read/OCR its own label; do not reuse values from other images.`,
-              }
+            ? { ...m, content: `${m.content}\n\n${batchNudge}` }
             : m,
         );
 
         let done = 0;
+        // Each image runs in its own conversation, so without this the model has
+        // no idea where it sits in the batch. Rules the user states as a sequence
+        // ("bump the suffix every two images", "continue the numbering") are then
+        // unsatisfiable — not a reasoning failure, just missing information.
+        // Position and the previous result are carried across explicitly.
+        let batchIndex = 0;
+        let previousOutcome: string | null = null;
         for (const path of paths) {
           if (cancelRef.current) break;
+          batchIndex += 1;
           const name = (path.split(/[\\/]/).pop() || path).split('?vc=')[0];
           try {
-            const prepared: any = await invoke(Invokes.AssistantPrepareImage, {
-              path,
-              maxDim: imageMaxDim,
-            });
+            // "Don't send any images" is taken literally: nothing is decoded or
+            // attached, which also skips the inspect loop below (it needs a
+            // canvas) and saves the upload on every item in the batch.
+            const prepared: any = forbidsScanning
+              ? null
+              : await invoke(Invokes.AssistantPrepareImage, {
+                  path,
+                  maxDim: imageMaxDim,
+                });
             const canvas =
-              prepared.fullWidth && prepared.fullHeight
+              prepared?.fullWidth && prepared?.fullHeight
                 ? { width: prepared.fullWidth, height: prepared.fullHeight }
                 : null;
             const meta = readCurrentMetadata(imageList.find((i) => i.path === path)?.exif || {});
             // Same inspect loop as single-image chat: small label text ("gms",
             // codes) is often illegible at attachment size — let the model pull
             // a native-resolution region before it commits values to tags.
-            let itemHistory = batchHistory;
-            let itemImages = [{ mediaType: prepared.mediaType, data: prepared.data }];
+            // Stated before the image so a sequence rule is in hand as the model
+            // reads it. 1-based to match how people count ("every two images").
+            const positionNote =
+              `[app] Batch position: image ${batchIndex} of ${paths.length}. File on disk: ${name}.` +
+              (previousOutcome ? ` Previous image (${batchIndex - 1} of ${paths.length}) ended as: ${previousOutcome}.` : '') +
+              ` If the user's instruction counts images or continues a sequence, use this position — you cannot infer it from the image itself.`;
+            let itemHistory = [...batchHistory, { role: 'user', content: positionNote }];
+            let itemImages = prepared ? [{ mediaType: prepared.mediaType, data: prepared.data }] : [];
             let response: any;
             for (let round = 0; ; round++) {
               response = await invoke(Invokes.AssistantChat, {
@@ -826,6 +872,13 @@ export default function AssistantPanel() {
             if (cancelRef.current) break;
             const { metaPatch, org } = await applyMetaOrg(response, path, intent);
             done += 1;
+            // Carry forward what actually landed on disk, not what the model
+            // proposed — a rename may have been given a -001 suffix to dodge a
+            // collision, and the next image has to continue from the real name.
+            previousOutcome =
+              [org, metaPatch?.ImageDescription ? `title "${metaPatch.ImageDescription}"` : null]
+                .filter(Boolean)
+                .join(' · ') || 'no changes';
             addMessage({
               id: nextMessageId(),
               role: 'assistant',
