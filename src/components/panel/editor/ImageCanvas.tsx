@@ -1514,9 +1514,11 @@ const ImageCanvas = memo(
         if (!scale) return;
         const sourceX = d.sourceX + (ev.clientX - d.clientX) / scale;
         const sourceY = d.sourceY + (ev.clientY - d.clientY) / scale;
+        // Only the source indicator (crosshair + dashed ghost) follows the
+        // drag. Re-cloning live here made the patch content re-sample every
+        // move, so the painted area visibly slid along with the cursor — the
+        // clone is applied once, on release.
         updateSubMask(d.subMaskId, { parameters: { ...d.parameters, sourceX, sourceY } });
-        // Coalesced, so a fast drag does not queue a render per pixel.
-        if (d.parameters?.lines?.length > 0) triggerDirectPatch(d.subMaskId, sourceX, sourceY);
       };
 
       const up = (ev: MouseEvent) => {
@@ -1526,24 +1528,10 @@ const ImageCanvas = memo(
         if (!d) return;
         const { scale } = imageRenderSize;
         if (!scale) return;
-        // Re-apply at the released position: the coalescing above may have
-        // dropped the last move, which is the one the user actually chose.
         const sourceX = d.sourceX + (ev.clientX - d.clientX) / scale;
         const sourceY = d.sourceY + (ev.clientY - d.clientY) / scale;
         updateSubMask(d.subMaskId, { parameters: { ...d.parameters, sourceX, sourceY } });
         if (d.parameters?.lines?.length > 0) triggerDirectPatch(d.subMaskId, sourceX, sourceY);
-
-        const pts = (d.parameters?.lines || []).flatMap((l: any) => l.points || []);
-        if (pts.length) {
-          const xs = pts.map((p: any) => p.x);
-          const ys = pts.map((p: any) => p.y);
-          console.info(
-            '[clone-source] drag end — strokes bbox',
-            `x ${Math.min(...xs).toFixed(1)}..${Math.max(...xs).toFixed(1)}`,
-            `y ${Math.min(...ys).toFixed(1)}..${Math.max(...ys).toFixed(1)}`,
-            `source ${sourceX.toFixed(1)},${sourceY.toFixed(1)}`,
-          );
-        }
       };
 
       window.addEventListener('mousemove', move);
@@ -3443,22 +3431,6 @@ const ImageCanvas = memo(
                         subMaskId: id,
                         parameters: activeSubMask.parameters,
                       };
-                      // The painted strokes and the source ghost look alike, so
-                      // "the heal area moved" can mean either. Record the stroke
-                      // bounds to tell a real move from a moving preview.
-                      {
-                        const pts = (activeSubMask.parameters?.lines || []).flatMap((l: any) => l.points || []);
-                        if (pts.length) {
-                          const xs = pts.map((p: any) => p.x);
-                          const ys = pts.map((p: any) => p.y);
-                          console.info(
-                            '[clone-source] drag start — strokes bbox',
-                            `x ${Math.min(...xs).toFixed(1)}..${Math.max(...xs).toFixed(1)}`,
-                            `y ${Math.min(...ys).toFixed(1)}..${Math.max(...ys).toFixed(1)}`,
-                            `source ${activeSubMask.parameters.sourceX.toFixed(1)},${activeSubMask.parameters.sourceY.toFixed(1)}`,
-                          );
-                        }
-                      }
                       setIsDraggingSource(true);
                     }}
                   />
@@ -3523,6 +3495,7 @@ const ImageCanvas = memo(
                             showBrushStrokes =
                               isActivelyDrawingThis ||
                               isHoveringThisMarker ||
+                              (isThisSubMaskActive && isDraggingSource) ||
                               (isThisSubMaskActive && isMaskControlHovered) ||
                               (isThisSubMaskActive &&
                                 (renderSubMask.type === Mask.Liquify || renderSubMask.type === Mask.Retouch));
