@@ -1136,7 +1136,8 @@
       "focalLength": "Focal Length",
       "iso": "ISO",
       "rating": "Rating",
-      "shutterSpeed": "Shutter Speed"
+      "shutterSpeed": "Shutter Speed",
+      "manual": "Manual (drag to reorder)"
     },
     "splash": {
       "addFolder": "Add Folder",

@@ -34,6 +34,7 @@ mod launch_request;
 mod lens_blur;
 mod lens_correction;
 mod lut_processing;
+mod manual_order;
 mod mask_generation;
 mod multi_exposure;
 mod negative_conversion;
@@ -2205,6 +2206,8 @@ pub fn run() {
             mask_generation::generate_mask_overlay,
             file_management::update_exif_fields,
             file_management::assistant_prepare_image,
+            manual_order::load_manual_order,
+            manual_order::save_manual_order,
             file_management::assistant_prepare_label,
             file_management::assistant_prepare_region,
             file_management::get_supported_file_types,

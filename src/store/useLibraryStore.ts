@@ -31,6 +31,8 @@ interface LibraryState {
 
   // Images & Selection
   imageList: Array<ImageFile>;
+  /// Filenames in user-chosen order for the open folder; empty when never sorted manually.
+  manualOrder: Array<string>;
   imageRatings: Record<string, number>;
   multiSelectedPaths: Array<string>;
   selectionAnchorPath: string | null;
@@ -71,6 +73,7 @@ export const useLibraryStore = create<LibraryState>((set) => ({
   expandedAlbumGroups: new Set<string>(),
 
   imageList: [],
+  manualOrder: [],
   imageRatings: {},
   multiSelectedPaths: [],
   selectionAnchorPath: null,

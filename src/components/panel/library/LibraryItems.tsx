@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import clsx from 'clsx';
 import { useTranslation } from 'react-i18next';
-import { useDraggable } from '@dnd-kit/core';
+import { useDraggable, useDroppable } from '@dnd-kit/core';
 import { COLOR_LABELS, Color } from '../../../utils/adjustments';
 import { ThumbnailAspectRatio, ImageFile, ExifOverlay } from '../../ui/AppProperties';
 import Text from '../../ui/Text';
@@ -74,6 +74,20 @@ const ThumbnailComponent = ({
     id: `image-${path}`,
     data: { type: 'library-image', path },
   });
+
+  // Each tile is also a drop target, so dragging one image onto another
+  // reorders it into that position. Only acted on under manual sort — App's
+  // drag handler ignores this drop otherwise, so folder and album drops behave
+  // exactly as before.
+  const { setNodeRef: setSlotRef, isOver: isReorderTarget } = useDroppable({
+    id: `slot-${path}`,
+    data: { type: 'library-image-slot', path },
+  });
+  // dnd-kit gives each hook its own ref; one node needs both.
+  const setDragAndSlotRef = (node: HTMLElement | null) => {
+    setNodeRef(node);
+    setSlotRef(node);
+  };
 
   const { baseName, isVirtualCopy } = useMemo(() => {
     const fullFileName = path.split(/[\\/]/).pop() || '';
@@ -169,12 +183,14 @@ const ThumbnailComponent = ({
 
   return (
     <div
-      ref={setNodeRef}
+      ref={setDragAndSlotRef}
       {...listeners}
       {...attributes}
       className={clsx(
         'aspect-square bg-surface rounded-md overflow-hidden cursor-pointer group relative flex flex-col transition-all duration-150 transform-gpu [-webkit-mask-image:-webkit-radial-gradient(white,black)]',
         isDragging && 'opacity-50 ring-2 ring-accent z-50',
+        // Where the dragged image will land.
+        isReorderTarget && !isDragging && 'ring-2 ring-accent ring-offset-1 ring-offset-bg-primary',
       )}
       data-bench-id="thumbnail"
       onClick={(e: any) => {
@@ -514,6 +530,20 @@ const ListItemComponent = ({
     data: { type: 'library-image', path },
   });
 
+  // Each tile is also a drop target, so dragging one image onto another
+  // reorders it into that position. Only acted on under manual sort — App's
+  // drag handler ignores this drop otherwise, so folder and album drops behave
+  // exactly as before.
+  const { setNodeRef: setSlotRef, isOver: isReorderTarget } = useDroppable({
+    id: `slot-${path}`,
+    data: { type: 'library-image-slot', path },
+  });
+  // dnd-kit gives each hook its own ref; one node needs both.
+  const setDragAndSlotRef = (node: HTMLElement | null) => {
+    setNodeRef(node);
+    setSlotRef(node);
+  };
+
   const { baseName, isVirtualCopy } = useMemo(() => {
     const fullFileName = path.split(/[\\/]/).pop() || '';
     const parts = fullFileName.split('?vc=');
@@ -626,7 +656,7 @@ const ListItemComponent = ({
 
   return (
     <div
-      ref={setNodeRef}
+      ref={setDragAndSlotRef}
       {...listeners}
       {...attributes}
       className={`flex items-center w-full h-full cursor-pointer transition-all duration-150 ${borderClass} ${roundingClass} ${stateClass} ${isDragging ? 'opacity-50 ring-2 ring-accent z-50' : ''}`}

@@ -255,6 +255,7 @@ export default function MainLibrary(props: MainLibraryProps) {
   const translatedSortOptions = useMemo(
     () => [
       { key: 'name', label: t('library.sort.fileName') },
+      { key: 'manual', label: t('library.sort.manual', 'Manual (drag to reorder)') },
       { key: 'date', label: t('library.sort.dateModified') },
       { key: 'rating', label: t('library.sort.rating') },
       { key: 'date_taken', label: t('library.sort.dateTaken') },

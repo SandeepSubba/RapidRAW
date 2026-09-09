@@ -203,6 +203,29 @@ function computeGroupedLibrary(libraryState: any, settingsState: any): GroupedLi
 
   const list = [...filteredBySearch];
 
+  // Manual order is a lookup, not a comparison: rank by position in the saved
+  // list. Handled before the switch because the name tiebreak below would
+  // otherwise undo it whenever two files rank equal, and because a manual order
+  // must ignore sort direction — "reversed manual" is not a thing the user
+  // arranged.
+  if (sortCriteria.key === 'manual') {
+    const rank = new Map<string, number>();
+    (libraryState.manualOrder ?? []).forEach((name: string, i: number) => rank.set(name, i));
+    const nameOf = (img: ImageFile) => img.path.split(/[\\/]/).pop() || img.path;
+    // Files added since the order was saved sort after everything known, in
+    // name order, rather than jumping to the front.
+    list.sort((a, b) => {
+      const ra = rank.get(nameOf(a)) ?? Number.MAX_SAFE_INTEGER;
+      const rb = rank.get(nameOf(b)) ?? Number.MAX_SAFE_INTEGER;
+      if (ra !== rb) return ra - rb;
+      return nameOf(a).localeCompare(nameOf(b));
+    });
+    const badgesManual = isGroupingActive
+      ? buildImageGroups(imageList, groupingMode, appSettings?.groupEditedFiles ?? true).badges
+      : null;
+    return { displayList: list, badges: badgesManual };
+  }
+
   list.sort((a, b) => {
     const { key, order } = sortCriteria;
     let comparison = 0;
@@ -276,15 +299,16 @@ export function useSortedLibrary() {
   const filterCriteria = useLibraryStore((state) => state.filterCriteria);
   const searchCriteria = useLibraryStore((state) => state.searchCriteria);
   const sortCriteria = useLibraryStore((state) => state.sortCriteria);
+  const manualOrder = useLibraryStore((state) => state.manualOrder);
 
   const appSettings = useSettingsStore((state) => state.appSettings);
 
   const result = useMemo(() => {
     return computeGroupedLibrary(
-      { imageList, imageRatings, filterCriteria, searchCriteria, sortCriteria },
+      { imageList, imageRatings, filterCriteria, searchCriteria, sortCriteria, manualOrder },
       { appSettings },
     );
-  }, [imageList, sortCriteria, imageRatings, filterCriteria, searchCriteria, appSettings]);
+  }, [imageList, sortCriteria, manualOrder, imageRatings, filterCriteria, searchCriteria, appSettings]);
 
   return result;
 }

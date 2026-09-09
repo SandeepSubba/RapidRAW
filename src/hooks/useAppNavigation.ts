@@ -310,8 +310,22 @@ export function useAppNavigation({ clearThumbnailQueue, refs }: AppNavigationPro
         setLibrary({
           currentFolderPath: path,
           expandedFolders: newExpandedFolders,
+          // Cleared up front so the previous folder's arrangement can never be
+          // applied to this one while the saved order is still loading.
+          manualOrder: [],
           ...(preserveEditor ? {} : { imageList: [], multiSelectedPaths: [], libraryActivePath: null }),
         });
+
+        invoke<string[]>(Invokes.LoadManualOrder, { folder: path })
+          .then((order) => {
+            // A slow read must not overwrite a folder the user has since left.
+            if (useLibraryStore.getState().currentFolderPath === path && order.length > 0) {
+              setLibrary({ manualOrder: order });
+            }
+          })
+          .catch(() => {
+            // No saved order is the normal case, not a failure worth surfacing.
+          });
 
         if (!preserveEditor && selectedImage) {
           debouncedSave.flush();

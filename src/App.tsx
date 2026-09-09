@@ -976,6 +976,56 @@ function App() {
       movePanel(active.data.current.panel as Panel, over.data.current.region as PanelRegion);
     }
 
+    // Dropping an image on another moves it into that slot. Dragging is an
+    // unambiguous statement of intent, so it works from ANY sort: the visible
+    // order becomes the starting arrangement and the sort switches to manual,
+    // rather than the drop being silently discarded because the list happened
+    // to be sorted by date.
+    if (
+      active.data.current?.type === 'library-image' &&
+      over?.data.current?.type === 'library-image-slot'
+    ) {
+      const { currentFolderPath, manualOrder, multiSelectedPaths, sortCriteria } = useLibraryStore.getState();
+      const wasManual = sortCriteria.key === 'manual';
+      const nameOf = (p: string) => (p.split(/[\\/]/).pop() || p).split('?vc=')[0];
+      const targetName = nameOf(over.data.current.path);
+
+      // Already arranging: continue from the saved order. Coming from another
+      // sort: seed from what is on screen, since that is the arrangement the
+      // user is looking at and dragging against — a stale manual order from an
+      // earlier session would make images jump before the drop even applied.
+      const base = wasManual && manualOrder.length > 0
+        ? [...manualOrder]
+        : sortedImageList.map((i: ImageFile) => nameOf(i.path));
+
+      // Dragging one image of a multi-selection moves the whole selection,
+      // matching how the folder drop already behaves.
+      const dragged = (
+        multiSelectedPaths.includes(active.data.current.path) ? multiSelectedPaths : [active.data.current.path]
+      ).map(nameOf);
+      const draggedSet = new Set(dragged);
+      if (draggedSet.has(targetName)) return;
+
+      const without = base.filter((n) => !draggedSet.has(n));
+      const at = without.indexOf(targetName);
+      if (at === -1) return;
+      const next = [...without.slice(0, at), ...dragged, ...without.slice(at)];
+
+      useLibraryStore.getState().setLibrary({ manualOrder: next });
+      if (!wasManual) {
+        // Adopt the arrangement, or the list would snap straight back to the
+        // date/name order and the drag would look like it did nothing.
+        useLibraryStore.getState().setSortCriteria({ key: 'manual' });
+        toast.info('Switched to manual sorting');
+      }
+      if (currentFolderPath) {
+        invoke(Invokes.SaveManualOrder, { folder: currentFolderPath, order: next }).catch((err) =>
+          toast.error(`Failed to save order: ${err}`),
+        );
+      }
+      return;
+    }
+
     if (active.data.current?.type === 'library-image' && over?.data.current?.type === 'folder') {
       const targetFolder = over.data.current.path;
       const sourcePaths = activeImageDragItem?.paths || [active.data.current.path];
