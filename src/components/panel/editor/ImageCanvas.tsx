@@ -1486,6 +1486,74 @@ const ImageCanvas = memo(
       [onDirectPatch],
     );
 
+    // Dragging the clone/heal source marker. Ctrl+Click still sets a source
+    // outright; this is for nudging one that already exists, where clicking
+    // exactly on the intended pixel is fiddly.
+    //
+    // Parameters are captured at drag start rather than read per-move: the
+    // pointer delta is applied to a fixed origin, so the source cannot drift
+    // from accumulated rounding, and a stale closure cannot clobber the rest of
+    // the parameter object.
+    const sourceDragRef = useRef<{
+      clientX: number;
+      clientY: number;
+      sourceX: number;
+      sourceY: number;
+      subMaskId: string;
+      parameters: any;
+    } | null>(null);
+    const [isDraggingSource, setIsDraggingSource] = useState(false);
+
+    useEffect(() => {
+      if (!isDraggingSource) return;
+
+      const move = (ev: MouseEvent) => {
+        const d = sourceDragRef.current;
+        if (!d) return;
+        const { scale } = imageRenderSize;
+        if (!scale) return;
+        const sourceX = d.sourceX + (ev.clientX - d.clientX) / scale;
+        const sourceY = d.sourceY + (ev.clientY - d.clientY) / scale;
+        updateSubMask(d.subMaskId, { parameters: { ...d.parameters, sourceX, sourceY } });
+        // Coalesced, so a fast drag does not queue a render per pixel.
+        if (d.parameters?.lines?.length > 0) triggerDirectPatch(d.subMaskId, sourceX, sourceY);
+      };
+
+      const up = (ev: MouseEvent) => {
+        const d = sourceDragRef.current;
+        setIsDraggingSource(false);
+        sourceDragRef.current = null;
+        if (!d) return;
+        const { scale } = imageRenderSize;
+        if (!scale) return;
+        // Re-apply at the released position: the coalescing above may have
+        // dropped the last move, which is the one the user actually chose.
+        const sourceX = d.sourceX + (ev.clientX - d.clientX) / scale;
+        const sourceY = d.sourceY + (ev.clientY - d.clientY) / scale;
+        updateSubMask(d.subMaskId, { parameters: { ...d.parameters, sourceX, sourceY } });
+        if (d.parameters?.lines?.length > 0) triggerDirectPatch(d.subMaskId, sourceX, sourceY);
+
+        const pts = (d.parameters?.lines || []).flatMap((l: any) => l.points || []);
+        if (pts.length) {
+          const xs = pts.map((p: any) => p.x);
+          const ys = pts.map((p: any) => p.y);
+          console.info(
+            '[clone-source] drag end — strokes bbox',
+            `x ${Math.min(...xs).toFixed(1)}..${Math.max(...xs).toFixed(1)}`,
+            `y ${Math.min(...ys).toFixed(1)}..${Math.max(...ys).toFixed(1)}`,
+            `source ${sourceX.toFixed(1)},${sourceY.toFixed(1)}`,
+          );
+        }
+      };
+
+      window.addEventListener('mousemove', move);
+      window.addEventListener('mouseup', up);
+      return () => {
+        window.removeEventListener('mousemove', move);
+        window.removeEventListener('mouseup', up);
+      };
+    }, [isDraggingSource, imageRenderSize, updateSubMask, triggerDirectPatch]);
+
     const paddingX = imageRenderSize.width * 0.5;
     const paddingY = imageRenderSize.height * 0.5;
 
@@ -3350,9 +3418,49 @@ const ImageCanvas = memo(
                       height: 32,
                       transform: `translate(-50%, -50%) scale(${1 / maxSafeScale})`,
                       transformOrigin: 'center',
-                      cursor: 'crosshair',
+                      cursor: isDraggingSource ? 'grabbing' : 'grab',
                     }}
-                    data-tooltip={t('editor.masks.tooltips.selectNewSourcePoint', { modifier: modifierKey })}
+                    data-tooltip={t('editor.masks.tooltips.moveOrSelectSourcePoint', {
+                      modifier: modifierKey,
+                      defaultValue: 'Drag to move the source point · {{modifier}} + Click to set a new one',
+                    })}
+                    onMouseDown={(e) => {
+                      if (e.button !== 0) return;
+                      // Ctrl+Click keeps its meaning: fall through to the stage
+                      // handler that picks a brand-new source.
+                      if (e.ctrlKey || e.metaKey) return;
+                      const id = activeAiSubMaskId;
+                      if (!id) return;
+                      // The stage below would otherwise read this as the start
+                      // of a brush stroke and paint into the mask.
+                      e.stopPropagation();
+                      e.preventDefault();
+                      sourceDragRef.current = {
+                        clientX: e.clientX,
+                        clientY: e.clientY,
+                        sourceX: activeSubMask.parameters.sourceX,
+                        sourceY: activeSubMask.parameters.sourceY,
+                        subMaskId: id,
+                        parameters: activeSubMask.parameters,
+                      };
+                      // The painted strokes and the source ghost look alike, so
+                      // "the heal area moved" can mean either. Record the stroke
+                      // bounds to tell a real move from a moving preview.
+                      {
+                        const pts = (activeSubMask.parameters?.lines || []).flatMap((l: any) => l.points || []);
+                        if (pts.length) {
+                          const xs = pts.map((p: any) => p.x);
+                          const ys = pts.map((p: any) => p.y);
+                          console.info(
+                            '[clone-source] drag start — strokes bbox',
+                            `x ${Math.min(...xs).toFixed(1)}..${Math.max(...xs).toFixed(1)}`,
+                            `y ${Math.min(...ys).toFixed(1)}..${Math.max(...ys).toFixed(1)}`,
+                            `source ${activeSubMask.parameters.sourceX.toFixed(1)},${activeSubMask.parameters.sourceY.toFixed(1)}`,
+                          );
+                        }
+                      }
+                      setIsDraggingSource(true);
+                    }}
                   />
                 )}
             </div>
