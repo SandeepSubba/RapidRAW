@@ -567,7 +567,7 @@ export default function AssistantPanel() {
     }
     setLoading(true);
     try {
-      const history = msgs.map((m) => ({ role: m.role, content: m.content }));
+      const history = msgs.filter((m) => !m.isError).map((m) => ({ role: m.role, content: m.content }));
       history.push({
         role: 'user',
         content:
@@ -720,10 +720,16 @@ export default function AssistantPanel() {
 
     const st = useAssistantStore.getState();
     const activeMessages = st.conversations.find((c) => c.id === st.activeId)?.messages ?? [];
-    const history = activeMessages.map((m) => ({
-      role: m.role,
-      content: m.content,
-    }));
+    // Error lines (failed runs, per-item batch reports, past refusals) are the
+    // app talking to the user, not turns the model authored. Replayed as
+    // assistant turns they read as an established finding — one refusal then
+    // teaches every later run to refuse the same way.
+    const history = activeMessages
+      .filter((m) => !m.isError)
+      .map((m) => ({
+        role: m.role,
+        content: m.content,
+      }));
 
     // Infer what the user wants written, scanning recent user turns so "do it
     // again"/"do the same" follow-ups inherit the intent from earlier messages.
@@ -884,14 +890,11 @@ export default function AssistantPanel() {
                 const stillWantsToInspect = !!response?.inspect;
                 if (stillWantsToInspect && canvas && round >= 5 && !outOfInspections) {
                   outOfInspections = true;
+                  itemAppTurn = { kind: 'out_of_inspections' };
                   itemHistory = [
                     ...itemHistory,
                     { role: 'assistant', content: response?.reply || '(inspecting)' },
-                    {
-                      role: 'user',
-                      content:
-                        '[app] No inspections left for this image (5 used). Answer now from the close-ups you have already seen: re-emit ALL the values you are confident of. If the text is genuinely unreadable, say so plainly in "reply" and leave those fields null — do not ask to inspect again.',
-                    },
+                    { role: 'user', content: '(app follow-up turn)' },
                   ];
                   continue;
                 }
