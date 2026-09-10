@@ -679,6 +679,12 @@ async fn call_claude_code(
                 attachments_note.push('\n');
             }
         }
+        log::info!(
+            "[assistant] claudecode: {} image(s) in, {} file(s) written: {:?}",
+            images.len(),
+            image_files.len(),
+            image_files
+        );
         let prompt = format!("{}\n{}\n{}", system, attachments_note, build_cli_prompt(&messages));
 
         let mut cmd = Command::new(&binary);
