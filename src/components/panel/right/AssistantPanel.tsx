@@ -830,6 +830,10 @@ export default function AssistantPanel() {
             };
             let itemHistory = batchHistory;
             let itemImages = prepared ? [{ mediaType: prepared.mediaType, data: prepared.data }] : [];
+            // App-driven follow-ups (inspect deliveries, the accuracy gate) ride
+            // in the structured context like _batch — a chat line claiming app
+            // authority is indistinguishable from an injection and gets refused.
+            let itemAppTurn: any = null;
             let response: any;
             // The final-chance turn is offered once; without this a model that
             // keeps requesting inspections would loop forever.
@@ -837,7 +841,11 @@ export default function AssistantPanel() {
             for (let round = 0; ; round++) {
               response = await invoke(Invokes.AssistantChat, {
                 messages: itemHistory,
-                adjustments: { ...(canvas ? { _canvas: canvas } : {}), _batch: batchContext },
+                adjustments: {
+                  ...(canvas ? { _canvas: canvas } : {}),
+                  _batch: batchContext,
+                  ...(itemAppTurn ? { _appTurn: itemAppTurn } : {}),
+                },
                 currentMetadata: meta,
                 images: itemImages,
                 model: selectedModel || null,
@@ -852,15 +860,13 @@ export default function AssistantPanel() {
                   canvasWidth: canvas?.width,
                   canvasHeight: canvas?.height,
                 });
+                itemAppTurn = lab?.found
+                  ? { kind: 'label_attached', x: lab.x, y: lab.y, width: lab.width, height: lab.height }
+                  : { kind: 'label_not_found' };
                 itemHistory = [
                   ...itemHistory,
                   { role: 'assistant', content: response?.reply || '(inspecting the label)' },
-                  {
-                    role: 'user',
-                    content: lab?.found
-                      ? `[app] Attached is the label the app detected at x=${lab.x} y=${lab.y} ${lab.width}x${lab.height}px, cropped at native resolution. Read it character by character and continue with this image only. If a line is still unclear, inspect a tighter region inside that rectangle.`
-                      : `[app] No label-like card was found in this frame, so the whole view is attached instead. Say so rather than guessing, or inspect explicit coordinates.`,
-                  },
+                  { role: 'user', content: '(app follow-up turn)' },
                 ];
                 itemImages = [{ mediaType: lab.mediaType, data: lab.data }];
                 continue;
@@ -893,14 +899,11 @@ export default function AssistantPanel() {
                 // without a single close-up look gets sent back once.
                 const wroteValues = !!response?.metadata || !!response?.tags || !!response?.filename;
                 if (ocrIntent && canvas && round === 0 && wroteValues) {
+                  itemAppTurn = { kind: 'accuracy_gate' };
                   itemHistory = [
                     ...itemHistory,
                     { role: 'assistant', content: response?.reply || '(values proposed)' },
-                    {
-                      role: 'user',
-                      content:
-                        '[app] Accuracy gate: you proposed values without inspecting. Respond with an "inspect" region covering the text you read (other fields null). After the native-resolution close-up arrives, re-read it character by character and re-emit ALL the values, corrected if needed.',
-                    },
+                    { role: 'user', content: '(app follow-up turn)' },
                   ];
                   continue;
                 }
@@ -917,13 +920,17 @@ export default function AssistantPanel() {
                 canvasWidth: canvas?.width,
                 canvasHeight: canvas?.height,
               });
+              itemAppTurn = {
+                kind: 'region_attached',
+                x: region.crop.x,
+                y: region.crop.y,
+                width: region.crop.width,
+                height: region.crop.height,
+              };
               itemHistory = [
                 ...itemHistory,
                 { role: 'assistant', content: response?.reply || '(inspecting)' },
-                {
-                  role: 'user',
-                  content: `[app] Attached is the region x=${region.crop.x} y=${region.crop.y} ${region.crop.width}x${region.crop.height}px you asked to inspect, at native resolution. Continue with this image only.`,
-                },
+                { role: 'user', content: '(app follow-up turn)' },
               ];
               itemImages = [{ mediaType: att.mediaType, data: att.data }];
               continue;
@@ -1050,11 +1057,13 @@ export default function AssistantPanel() {
       const MAX_INSPECT_ROUNDS = 5;
       let loopHistory = history;
       let loopImages = images;
+      // Same rule as batch: app follow-ups are structured context, not chat text.
+      let loopAppTurn: any = null;
       let response: any;
       for (let round = 0; ; round++) {
         response = await invoke(Invokes.AssistantChat, {
           messages: loopHistory,
-          adjustments: chatContext,
+          adjustments: loopAppTurn ? { ...chatContext, _appTurn: loopAppTurn } : chatContext,
           currentMetadata: scannerMode || !currentImage ? null : readCurrentMetadata(currentImage.exif),
           images: loopImages,
           model: selectedModel || null,
@@ -1088,9 +1097,10 @@ export default function AssistantPanel() {
             canvasHeight: viewCanvas?.height,
           });
           att = lab;
-          note = lab?.found
-            ? `[app] Attached is the label the app detected at x=${lab.x} y=${lab.y} ${lab.width}x${lab.height}px, cropped at native resolution. Read it character by character. If one line is still unclear, inspect a tighter region inside that rectangle.`
-            : `[app] No label-like card was found, so the whole view is attached instead. Say so, and inspect explicit coordinates if you can see where the text is.`;
+          loopAppTurn = lab?.found
+            ? { kind: 'label_attached', x: lab.x, y: lab.y, width: lab.width, height: lab.height }
+            : { kind: 'label_not_found' };
+          note = '(app follow-up turn)';
         } else {
           att = await invoke(Invokes.AssistantPrepareRegion, {
             path: currentImage.path,
@@ -1103,7 +1113,14 @@ export default function AssistantPanel() {
             canvasWidth: viewCanvas?.width,
             canvasHeight: viewCanvas?.height,
           });
-          note = `[app] Attached is the region x=${region!.crop.x} y=${region!.crop.y} ${region!.crop.width}x${region!.crop.height}px you asked to inspect, at native resolution. Continue the user's request and answer from what you can now see.`;
+          loopAppTurn = {
+            kind: 'region_attached',
+            x: region!.crop.x,
+            y: region!.crop.y,
+            width: region!.crop.width,
+            height: region!.crop.height,
+          };
+          note = '(app follow-up turn)';
         }
         loopHistory = [
           ...loopHistory,
