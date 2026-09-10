@@ -831,6 +831,9 @@ export default function AssistantPanel() {
             let itemHistory = batchHistory;
             let itemImages = prepared ? [{ mediaType: prepared.mediaType, data: prepared.data }] : [];
             let response: any;
+            // The final-chance turn is offered once; without this a model that
+            // keeps requesting inspections would loop forever.
+            let outOfInspections = false;
             for (let round = 0; ; round++) {
               response = await invoke(Invokes.AssistantChat, {
                 messages: itemHistory,
@@ -865,6 +868,27 @@ export default function AssistantPanel() {
               const region =
                 canvas && round < 5 ? sanitizeCropPatch(response?.inspect, canvas.width, canvas.height) : null;
               if (!region) {
+                // Out of inspections while still asking for one. Breaking here
+                // applied the last response, which — per the prompt's rule that
+                // an inspect turn nulls every other field — carried no values at
+                // all. The image was silently skipped while the chat still
+                // showed a normal-looking reply. Give it one final turn to
+                // commit what it has seen, or to say plainly that it cannot
+                // read it.
+                const stillWantsToInspect = !!response?.inspect;
+                if (stillWantsToInspect && canvas && round >= 5 && !outOfInspections) {
+                  outOfInspections = true;
+                  itemHistory = [
+                    ...itemHistory,
+                    { role: 'assistant', content: response?.reply || '(inspecting)' },
+                    {
+                      role: 'user',
+                      content:
+                        '[app] No inspections left for this image (5 used). Answer now from the close-ups you have already seen: re-emit ALL the values you are confident of. If the text is genuinely unreadable, say so plainly in "reply" and leave those fields null — do not ask to inspect again.',
+                    },
+                  ];
+                  continue;
+                }
                 // Accuracy gate: an OCR-style request that proposed values
                 // without a single close-up look gets sent back once.
                 const wroteValues = !!response?.metadata || !!response?.tags || !!response?.filename;
@@ -947,10 +971,19 @@ export default function AssistantPanel() {
               [org, metaPatch?.ImageDescription ? `title "${metaPatch.ImageDescription}"` : null]
                 .filter(Boolean)
                 .join(' · ') || 'no changes';
+            // An OCR request that wrote nothing is a skipped image, not a
+            // result. It used to read like any other line in the run, so a
+            // handful of misses in a long batch went unnoticed until the
+            // filenames were checked later.
+            const wroteNothing = !metaPatch && !org;
             addMessage({
               id: nextMessageId(),
               role: 'assistant',
-              content: `${name}: ${response?.reply || 'done'}`,
+              isError: ocrIntent && wroteNothing,
+              content:
+                ocrIntent && wroteNothing
+                  ? `${name}: nothing applied — ${response?.reply || 'no values returned'}`
+                  : `${name}: ${response?.reply || 'done'}`,
               appliedMetadata: metaPatch,
               appliedOrganization: org,
             });
