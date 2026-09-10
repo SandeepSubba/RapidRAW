@@ -756,6 +756,192 @@ async fn call_claude_code(
     .map_err(|e| format!("Task failed: {}", e))?
 }
 
+// ---------------------------------------------------------------------------
+// Developer mode: the assistant changes the app itself.
+//
+// Runs the Claude Code CLI inside the user's RapidRAW checkout, with edit and
+// git tools allowed, so "fix X in the app" works from the chat panel. This is
+// deliberately a separate command from the photo chat: only here is anything
+// beyond Read granted, and the repo (not a scratch dir) is the CWD so the
+// project's CLAUDE.md conventions load.
+
+static DEV_CHILD_PID: std::sync::Mutex<Option<u32>> = std::sync::Mutex::new(None);
+
+const DEV_ALLOWED_TOOLS: &str = "Read,Edit,Write,Grep,Glob,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(git pull:*),Bash(git show:*),Bash(cargo check:*),Bash(cargo test:*),Bash(npx tsc:*),Bash(npm run build:*),Bash(rg:*),Bash(ls:*)";
+
+const DEV_PREAMBLE: &str = "You are RapidRAW's built-in developer assistant, running inside the user's RapidRAW fork checkout (the current working directory). The user is asking for a change to the APP ITSELF, not to a photo. Make the change: follow the repository's CLAUDE.md and FORK_NOTES.md conventions, keep the diff minimal, and verify the change (cargo check for Rust, npx tsc --noEmit for TypeScript) when it isn't trivial. When done, commit with a clear conventional message and push to the current branch. If the request is ambiguous or destructive, describe what you would do and ask instead of guessing. End with a short plain-text summary: what changed, how it was verified, and that the user must rebuild (or pull on the other machine) for it to take effect.\n\nUser request:\n";
+
+/// One compact progress line for a streamed CLI event, or None to stay quiet.
+fn dev_progress_line(v: &Value) -> Option<String> {
+    match v["type"].as_str()? {
+        "assistant" => {
+            let blocks = v["message"]["content"].as_array()?;
+            for b in blocks {
+                if b["type"].as_str() == Some("tool_use") {
+                    let name = b["name"].as_str().unwrap_or("tool");
+                    let input = &b["input"];
+                    let target = input["file_path"]
+                        .as_str()
+                        .or_else(|| input["command"].as_str())
+                        .or_else(|| input["pattern"].as_str())
+                        .unwrap_or("");
+                    return Some(format!("{} {}", name, truncate(target, 90)));
+                }
+            }
+            let text = blocks
+                .iter()
+                .find_map(|b| b["text"].as_str())
+                .unwrap_or("");
+            if text.trim().is_empty() {
+                None
+            } else {
+                Some(truncate(text.trim(), 120).to_string())
+            }
+        }
+        _ => None,
+    }
+}
+
+#[tauri::command]
+pub async fn assistant_dev_chat(
+    prompt: String,
+    app_handle: tauri::AppHandle,
+) -> Result<String, String> {
+    let settings = app_settings::load_settings(app_handle.clone()).unwrap_or_default();
+    if settings.assistant_provider.as_deref() != Some("claudecode") {
+        return Err("Developer mode drives the Claude Code CLI — set the assistant provider to Claude Code in Settings → AI Assistant.".to_string());
+    }
+    let repo = settings
+        .assistant_dev_repo_path
+        .clone()
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    if repo.is_empty() {
+        return Err("Set the RapidRAW repository path in Settings → AI Assistant → Developer mode first.".to_string());
+    }
+    let repo_path = std::path::PathBuf::from(&repo);
+    if !repo_path.join(".git").exists() {
+        return Err(format!(
+            "'{}' is not a git checkout — point Developer mode at your RapidRAW repository.",
+            repo
+        ));
+    }
+    let binary = {
+        let b = settings.assistant_endpoint.clone().unwrap_or_default();
+        let b = b.trim().to_string();
+        if b.is_empty() { "claude".to_string() } else { b }
+    };
+    let model = settings
+        .assistant_model
+        .clone()
+        .filter(|m| !m.trim().is_empty())
+        .unwrap_or_else(|| "claude-sonnet-5".to_string());
+
+    tauri::async_runtime::spawn_blocking(move || {
+        use std::io::BufRead as _;
+        use tauri::Emitter as _;
+
+        let mut cmd = Command::new(&binary);
+        cmd.current_dir(&repo_path)
+            .arg("-p")
+            .arg("--verbose")
+            .arg("--output-format")
+            .arg("stream-json")
+            .arg("--model")
+            .arg(&model)
+            .arg("--permission-mode")
+            .arg("acceptEdits")
+            .arg("--allowedTools")
+            .arg(DEV_ALLOWED_TOOLS)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
+
+        let mut child = cmd.spawn().map_err(|e| {
+            format!(
+                "Couldn't launch Claude Code ('{}'): {}. Make sure Claude Code is installed and logged in, or set the binary path in Settings.",
+                binary, e
+            )
+        })?;
+        *DEV_CHILD_PID.lock().unwrap() = Some(child.id());
+
+        if let Some(mut stdin) = child.stdin.take() {
+            let _ = stdin.write_all(DEV_PREAMBLE.as_bytes());
+            let _ = stdin.write_all(prompt.as_bytes());
+        }
+
+        let mut final_result: Option<String> = None;
+        let mut is_error = false;
+        if let Some(stdout) = child.stdout.take() {
+            let reader = std::io::BufReader::new(stdout);
+            for line in reader.lines() {
+                let Ok(line) = line else { break };
+                let Ok(v) = serde_json::from_str::<Value>(&line) else { continue };
+                if v["type"].as_str() == Some("result") {
+                    is_error = v["is_error"].as_bool().unwrap_or(false);
+                    final_result = v["result"].as_str().map(|s| s.to_string());
+                } else if let Some(p) = dev_progress_line(&v) {
+                    let _ = app_handle.emit("assistant-dev-progress", p);
+                }
+            }
+        }
+
+        let mut stderr_text = String::new();
+        if let Some(mut se) = child.stderr.take() {
+            use std::io::Read as _;
+            let _ = se.read_to_string(&mut stderr_text);
+        }
+        let status = child.wait();
+        *DEV_CHILD_PID.lock().unwrap() = None;
+
+        match final_result {
+            Some(r) if !is_error => Ok(r),
+            Some(r) => Err(format!("Claude Code: {}", truncate(&r, 600))),
+            None => {
+                let ok = status.map(|s| s.success()).unwrap_or(false);
+                if ok {
+                    Err("Claude Code finished without a result (cancelled?).".to_string())
+                } else if !stderr_text.trim().is_empty() {
+                    Err(format!(
+                        "Claude Code error: {}",
+                        truncate(stderr_text.trim(), 400)
+                    ))
+                } else {
+                    Err("Claude Code exited without a result.".to_string())
+                }
+            }
+        }
+    })
+    .await
+    .map_err(|e| format!("Task failed: {}", e))?
+}
+
+#[tauri::command]
+pub fn assistant_dev_cancel() -> Result<(), String> {
+    let pid = DEV_CHILD_PID.lock().unwrap().take();
+    let Some(pid) = pid else { return Ok(()) };
+    #[cfg(target_os = "windows")]
+    {
+        let _ = Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .output();
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = Command::new("kill")
+            .args(["-9", &pid.to_string()])
+            .output();
+    }
+    Ok(())
+}
+
 struct ResolvedConfig {
     provider: String,
     endpoint: String,

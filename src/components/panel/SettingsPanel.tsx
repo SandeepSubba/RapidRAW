@@ -152,6 +152,7 @@ export default function SettingsPanel({
   const [assistantEndpoint, setAssistantEndpoint] = useState<string>(appSettings?.assistantEndpoint || '');
   const [assistantApiKey, setAssistantApiKey] = useState<string>(appSettings?.assistantApiKey || '');
   const [assistantModel, setAssistantModel] = useState<string>(appSettings?.assistantModel || '');
+  const [assistantDevRepoPath, setAssistantDevRepoPath] = useState<string>(appSettings?.assistantDevRepoPath || '');
   const [assistantTest, setAssistantTest] = useState<{ testing: boolean; success: boolean | null; message: string }>({
     testing: false,
     success: null,
@@ -289,6 +290,9 @@ export default function SettingsPanel({
     }
     if ((appSettings?.assistantModel || '') !== assistantModel) {
       setAssistantModel(appSettings?.assistantModel || '');
+    }
+    if ((appSettings?.assistantDevRepoPath || '') !== assistantDevRepoPath) {
+      setAssistantDevRepoPath(appSettings?.assistantDevRepoPath || '');
     }
     setProcessingSettings({
       editorPreviewResolution: appSettings?.editorPreviewResolution || 1920,
@@ -1872,6 +1876,27 @@ export default function SettingsPanel({
                           'Uses the Claude Code CLI you’re already logged into — your Claude subscription pays, no API key needed. Requires Claude Code installed and signed in (the same one you use in VS Code).',
                         )}
                       </Text>
+                    )}
+
+                    {appSettings?.assistantProvider === 'claudecode' && (
+                      <SettingItem
+                        label={t('settings.assistant.devRepoPath', 'Developer mode: repository path')}
+                        description={t(
+                          'settings.assistant.devRepoPathDesc',
+                          'Path to your RapidRAW git checkout. With the wrench toggled in the assistant panel, chat messages become change requests for the app itself: Claude Code edits the source there, verifies, commits, and pushes. Leave blank to keep developer mode off.',
+                        )}
+                      >
+                        <Input
+                          className="grow"
+                          onBlur={() => onSettingsChange({ ...appSettings, assistantDevRepoPath })}
+                          onChange={(e: any) => setAssistantDevRepoPath(e.target.value)}
+                          onKeyDown={(e: any) => e.stopPropagation()}
+                          placeholder="C:\Users\you\RapidRAW"
+                          type="text"
+                          value={assistantDevRepoPath}
+                          bgClassName="bg-bg-primary"
+                        />
+                      </SettingItem>
                     )}
 
                     <SettingItem

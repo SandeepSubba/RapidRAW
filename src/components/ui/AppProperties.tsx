@@ -33,6 +33,8 @@ export enum Invokes {
   AddTagForPaths = 'add_tag_for_paths',
   ApplyAdjustments = 'apply_adjustments',
   AssistantChat = 'assistant_chat',
+  AssistantDevChat = 'assistant_dev_chat',
+  AssistantDevCancel = 'assistant_dev_cancel',
   AssistantListModels = 'assistant_list_models',
   AssistantPrepareImage = 'assistant_prepare_image',
   AssistantPrepareLabel = 'assistant_prepare_label',
@@ -249,6 +251,7 @@ export interface AppSettings {
   assistantEndpoint?: string;
   assistantApiKey?: string;
   assistantModel?: string;
+  assistantDevRepoPath?: string;
   decorations?: any;
   editorPreviewResolution?: number;
   smallThumbnailResolution?: number;

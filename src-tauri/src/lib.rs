@@ -2177,6 +2177,8 @@ pub fn run() {
             assistant::assistant_chat,
             assistant::assistant_list_models,
             assistant::assistant_test_connection,
+            assistant::assistant_dev_chat,
+            assistant::assistant_dev_cancel,
             ai_commands::generate_ai_subject_mask,
             ai_commands::generate_ai_face_region_mask,
             ai_commands::precompute_ai_subject_mask,

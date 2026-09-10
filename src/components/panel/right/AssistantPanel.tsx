@@ -18,7 +18,9 @@ import {
   Check,
   Layers,
   Square,
+  Wrench,
 } from 'lucide-react';
+import { listen } from '@tauri-apps/api/event';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'react-toastify';
 import clsx from 'clsx';
@@ -360,6 +362,11 @@ export default function AssistantPanel() {
   // Set by the Stop button; checked between batch images and before applying a
   // single response so an in-flight run can be abandoned.
   const cancelRef = useRef(false);
+  // Developer mode: route the message to the Claude Code CLI running inside
+  // the user's RapidRAW checkout, so the assistant can change the app itself.
+  const [devMode, setDevMode] = useState(false);
+  const [devProgress, setDevProgress] = useState<string[]>([]);
+  const devBusyRef = useRef(false);
 
   const conversations = useAssistantStore((s) => s.conversations);
   const activeId = useAssistantStore((s) => s.activeId);
@@ -654,6 +661,38 @@ export default function AssistantPanel() {
     if (text.startsWith('/') && attachments.length === 0) {
       setInput('');
       await runCommand(text);
+      return;
+    }
+
+    // Developer mode: the request is about the app, not a photo — hand it to
+    // the Claude Code CLI working inside the configured RapidRAW checkout and
+    // stream its progress under the spinner.
+    if (devMode) {
+      setInput('');
+      addMessage({ id: nextMessageId(), role: 'user', content: text });
+      setLoading(true);
+      setDevProgress([]);
+      devBusyRef.current = true;
+      const unlisten = await listen('assistant-dev-progress', (e: any) => {
+        const line = String(e.payload ?? '').trim();
+        if (line) setDevProgress((p) => [...p.slice(-11), line]);
+      });
+      try {
+        const result = await invoke<string>(Invokes.AssistantDevChat, { prompt: text });
+        addMessage({ id: nextMessageId(), role: 'assistant', content: result || 'Done.' });
+      } catch (err: any) {
+        addMessage({
+          id: nextMessageId(),
+          role: 'assistant',
+          content: String(err?.message || err),
+          isError: true,
+        });
+      } finally {
+        unlisten();
+        devBusyRef.current = false;
+        setDevProgress([]);
+        setLoading(false);
+      }
       return;
     }
     cancelRef.current = false;
@@ -1227,10 +1266,14 @@ export default function AssistantPanel() {
     selectedModel,
     imageMaxDim,
     t,
+    devMode,
   ]);
 
   const stop = useCallback(() => {
     cancelRef.current = true;
+    if (devBusyRef.current) {
+      invoke(Invokes.AssistantDevCancel).catch(() => {});
+    }
   }, []);
 
   const handleKeyDown = (e: any) => {
@@ -1423,6 +1466,22 @@ export default function AssistantPanel() {
         >
           <RefreshCw size={14} />
         </button>
+        <button
+          type="button"
+          onClick={() => setDevMode((v) => !v)}
+          title={t(
+            'editor.assistant.devModeTip',
+            'Developer mode — change the app itself: edits the RapidRAW source, verifies, commits, and pushes',
+          )}
+          className={clsx(
+            'p-1 rounded-md transition-colors shrink-0',
+            devMode
+              ? 'bg-accent text-button-text'
+              : 'hover:bg-surface text-text-secondary hover:text-text-primary',
+          )}
+        >
+          <Wrench size={14} />
+        </button>
       </div>
       {modelsError && (
         <div className="px-3 pt-2 shrink-0">
@@ -1506,6 +1565,15 @@ export default function AssistantPanel() {
             </div>
           </div>
         )}
+        {isLoading && devProgress.length > 0 && (
+          <div className="pl-1 space-y-0.5">
+            {devProgress.map((l, i) => (
+              <div key={i} className="text-[11px] text-text-secondary font-mono truncate">
+                {l}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="p-3 border-t border-surface shrink-0">
@@ -1530,7 +1598,23 @@ export default function AssistantPanel() {
           </div>
         )}
 
-        {selectedCount > 1 && attachments.length === 0 && (
+        {devMode && (
+          <div className="flex items-center gap-1.5 mb-2 px-1 text-accent">
+            <Wrench size={13} className="shrink-0" />
+            <Text color={TextColors.secondary} className="text-xs">
+              {appSettings?.assistantDevRepoPath
+                ? t('editor.assistant.devModeOn', 'Developer mode — changes the app source at {{path}}', {
+                    path: appSettings.assistantDevRepoPath,
+                  })
+                : t(
+                    'editor.assistant.devModeNoRepo',
+                    'Developer mode — set the repository path in Settings → AI Assistant first',
+                  )}
+            </Text>
+          </div>
+        )}
+
+        {!devMode && selectedCount > 1 && attachments.length === 0 && (
           <div className="flex items-center gap-1.5 mb-2 px-1 text-accent">
             <Layers size={13} className="shrink-0" />
             <Text color={TextColors.secondary} className="text-xs">
@@ -1602,7 +1686,11 @@ export default function AssistantPanel() {
             }}
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
-            placeholder={t('editor.assistant.placeholder', 'Ask for an edit…')}
+            placeholder={
+              devMode
+                ? t('editor.assistant.devPlaceholder', 'Describe the app change…')
+                : t('editor.assistant.placeholder', 'Ask for an edit…')
+            }
             rows={2}
             className="grow resize-none rounded-lg bg-bg-primary border border-border-color px-3 py-2 text-sm text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent custom-scrollbar"
           />

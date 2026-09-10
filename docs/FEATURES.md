@@ -87,6 +87,11 @@ and dated.
   or **Claude Code** — the last drives the `claude` CLI so an existing Claude
   subscription works with no API key.
 - **OCR & metadata extraction** through cloud vision models.
+- **Developer mode** (wrench toggle, Claude Code provider only) — chat messages
+  become change requests for the app itself: the CLI runs inside the configured
+  RapidRAW checkout with edit/git tools allowed, makes the change, verifies it
+  (`cargo check` / `tsc`), commits and pushes; tool activity streams under the
+  spinner. Set the repository path in Settings → AI Assistant.
 - **Zoom-to-read (inspect loop)** — when small text or ruler ticks are illegible
   at the attached resolution, the assistant asks the app for a region and gets it
   back cropped from the original at native pixels (up to 3 rounds per request),

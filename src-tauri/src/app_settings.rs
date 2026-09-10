@@ -484,6 +484,10 @@ pub struct AppSettings {
     pub assistant_api_key: Option<String>,
     #[serde(default)]
     pub assistant_model: Option<String>,
+    // Developer mode: path to the user's RapidRAW checkout that the assistant
+    // may modify (claudecode provider only).
+    #[serde(default)]
+    pub assistant_dev_repo_path: Option<String>,
     #[serde(default = "default_adjustment_visibility")]
     pub adjustment_visibility: HashMap<String, bool>,
     #[serde(default = "default_open_tree_sections")]
@@ -631,6 +635,7 @@ impl Default for AppSettings {
             assistant_endpoint: None,
             assistant_api_key: None,
             assistant_model: None,
+            assistant_dev_repo_path: None,
             adjustment_visibility: default_adjustment_visibility(),
             open_tree_sections: default_open_tree_sections(),
             copy_paste_settings: CopyPasteSettings::default(),
