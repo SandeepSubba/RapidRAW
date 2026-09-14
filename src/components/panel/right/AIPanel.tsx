@@ -148,7 +148,15 @@ const SUB_MASK_CONFIG: any = {
   },
 };
 
-const BrushTools = ({ settings, onSettingsChange }: { settings: any; onSettingsChange: any }) => {
+const BrushTools = ({
+  settings,
+  onSettingsChange,
+  onCommit,
+}: {
+  settings: any;
+  onSettingsChange: any;
+  onCommit?: () => void;
+}) => {
   const { t } = useTranslation();
 
   return (
@@ -159,6 +167,7 @@ const BrushTools = ({ settings, onSettingsChange }: { settings: any; onSettingsC
         max={200}
         min={1}
         onChange={(e: any) => onSettingsChange((s: any) => ({ ...s, size: Number(e.target.value) }))}
+        onPointerUp={onCommit}
         step={1}
         value={settings.size}
         fillOrigin="min"
@@ -169,6 +178,7 @@ const BrushTools = ({ settings, onSettingsChange }: { settings: any; onSettingsC
         max={100}
         min={0}
         onChange={(e: any) => onSettingsChange((s: any) => ({ ...s, feather: Number(e.target.value) }))}
+        onPointerUp={onCommit}
         step={1}
         value={settings.feather}
         fillOrigin="min"
@@ -1992,6 +2002,51 @@ function SettingsPanel({
   const handleToggleSection = (section: string) =>
     setCollapsibleState((prev: any) => ({ ...prev, [section]: !prev[section] }));
 
+  // An applied patch stays editable: with a stroke-based edit selected, the
+  // brush sliders retune the strokes already painted, not just the next ones.
+  const isStrokePatch =
+    isComponentMode &&
+    (activeSubMask.type === Mask.Clone ||
+      activeSubMask.type === Mask.Heal ||
+      activeSubMask.type === Mask.Liquify ||
+      activeSubMask.type === Mask.Retouch);
+  const hasAppliedStrokes = isStrokePatch && activeSubMask.parameters?.lines?.length > 0;
+
+  const handleBrushSettingsChange = (updater: any) => {
+    const prev = brushSettings;
+    const next = typeof updater === 'function' ? updater(prev) : updater;
+    setBrushSettings(next);
+    if (!hasAppliedStrokes || !prev) return;
+    // Stroke sizes are stored in image-space pixels (they depend on the zoom
+    // at paint time), so a new slider value scales them instead of replacing
+    // them; feather is absolute (0-1).
+    const sizeRatio = prev.size > 0 && next.size > 0 ? next.size / prev.size : 1;
+    const featherChanged = next.feather !== prev.feather;
+    if (sizeRatio === 1 && !featherChanged) return;
+    updateSubMask(activeSubMask.id, {
+      parameters: {
+        ...activeSubMask.parameters,
+        lines: activeSubMask.parameters.lines.map((l: any) => ({
+          ...l,
+          ...(sizeRatio !== 1 && l.brushSize > 0 ? { brushSize: l.brushSize * sizeRatio } : {}),
+          ...(featherChanged ? { feather: next.feather / 100 } : {}),
+        })),
+      },
+    });
+  };
+
+  // Re-render the patch once, on slider release — not per tick.
+  const handleBrushCommit = () => {
+    if (!hasAppliedStrokes) return;
+    const requiresSource = activeSubMask.type === Mask.Clone || activeSubMask.type === Mask.Heal;
+    const sx = activeSubMask.parameters?.sourceX;
+    const sy = activeSubMask.parameters?.sourceY;
+    if (requiresSource && (sx === undefined || sy === undefined)) return;
+    setTimeout(() => {
+      onManualCleanup(activeSubMask.id, sx ?? 0, sy ?? 0);
+    }, 0);
+  };
+
   return (
     <div
       className={`space-y-2 transition-opacity duration-300 ${!isActive ? 'opacity-50 pointer-events-none' : ''}`}
@@ -2202,7 +2257,11 @@ function SettingsPanel({
               )}
 
               {subMaskConfig.showBrushTools && brushSettings && (
-                <BrushTools settings={brushSettings} onSettingsChange={setBrushSettings} />
+                <BrushTools
+                  settings={brushSettings}
+                  onSettingsChange={handleBrushSettingsChange}
+                  onCommit={handleBrushCommit}
+                />
               )}
             </>
           )}
