@@ -368,14 +368,24 @@ export default function CropPanel() {
     [selectedImage, orientationSteps, rotation, adjustments.crop, setAdjustments, rememberRatio],
   );
 
+  // Keeps the "Original" preset tracking the image's own ratio through 90°
+  // rotations. Only ever for the SAME image: on a switch, the new image's
+  // dimensions arriving against the old ratio looked like a mismatch, and the
+  // re-apply rewrote (reset) the new image's saved crop.
+  const originalRatioImageRef = useRef<string | null>(null);
   useEffect(() => {
+    const path = selectedImage?.path ?? null;
+    if (originalRatioImageRef.current !== path) {
+      originalRatioImageRef.current = path;
+      return;
+    }
     if (activePreset?.value === ORIGINAL_RATIO) {
       const newOriginalRatio = getEffectiveOriginalRatio();
       if (newOriginalRatio !== null && aspectRatio && Math.abs(aspectRatio - newOriginalRatio) > RATIO_TOLERANCE) {
         applyAspectRatio(newOriginalRatio);
       }
     }
-  }, [orientationSteps, activePreset, aspectRatio, getEffectiveOriginalRatio, applyAspectRatio]);
+  }, [orientationSteps, activePreset, aspectRatio, getEffectiveOriginalRatio, applyAspectRatio, selectedImage?.path]);
 
   const handleCustomInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;

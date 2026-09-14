@@ -147,6 +147,13 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
 
   const [crop, setCrop] = useState<Crop | null>(null);
   const prevCropParams = useRef<any>(null);
+  // Which image and which crop object prevCropParams describes. A wholesale
+  // adjustments swap (image switch, undo/redo, preset, sidecar load landing
+  // after the switch) must RESEED the params, never be mistaken for the user
+  // editing rotation/ratio/orientation — that mistake recomputed a centered
+  // crop and silently reset the image's saved crop.
+  const prevCropImagePathRef = useRef<string | null>(null);
+  const prevCropAdjCropRef = useRef<any>(undefined);
   const lastValidCropRef = useRef<PercentCrop | null>(null);
   // Only persist a crop that came from real user interaction. Opening the crop tool
   // seeds a display crop programmatically (and react-image-crop fires onComplete for
@@ -1579,7 +1586,31 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
   }, [showSpinner]);
 
   useEffect(() => {
-    if (!isCropping || !selectedImage?.width || !selectedImage?.height) {
+    const { aspectRatio, orientationSteps = 0, crop: currentAdjCrop, rotation = 0 } = adjustments;
+
+    const imageChanged = prevCropImagePathRef.current !== (selectedImage?.path ?? null);
+    // In-place edits spread the previous adjustments, so the crop keeps its
+    // object identity; a new reference means the whole object was replaced.
+    const cropSwapped = prevCropAdjCropRef.current !== currentAdjCrop;
+    prevCropImagePathRef.current = selectedImage?.path ?? null;
+    prevCropAdjCropRef.current = currentAdjCrop;
+
+    const geometryChanged =
+      prevCropParams.current?.rotation !== rotation ||
+      prevCropParams.current?.aspectRatio !== aspectRatio ||
+      prevCropParams.current?.orientationSteps !== orientationSteps;
+
+    // Reseed instead of recomputing when the change did not come from the user
+    // editing a single crop parameter: a different image, the panel being
+    // closed (its edits arrive wholesale later), or crop+params changing
+    // together in one update. Recomputing here is what reset saved crops when
+    // reopening the tool or stepping to another image.
+    if (imageChanged || !isCropping || (cropSwapped && geometryChanged)) {
+      prevCropParams.current = { rotation, aspectRatio, orientationSteps };
+      return;
+    }
+
+    if (!selectedImage?.width || !selectedImage?.height) {
       return;
     }
 
@@ -1590,13 +1621,7 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
       return;
     }
 
-    const { aspectRatio, orientationSteps = 0, crop: currentAdjCrop, rotation = 0 } = adjustments;
     const effectiveRotation = liveRotation !== null && liveRotation !== undefined ? liveRotation : rotation;
-
-    const geometryChanged =
-      prevCropParams.current?.rotation !== rotation ||
-      prevCropParams.current?.aspectRatio !== aspectRatio ||
-      prevCropParams.current?.orientationSteps !== orientationSteps;
 
     const isDraggingRotation = liveRotation !== null && liveRotation !== undefined;
     const needsRecalc = currentAdjCrop === null || geometryChanged || isDraggingRotation;
