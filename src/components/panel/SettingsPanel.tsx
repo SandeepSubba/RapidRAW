@@ -28,7 +28,7 @@ import Dropdown, { OptionItem } from '../ui/Dropdown';
 import Switch from '../ui/Switch';
 import Input from '../ui/Input';
 import Slider from '../ui/Slider';
-import { ThemeProps, THEMES, DEFAULT_THEME_ID } from '../../utils/themes';
+import { ThemeProps, THEMES, DEFAULT_THEME_ID, EDITOR_CANVAS_COLORS } from '../../utils/themes';
 import { useTranslation } from 'react-i18next';
 import { Invokes } from '../ui/AppProperties';
 import { ADJUSTMENT_NUDGES, KEYBIND_DEFINITIONS, KEYBIND_SECTIONS, resolveNudgeStep } from '../../utils/keyboardUtils';
@@ -794,6 +794,20 @@ export default function SettingsPanel({
                         onChange={(value: any) => onSettingsChange({ ...appSettings, theme: value })}
                         options={THEMES.map((theme: ThemeProps) => ({ value: theme.id, label: t(theme.name as any) }))}
                         value={appSettings?.theme || DEFAULT_THEME_ID}
+                        triggerClassName="bg-bg-primary"
+                      />
+                    </SettingItem>
+
+                    <SettingItem
+                      label={t('settings.general.editorCanvas')}
+                      description={t('settings.general.editorCanvasDesc')}
+                    >
+                      <Dropdown
+                        onChange={(value: any) =>
+                          onSettingsChange({ ...appSettings, editorCanvasColor: value === 'theme' ? undefined : value })
+                        }
+                        options={EDITOR_CANVAS_COLORS.map((c) => ({ value: c.id, label: t(c.name as any) }))}
+                        value={appSettings?.editorCanvasColor || 'theme'}
                         triggerClassName="bg-bg-primary"
                       />
                     </SettingItem>

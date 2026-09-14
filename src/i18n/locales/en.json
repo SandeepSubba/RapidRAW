@@ -196,6 +196,7 @@
       "mergeHdr": "Merge to HDR",
       "noLabel": "No Label",
       "noRating": "No Rating",
+      "openSettings": "Settings",
       "pasteAdjustments": "Paste Adjustments",
       "productivity": "Productivity",
       "rating": "Rating",
@@ -228,6 +229,7 @@
     "library": {
       "addCopiedToAlbum_one": "Add copied image to album",
       "addCopiedToAlbum_other": "Add {{count}} copied images to album",
+      "openSettings": "Settings",
       "refreshView": "Refresh View"
     },
     "merge": {
@@ -1637,6 +1639,14 @@
       "createXmpMissing": "Create XMP if missing",
       "displayEditIcon": "Display Edit Icon",
       "displayEditIconDesc": "Show a small slider icon on thumbnails that have been edited.",
+      "editorCanvas": "Editor Canvas",
+      "editorCanvasDesc": "Background around the image in the editor. Only the canvas changes; the rest of the app keeps its theme.",
+      "editorCanvasTheme": "Match Theme",
+      "editorCanvasWhite": "White",
+      "editorCanvasLightGrey": "Light Grey",
+      "editorCanvasMidGrey": "Mid Grey",
+      "editorCanvasDarkGrey": "Dark Grey",
+      "editorCanvasBlack": "Black",
       "enableFocusMode": "Enable Focus Mode",
       "enableOsTitlebar": "Enable OS Titlebar",
       "enableXmpSync": "Enable XMP Sync",

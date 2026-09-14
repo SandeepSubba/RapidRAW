@@ -457,6 +457,10 @@ pub struct AppSettings {
     pub sort_criteria: Option<SortCriteria>,
     pub filter_criteria: Option<FilterCriteria>,
     pub theme: Option<String>,
+    // Editor canvas (the area around the image) preset, independent of the UI
+    // theme: "theme" | "white" | "lightGrey" | "midGrey" | "darkGrey" | "black".
+    #[serde(default)]
+    pub editor_canvas_color: Option<String>,
     #[serde(default)]
     pub font_family: Option<String>,
     pub decorations: Option<bool>,
@@ -615,6 +619,7 @@ impl Default for AppSettings {
             sort_criteria: None,
             filter_criteria: None,
             theme: Some("dark".to_string()),
+            editor_canvas_color: None,
             font_family: None,
             decorations: Some(false),
             ai_connector_address: None,

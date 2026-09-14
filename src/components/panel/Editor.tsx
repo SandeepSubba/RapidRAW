@@ -7,6 +7,7 @@ import debounce from 'lodash.debounce';
 
 import { ImageDimensions, RenderSize, useImageRenderSize } from '../../hooks/useImageRenderSize';
 import { Adjustments, AiPatch, MaskContainer, INITIAL_ADJUSTMENTS } from '../../utils/adjustments';
+import { editorCanvasRgb } from '../../utils/themes';
 import {
   calculateCenteredCrop,
   getOrientedDimensions,
@@ -1261,6 +1262,11 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
     const rootStyle = getComputedStyle(document.documentElement);
     const bgPrimaryStr = rootStyle.getPropertyValue('--app-bg-primary') || 'rgb(24, 24, 24)';
     const bgSecondaryStr = rootStyle.getPropertyValue('--app-bg-secondary') || 'rgb(35, 35, 35)';
+    // display.wgsl paints every pixel inside the canvas clip that falls outside
+    // the image with bgSecondary; bgPrimary is only the surface clear behind
+    // the (opaque) webview. So the preset replaces bgSecondary and the rest of
+    // the app keeps its theme.
+    const canvasRgb = editorCanvasRgb(appSettings?.editorCanvasColor);
 
     wgpuStateRef.current = {
       useWgpuRenderer: appSettings?.useWgpuRenderer,
@@ -1271,7 +1277,9 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
       uncroppedAdjustedPreviewUrl,
       showOriginal,
       bgPrimary: parseRgb(bgPrimaryStr),
-      bgSecondary: parseRgb(bgSecondaryStr),
+      bgSecondary: canvasRgb
+        ? [canvasRgb[0] / 255, canvasRgb[1] / 255, canvasRgb[2] / 255, 1.0]
+        : parseRgb(bgSecondaryStr),
     };
   }, [
     appSettings?.useWgpuRenderer,
@@ -1282,6 +1290,7 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
     uncroppedAdjustedPreviewUrl,
     showOriginal,
     appSettings?.theme,
+    appSettings?.editorCanvasColor,
     finalPreviewUrl,
   ]);
 
@@ -1299,6 +1308,7 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
     uncroppedAdjustedPreviewUrl,
     showOriginal,
     appSettings?.theme,
+    appSettings?.editorCanvasColor,
     finalPreviewUrl,
     transformState,
     imageRenderSize,
@@ -2156,6 +2166,10 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
   }
 
   const isWgpuActive = appSettings?.useWgpuRenderer !== false && hasRenderedFirstFrame;
+  // Same preset for the CSS paths (WebGL renderer, before the first native
+  // frame), so the canvas doesn't flash the theme colour on load.
+  const canvasPresetRgb = editorCanvasRgb(appSettings?.editorCanvasColor);
+  const canvasCss = canvasPresetRgb ? `rgb(${canvasPresetRgb.join(',')})` : null;
   const hasRenderedAnyPreview = hasRenderedFirstFrame || !!finalPreviewUrl;
 
   return (
@@ -2203,9 +2217,9 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
           'flex-1 relative overflow-hidden touch-none',
           isFullScreen ? 'rounded-none' : 'rounded-lg',
           appSettings?.useWgpuRenderer !== false && !isFullScreen && 'ring-[9999px] ring-bg-secondary',
-          !isWgpuActive && 'bg-bg-secondary',
+          !isWgpuActive && !canvasCss && 'bg-bg-secondary',
         )}
-        style={{ cursor: cursorStyle }}
+        style={{ cursor: cursorStyle, ...(!isWgpuActive && canvasCss ? { backgroundColor: canvasCss } : {}) }}
         onContextMenu={onContextMenu}
         ref={imageContainerRef}
         onPointerDownCapture={handlePointerDown}

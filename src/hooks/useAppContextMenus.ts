@@ -44,6 +44,7 @@ import {
   User,
   Album as AlbumIcon,
   PencilSparkles,
+  Settings as SettingsIcon,
 } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { useTranslation } from 'react-i18next';
@@ -388,6 +389,14 @@ export function useAppContextMenus(props: UseAppContextMenusProps) {
               },
             },
           ],
+        },
+        { type: OPTION_SEPARATOR },
+        // Settings otherwise sits behind the library/home screen; the overlay
+        // opens over the editor and Back returns straight to the image.
+        {
+          label: t('contextMenus.editor.openSettings'),
+          icon: SettingsIcon,
+          onClick: () => setUI({ isSettingsOpen: true }),
         },
       ];
       showContextMenu(event.clientX, event.clientY, options);
@@ -1448,6 +1457,12 @@ export function useAppContextMenus(props: UseAppContextMenusProps) {
           label: t('contextMenus.folders.importImages'),
           onClick: () => props.handleImportClick(currentFolderPath as string),
           disabled: !currentFolderPath || isAlbumView,
+        },
+        { type: OPTION_SEPARATOR },
+        {
+          label: t('contextMenus.library.openSettings'),
+          icon: SettingsIcon,
+          onClick: () => useUIStore.getState().setUI({ isSettingsOpen: true }),
         },
       ];
 

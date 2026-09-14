@@ -272,6 +272,8 @@ export interface AppSettings {
   libraryViewMode?: LibraryViewMode;
   sortCriteria?: SortCriteria;
   theme: Theme;
+  // Editor canvas preset (see EDITOR_CANVAS_COLORS); unset follows the theme.
+  editorCanvasColor?: string;
   thumbnailSize?: ThumbnailSize;
   thumbnailAspectRatio?: ThumbnailAspectRatio;
   uiVisibility?: UiVisibility;
