@@ -179,6 +179,28 @@ function sanitizePatch(raw: any): Record<string, number> {
 // `inspect: {"target": "label"}` asks the app to locate the printed tag itself
 // rather than supplying coordinates. Accepted loosely — models reach for
 // "auto"/"tag" as readily as the documented "label".
+// "Don't scan/ocr or send any images" is a standing rule for the chat, but a
+// later request to look overrides it: the newest user turn that says either way
+// decides. Checking only the message being sent let "do the same" fall back on
+// a prohibition from many turns earlier, and a loose keyword match read
+// targeted exclusions ("read the tag but don't read the price code") as bans.
+// Clause punctuation ends the span, so "skip 1160, read the tag" is a request.
+const SCAN_VERB = String.raw`(?:scan(?:ning)?|ocr|inspect(?:ing)?|zoom(?:ing)?|read(?:ing)?|look(?:ing)?\s+at|attach(?:ing)?|send(?:ing)?)`;
+const SCAN_PROHIBITION = new RegExp(
+  String.raw`\b(?:don['’]?t|do(?:es)?\s+not|to\s+not|never|no(?:\s+need\s+to)?|without|avoid|skip|stop)\b[^.!?,;\n]{0,25}?\b${SCAN_VERB}\b(?:\s*(?:\/|,|\bor\b|\band\b|\bnor\b)\s*${SCAN_VERB}\b)*`,
+  'g',
+);
+const SCAN_REQUEST = /\b(?:scan|ocr|read|inspect|zoom in|look at)\b/;
+
+// 'ask' when the text asks to look at the image once its prohibited phrases are
+// removed, 'forbid' when it only prohibits, null when it says neither.
+function scanStance(text: string): 'forbid' | 'ask' | null {
+  const lower = (text || '').toLowerCase();
+  const stripped = lower.replace(SCAN_PROHIBITION, ' ');
+  if (SCAN_REQUEST.test(stripped)) return 'ask';
+  return stripped !== lower ? 'forbid' : null;
+}
+
 function wantsLabelInspect(inspect: any): boolean {
   const target = inspect?.target;
   if (typeof target !== 'string') return false;
@@ -729,15 +751,10 @@ export default function AssistantPanel() {
       const msgs = s.conversations.find((c) => c.id === s.activeId)?.messages ?? [];
       return msgs.filter((m) => m.role === 'user').map((m) => m.content);
     })();
-    const PROHIBITION =
-      /\b(?:don'?t|do(?:es)? not|cannot|can'?t|never|no|not|without|avoid|skip|stop)\b[^.!?]{0,40}?\b(?:scan(?:ning)?|ocr|inspect|zoom|read(?:ing)?|attach|send)\b/;
-    const lastUserText = (text || '').toLowerCase();
-    // A later explicit request to look lifts the standing rule, so one "don't
-    // scan" cannot mute OCR for the rest of the session.
-    const latestAsksToScan =
-      !PROHIBITION.test(lastUserText) && /\b(scan|ocr|read|inspect|zoom in|look at)\b/.test(lastUserText);
+    // Newest turn with a stance wins, so a "read the tag" after a "don't scan"
+    // re-enables images for every follow-up until the user forbids it again.
     const forbidsScanning =
-      PROHIBITION.test([...priorUserText, text].join('\n').toLowerCase()) && !latestAsksToScan;
+      [text, ...[...priorUserText].reverse()].map(scanStance).find((s) => s !== null) === 'forbid';
 
     const userMessage: AssistantMessage = {
       id: nextMessageId(),
@@ -1024,15 +1041,27 @@ export default function AssistantPanel() {
             // result. It used to read like any other line in the run, so a
             // handful of misses in a long batch went unnoticed until the
             // filenames were checked later.
+            //
+            // A reply that still asks to inspect carries no values by the
+            // prompt's rules, so it is a miss whatever the request was. With
+            // images switched off the model can only ask to look and the app can
+            // only refuse; say why, or the run reads as "Zooming into the tag…"
+            // with nothing behind it.
             const wroteNothing = !metaPatch && !org;
+            const skipped = wroteNothing && (ocrIntent || !!response?.inspect);
             addMessage({
               id: nextMessageId(),
               role: 'assistant',
-              isError: ocrIntent && wroteNothing,
-              content:
-                ocrIntent && wroteNothing
-                  ? `${name}: nothing applied — ${response?.reply || 'no values returned'}`
-                  : `${name}: ${response?.reply || 'done'}`,
+              isError: skipped,
+              content: !skipped
+                ? `${name}: ${response?.reply || 'done'}`
+                : forbidsScanning && response?.inspect
+                  ? t(
+                      'editor.assistant.skippedNoImages',
+                      '{{name}}: skipped — it needs to see the image, but images are off because an earlier message said not to scan or send them. Ask it to read or scan the tag to turn them back on.',
+                      { name },
+                    )
+                  : `${name}: nothing applied — ${response?.reply || 'no values returned'}`,
               appliedMetadata: metaPatch,
               appliedOrganization: org,
             });
