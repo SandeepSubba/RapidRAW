@@ -406,6 +406,7 @@ export default function CropPanel() {
     const numH = parseFloat(customH);
 
     if (numW > 0 && numH > 0) {
+      activateCropTool();
       const newAspectRatio = numW / numH;
       lastSyncedRatio.current = newAspectRatio;
       if (!adjustments?.aspectRatio || Math.abs(adjustments.aspectRatio - newAspectRatio) > RATIO_TOLERANCE) {
@@ -431,7 +432,16 @@ export default function CropPanel() {
     }
   };
 
+  // Picking a ratio is crop intent: activate the (opt-in) crop tool so the
+  // handles appear immediately instead of requiring a second click on the
+  // crop toggle. Only user-facing handlers call this — the programmatic
+  // ratio syncs (Original tracking a 90° turn) leave the tool alone.
+  const activateCropTool = useCallback(() => {
+    setEditor({ cropToolActive: true });
+  }, [setEditor]);
+
   const handlePresetClick = (preset: CropPreset) => {
+    activateCropTool();
     if (preset.value === ORIGINAL_RATIO) {
       applyAspectRatio(getEffectiveOriginalRatio());
       return;
@@ -473,6 +483,7 @@ export default function CropPanel() {
 
   const handleApplySavedPreset = (preset: SavedCropPreset) => {
     if (!(preset.width > 0) || !(preset.height > 0)) return;
+    activateCropTool();
     lastSyncedRatio.current = preset.width / preset.height;
     setCustomW(String(preset.width));
     setCustomH(String(preset.height));
@@ -489,11 +500,12 @@ export default function CropPanel() {
 
   const handleOrientationToggle = useCallback(() => {
     if (aspectRatio && aspectRatio !== 1) {
+      activateCropTool();
       const newRatio = 1 / aspectRatio;
       setPreferPortrait(newRatio < 1);
       applyAspectRatio(newRatio);
     }
-  }, [aspectRatio, applyAspectRatio]);
+  }, [aspectRatio, applyAspectRatio, activateCropTool]);
 
   const handleReset = () => {
     const originalAspectRatio =
@@ -952,6 +964,7 @@ export default function CropPanel() {
                     isCustomActive ? 'bg-accent' : 'bg-surface hover:bg-card-active',
                   )}
                   onClick={() => {
+                    activateCropTool();
                     const imageRatio = getEffectiveOriginalRatio();
                     let newAspectRatio = BASE_RATIO;
                     if (preferPortrait || (imageRatio && imageRatio < 1)) {
