@@ -190,7 +190,7 @@ const SCAN_PROHIBITION = new RegExp(
   String.raw`\b(?:don['’]?t|do(?:es)?\s+not|to\s+not|never|no(?:\s+need\s+to)?|without|avoid|skip|stop)\b[^.!?,;\n]{0,25}?\b${SCAN_VERB}\b(?:\s*(?:\/|,|\bor\b|\band\b|\bnor\b)\s*${SCAN_VERB}\b)*`,
   'g',
 );
-const SCAN_REQUEST = /\b(?:scan|ocr|read|inspect|zoom in|look at)\b/;
+const SCAN_REQUEST = /\b(?:scan|ocr|read|inspect|zoom in|look at|describe|analy[sz]e|identify)\b/;
 
 // 'ask' when the text asks to look at the image once its prohibited phrases are
 // removed, 'forbid' when it only prohibits, null when it says neither.
@@ -199,6 +199,64 @@ function scanStance(text: string): 'forbid' | 'ask' | null {
   const stripped = lower.replace(SCAN_PROHIBITION, ' ');
   if (SCAN_REQUEST.test(stripped)) return 'ask';
   return stripped !== lower ? 'forbid' : null;
+}
+
+// Photos go to the model only when the user asks it to look ("scan/ocr this
+// image", "read the tag"). Titles, renames, tags and folder questions don't
+// need the picture, and attaching it anyway pinned every answer to that one
+// image ("I can only inspect the single image attached"). A bare follow-up
+// ("do the same", "again") inherits the last stance so a scan workflow repeats.
+const REPEAT_FOLLOW_UP = /\b(?:same|again|repeat|redo|continue|next one)\b/;
+
+function wantsImage(text: string, priorUserText: string[]): boolean {
+  const own = scanStance(text);
+  if (own !== null) return own === 'ask';
+  if (!REPEAT_FOLLOW_UP.test((text || '').toLowerCase())) return false;
+  return [...priorUserText].reverse().map(scanStance).find((s) => s !== null) === 'ask';
+}
+
+// Folder-wide questions ("is any image missing a title?", "which ones have no
+// tags?") are answered from an app-supplied listing, never from pixels.
+const LIBRARY_REQUEST =
+  /\b(?:folder|library|all (?:the |these |of the )?(?:images|photos|pictures|files)|every (?:image|photo|picture|file)|any (?:image|photo|picture|file)s?|which (?:images|photos|pictures|files|ones)|how many)\b/;
+const LIBRARY_LIMIT = 2000;
+
+const fileNameOf = (p: string) => (p.split(/[\\/]/).pop() || p).split('?vc=')[0];
+
+// One compact entry per image in the open folder, empty fields omitted. Titles
+// come from the background EXIF pass; anything it hasn't reached yet is read
+// now, so "no title" can't be reported just because loading was still running.
+async function buildLibraryContext(): Promise<Record<string, any> | null> {
+  const { imageList, imageRatings, currentFolderPath } = useLibraryStore.getState();
+  if (imageList.length === 0) return null;
+  const list = imageList.slice(0, LIBRARY_LIMIT);
+  const missing = list.filter((img) => !img.exif).map((img) => img.path);
+  const fetched: Record<string, Record<string, string>> = {};
+  for (let i = 0; i < missing.length; i += 100) {
+    try {
+      Object.assign(fetched, await invoke(Invokes.ReadExifForPaths, { paths: missing.slice(i, i + 100) }));
+    } catch {
+      // An unreadable file is listed without a title rather than failing the question.
+    }
+  }
+  const images = list.map((img) => {
+    const title = readCurrentMetadata(img.exif || fetched[img.path] || null).title;
+    const rating = imageRatings[img.path] ?? img.rating;
+    const allTags = img.tags || [];
+    const label = allTags.find((tg) => tg.startsWith('color:'))?.slice(6);
+    const tags = allTags
+      .filter((tg) => !tg.startsWith('color:'))
+      .map((tg) => (tg.startsWith('user:') ? tg.slice(5) : tg));
+    return {
+      file: fileNameOf(img.path),
+      ...(title ? { title } : {}),
+      ...(rating ? { rating } : {}),
+      ...(label ? { label } : {}),
+      ...(tags.length ? { tags } : {}),
+      ...(img.is_edited ? { edited: true } : {}),
+    };
+  });
+  return { folder: currentFolderPath, total: imageList.length, truncated: imageList.length > list.length, images };
 }
 
 function wantsLabelInspect(inspect: any): boolean {
@@ -735,26 +793,25 @@ export default function AssistantPanel() {
     // Batch mode: several library images selected and no manual attachment — OCR
     // and apply to each of them individually (matches how the Metadata panel
     // treats a multi-selection). A manual attachment falls back to single.
-    const doBatch = !scannerMode && outgoing.length === 0 && selectedPaths.length > 1;
+    // A folder question is about the listing, so it never fans out per image
+    // even with several images selected.
+    const libraryRequest = !scannerMode && LIBRARY_REQUEST.test((text || '').toLowerCase());
+    const doBatch = !scannerMode && !libraryRequest && outgoing.length === 0 && selectedPaths.length > 1;
 
-    const viewerUrl = finalPreviewUrl || uncroppedAdjustedPreviewUrl || currentImage?.thumbnailUrl || null;
-    const willAttachViewer = scannerMode
-      ? outgoing.length === 0
-      : !doBatch && outgoing.length === 0 && !!currentImage && !!viewerUrl;
-
-    // Prohibitions ("don't scan or ocr these") are read across the WHOLE
-    // conversation plus the message being sent: a standing rule must not scroll
-    // out of a recent-turns window and silently re-enable scanning. Computed
-    // here, before the badge, so the count can reflect what is really sent.
     const priorUserText = (() => {
       const s = useAssistantStore.getState();
       const msgs = s.conversations.find((c) => c.id === s.activeId)?.messages ?? [];
       return msgs.filter((m) => m.role === 'user').map((m) => m.content);
     })();
-    // Newest turn with a stance wins, so a "read the tag" after a "don't scan"
-    // re-enables images for every follow-up until the user forbids it again.
-    const forbidsScanning =
-      [text, ...[...priorUserText].reverse()].map(scanStance).find((s) => s !== null) === 'forbid';
+    // Images are opt-in (see wantsImage); computed before the badge so the
+    // count reflects what is really sent. Manual attachments and the scanner
+    // preview (the scan controls are about that frame) are always sent.
+    const imagesOff = !wantsImage(text, priorUserText);
+
+    const viewerUrl = finalPreviewUrl || uncroppedAdjustedPreviewUrl || currentImage?.thumbnailUrl || null;
+    const willAttachViewer = scannerMode
+      ? outgoing.length === 0
+      : !doBatch && !imagesOff && outgoing.length === 0 && !!currentImage && !!viewerUrl;
 
     const userMessage: AssistantMessage = {
       id: nextMessageId(),
@@ -764,7 +821,7 @@ export default function AssistantPanel() {
       // attached, and showing "4 image(s)" made it look like the app had
       // ignored the instruction.
       imageCount: doBatch
-        ? forbidsScanning
+        ? imagesOff
           ? 0
           : selectedPaths.length
         : outgoing.length + (willAttachViewer ? 1 : 0),
@@ -824,7 +881,7 @@ export default function AssistantPanel() {
       : null;
 
     const ocrIntent =
-      !forbidsScanning &&
+      !imagesOff &&
       /\b(read|ocr|label|code|weight|gms|gsm|extract|text|number)\b/.test(recentUserText);
 
     try {
@@ -834,7 +891,7 @@ export default function AssistantPanel() {
         // image's own label instead of reusing values from earlier ones. When
         // the user has ruled scanning out, the nudge drops the OCR half rather
         // than ordering the very thing they forbade.
-        const batchNudge = forbidsScanning
+        const batchNudge = imagesOff
           ? 'Apply the workflow to THIS image only; do not reuse values from other images.'
           : 'Apply the workflow to the ATTACHED image only. Read/OCR its own label; do not reuse values from other images.';
         const batchHistory = history.map((m, i) =>
@@ -863,7 +920,7 @@ export default function AssistantPanel() {
             // "Don't send any images" is taken literally: nothing is decoded or
             // attached, which also skips the inspect loop below (it needs a
             // canvas) and saves the upload on every item in the batch.
-            const prepared: any = forbidsScanning
+            const prepared: any = imagesOff
               ? null
               : await invoke(Invokes.AssistantPrepareImage, {
                   path,
@@ -1055,10 +1112,10 @@ export default function AssistantPanel() {
               isError: skipped,
               content: !skipped
                 ? `${name}: ${response?.reply || 'done'}`
-                : forbidsScanning && response?.inspect
+                : imagesOff && response?.inspect
                   ? t(
                       'editor.assistant.skippedNoImages',
-                      '{{name}}: skipped — it needs to see the image, but images are off because an earlier message said not to scan or send them. Ask it to read or scan the tag to turn them back on.',
+                      '{{name}}: skipped — it needs to see the image, but no image was sent. Images are only sent when you ask it to look, e.g. "scan the tag" or "read the image".',
                       { name },
                     )
                   : `${name}: nothing applied — ${response?.reply || 'no values returned'}`,
@@ -1121,6 +1178,9 @@ export default function AssistantPanel() {
               _canvas: viewCanvas,
             }
           : null;
+      // Folder questions carry the listing; works with no image open too.
+      const libraryContext = libraryRequest ? await buildLibraryContext() : null;
+      const baseContext = libraryContext ? { ...(chatContext || {}), _library: libraryContext } : chatContext;
 
       // Inspect loop: the model may ask to zoom into a region (small text the
       // downscaled attachment can't resolve). Each round crops that region from
@@ -1134,7 +1194,7 @@ export default function AssistantPanel() {
       for (let round = 0; ; round++) {
         response = await invoke(Invokes.AssistantChat, {
           messages: loopHistory,
-          adjustments: loopAppTurn ? { ...chatContext, _appTurn: loopAppTurn } : chatContext,
+          adjustments: loopAppTurn ? { ...baseContext, _appTurn: loopAppTurn } : baseContext,
           currentMetadata: scannerMode || !currentImage ? null : readCurrentMetadata(currentImage.exif),
           images: loopImages,
           model: selectedModel || null,
@@ -1255,6 +1315,20 @@ export default function AssistantPanel() {
         const res = await applyMetaOrg(response, currentImage.path, intent);
         metaPatch = res.metaPatch;
         appliedOrganization = res.org;
+      }
+
+      // "select": filenames from _library the model picked out. Selecting them
+      // makes the user's next request run over exactly those images as a batch
+      // — the chat can't write other images directly, but it can hand them over.
+      if (Array.isArray(response?.select) && response.select.length > 0) {
+        const wanted = new Set(response.select.map((f: any) => String(f).trim().toLowerCase()));
+        const { imageList: list, setLibrary } = useLibraryStore.getState();
+        const picked = list.filter((img) => wanted.has(fileNameOf(img.path).toLowerCase())).map((img) => img.path);
+        if (picked.length > 0) {
+          setLibrary({ multiSelectedPaths: picked });
+          const note = `selected ${picked.length} image${picked.length === 1 ? '' : 's'}`;
+          appliedOrganization = appliedOrganization ? `${appliedOrganization} · ${note}` : note;
+        }
       }
 
       if (metaPatch || appliedOrganization) {
