@@ -41,6 +41,8 @@ import { TextColors, TextVariants, TextWeights } from '../../../types/typography
 import { Adjustments, AdjustmentSnapshot, INITIAL_ADJUSTMENTS } from '../../../utils/adjustments';
 import { Invokes, OPTION_SEPARATOR, Panel, Preset, SelectedImage } from '../../ui/AppProperties';
 import { useEditorStore } from '../../../store/useEditorStore';
+import { useLibraryStore } from '../../../store/useLibraryStore';
+import { globalImageCache } from '../../../utils/ImageLRUCache';
 import { useUIStore } from '../../../store/useUIStore';
 import { useEditorActions } from '../../../hooks/useEditorActions';
 
@@ -437,6 +439,7 @@ export default function PresetsPanel({ onNavigateToCommunity }: PresetsPanelProp
   const selectedImage = useEditorStore((s) => s.selectedImage);
   const adjustments = useEditorStore((s) => s.adjustments);
   const setEditor = useEditorStore((s) => s.setEditor);
+  const multiSelectedPaths = useLibraryStore((s) => s.multiSelectedPaths);
   const { setAdjustments } = useEditorActions();
   const snapshots = useMemo<AdjustmentSnapshot[]>(() => adjustments.snapshots || [], [adjustments.snapshots]);
 
@@ -788,6 +791,21 @@ export default function PresetsPanel({ onNavigateToCommunity }: PresetsPanelProp
     expandedFolders,
   ]);
 
+  // A style applied with several images selected covers the whole selection,
+  // like paste: the active image goes through the normal (undoable) editor
+  // state, the rest are written straight into their sidecars.
+  const applyToOtherSelected = useCallback(
+    (patch: Partial<Adjustments>) => {
+      const others = multiSelectedPaths.filter((p: string) => p !== selectedImage?.path);
+      if (others.length === 0) return;
+      others.forEach((p: string) => globalImageCache.delete(p));
+      invoke(Invokes.ApplyAdjustmentsToPaths, { paths: others, adjustments: patch }).catch((err) =>
+        console.error('Failed to apply preset to the selection:', err),
+      );
+    },
+    [multiSelectedPaths, selectedImage?.path],
+  );
+
   const handleApplyPreset = (preset: Preset) => {
     if (activePresetId === preset.id) {
       setActivePresetId(null);
@@ -806,8 +824,12 @@ export default function PresetsPanel({ onNavigateToCommunity }: PresetsPanelProp
       ...prevAdjustments,
       ...preset.adjustments,
     }));
+    applyToOtherSelected(preset.adjustments);
   };
 
+  // Intensity ticks per pointer move; the rest of the selection syncs once the
+  // slider settles instead of writing every sidecar per tick.
+  const intensitySyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handleIntensityChange = useCallback(
     (preset: Preset, intensity: number) => {
       setPresetIntensity(intensity);
@@ -816,8 +838,10 @@ export default function PresetsPanel({ onNavigateToCommunity }: PresetsPanelProp
         ...prev,
         ...mixed,
       }));
+      if (intensitySyncTimer.current) clearTimeout(intensitySyncTimer.current);
+      intensitySyncTimer.current = setTimeout(() => applyToOtherSelected(mixed), 400);
     },
-    [setAdjustments],
+    [setAdjustments, applyToOtherSelected],
   );
 
   const handleSaveConfiguredPreset = async (
