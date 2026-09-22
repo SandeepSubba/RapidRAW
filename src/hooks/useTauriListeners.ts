@@ -6,6 +6,7 @@ import { useProcessStore } from '../store/useProcessStore';
 import { useEditorStore } from '../store/useEditorStore';
 import { useUIStore } from '../store/useUIStore';
 import { useLibraryStore } from '../store/useLibraryStore';
+import { toast } from 'react-toastify';
 
 interface TauriListenerProps {
   refreshAllFolderTrees: () => void;
@@ -200,6 +201,18 @@ export function useTauriListeners({
           if (currentPath) {
             refs.current.handleSelectSubfolder(currentPath, false);
           }
+        }
+      }),
+      // The external editor (Photoshop, Affinity, …) saved the round-trip
+      // file — pull it into the library view next to its original.
+      listen('external-edit-saved', (event: any) => {
+        if (!isEffectActive) return;
+        const savedPath = String(event.payload?.path || '');
+        const name = savedPath.split(/[\\/]/).pop() || savedPath;
+        toast.success(`${name} was saved from the external editor.`);
+        const currentPath = useLibraryStore.getState().currentFolderPath;
+        if (currentPath && savedPath.startsWith(currentPath)) {
+          refs.current.handleSelectSubfolder(currentPath, false);
         }
       }),
       listen('import-error', (event: any) => {

@@ -35,6 +35,7 @@ export enum Invokes {
   AssistantChat = 'assistant_chat',
   AssistantDevChat = 'assistant_dev_chat',
   AssistantDevCancel = 'assistant_dev_cancel',
+  StartExternalEdit = 'start_external_edit',
   AssistantListModels = 'assistant_list_models',
   AssistantPrepareImage = 'assistant_prepare_image',
   AssistantPrepareLabel = 'assistant_prepare_label',
@@ -252,6 +253,8 @@ export interface AppSettings {
   assistantApiKey?: string;
   assistantModel?: string;
   assistantDevRepoPath?: string;
+  externalEditorPath?: string;
+  externalEditorFormat?: string;
   decorations?: any;
   editorPreviewResolution?: number;
   smallThumbnailResolution?: number;

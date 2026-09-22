@@ -194,6 +194,12 @@ and dated.
   If two images in a batch actually render the same name, the later ones get
   `_2`, `_3`, … so nothing is overwritten; templates that already produce unique
   names are left exactly as written.
+- **Edit in External Editor** (thumbnail context menu) — Lightroom-style round
+  trip: the current adjustments are rendered to a 16-bit TIFF (or PNG/JPEG,
+  Settings → General) as `<name>-Edit.tif` beside the original, the configured
+  editor is launched with it (blank path = OS default app; macOS `.app` bundles
+  via `open -a`), and a save watcher refreshes the library automatically when
+  the editor writes the file — the edited copy appears next to the original.
 
 ## Library & metadata
 

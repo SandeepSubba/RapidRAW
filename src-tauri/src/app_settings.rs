@@ -492,6 +492,12 @@ pub struct AppSettings {
     // may modify (claudecode provider only).
     #[serde(default)]
     pub assistant_dev_repo_path: Option<String>,
+    // "Edit in external editor": absolute path of the editor executable (blank
+    // = OS default app) and the interchange format rendered for it.
+    #[serde(default)]
+    pub external_editor_path: Option<String>,
+    #[serde(default)]
+    pub external_editor_format: Option<String>,
     #[serde(default = "default_adjustment_visibility")]
     pub adjustment_visibility: HashMap<String, bool>,
     #[serde(default = "default_open_tree_sections")]
@@ -641,6 +647,8 @@ impl Default for AppSettings {
             assistant_api_key: None,
             assistant_model: None,
             assistant_dev_repo_path: None,
+            external_editor_path: None,
+            external_editor_format: None,
             adjustment_visibility: default_adjustment_visibility(),
             open_tree_sections: default_open_tree_sections(),
             copy_paste_settings: CopyPasteSettings::default(),

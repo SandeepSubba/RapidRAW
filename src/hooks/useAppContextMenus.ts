@@ -21,6 +21,7 @@ import {
   Star,
   SquaresUnite,
   Palette,
+  ExternalLink,
   Tag,
   Trash2,
   Undo,
@@ -883,6 +884,27 @@ export function useAppContextMenus(props: UseAppContextMenusProps) {
             invoke(Invokes.ShowInFinder, { path: finalSelection[0] }).catch((err) =>
               toast.error(t('contextMenus.toasts.couldNotShowExplorer', { err })),
             );
+          },
+        },
+        {
+          disabled: !isSingleSelection,
+          icon: ExternalLink,
+          label: t('contextMenus.thumbnail.editExternal', 'Edit in External Editor'),
+          onClick: () => {
+            toast.info(t('contextMenus.toasts.externalEditRendering', 'Rendering for the external editor…'));
+            invoke<{ outputPath: string; editor: string }>(Invokes.StartExternalEdit, {
+              path: finalSelection[0],
+            })
+              .then((res) => {
+                const name = res.outputPath.split(/[\\/]/).pop();
+                toast.success(
+                  t('contextMenus.toasts.externalEditOpened', 'Opened {{name}} in {{editor}} — saves appear in the library automatically.', {
+                    name,
+                    editor: res.editor,
+                  }),
+                );
+              })
+              .catch((err) => toast.error(String(err)));
           },
         },
         {

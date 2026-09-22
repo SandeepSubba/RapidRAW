@@ -153,6 +153,7 @@ export default function SettingsPanel({
   const [assistantApiKey, setAssistantApiKey] = useState<string>(appSettings?.assistantApiKey || '');
   const [assistantModel, setAssistantModel] = useState<string>(appSettings?.assistantModel || '');
   const [assistantDevRepoPath, setAssistantDevRepoPath] = useState<string>(appSettings?.assistantDevRepoPath || '');
+  const [externalEditorPath, setExternalEditorPath] = useState<string>(appSettings?.externalEditorPath || '');
   const [assistantTest, setAssistantTest] = useState<{ testing: boolean; success: boolean | null; message: string }>({
     testing: false,
     success: null,
@@ -293,6 +294,9 @@ export default function SettingsPanel({
     }
     if ((appSettings?.assistantDevRepoPath || '') !== assistantDevRepoPath) {
       setAssistantDevRepoPath(appSettings?.assistantDevRepoPath || '');
+    }
+    if ((appSettings?.externalEditorPath || '') !== externalEditorPath) {
+      setExternalEditorPath(appSettings?.externalEditorPath || '');
     }
     setProcessingSettings({
       editorPreviewResolution: appSettings?.editorPreviewResolution || 1920,
@@ -830,6 +834,44 @@ export default function SettingsPanel({
                           { value: 'zh-TW', label: '繁體中文' },
                         ]}
                         value={appSettings?.language || 'en'}
+                        triggerClassName="bg-bg-primary"
+                      />
+                    </SettingItem>
+
+                    <SettingItem
+                      label={t('settings.general.externalEditor', 'External editor')}
+                      description={t(
+                        'settings.general.externalEditorDesc',
+                        'Path to the editor for "Edit in External Editor" (e.g. Photoshop or Affinity Photo). Leave blank to use the system default app for the rendered file. The image is rendered with your RapidRAW edits next to the original, and saves from the editor appear in the library automatically.',
+                      )}
+                    >
+                      <Input
+                        className="grow"
+                        onBlur={() => onSettingsChange({ ...appSettings, externalEditorPath })}
+                        onChange={(e: any) => setExternalEditorPath(e.target.value)}
+                        onKeyDown={(e: any) => e.stopPropagation()}
+                        placeholder="C:\Program Files\Adobe\Photoshop\Photoshop.exe"
+                        type="text"
+                        value={externalEditorPath}
+                        bgClassName="bg-bg-primary"
+                      />
+                    </SettingItem>
+
+                    <SettingItem
+                      label={t('settings.general.externalEditorFormat', 'External editor format')}
+                      description={t(
+                        'settings.general.externalEditorFormatDesc',
+                        'File handed to the external editor. 16-bit TIFF keeps the most quality for round-trips.',
+                      )}
+                    >
+                      <Dropdown
+                        onChange={(value: any) => onSettingsChange({ ...appSettings, externalEditorFormat: value })}
+                        options={[
+                          { value: 'tiff', label: t('settings.general.externalEditorTiff', 'TIFF (16-bit)') },
+                          { value: 'png', label: 'PNG' },
+                          { value: 'jpeg', label: 'JPEG' },
+                        ]}
+                        value={appSettings?.externalEditorFormat || 'tiff'}
                         triggerClassName="bg-bg-primary"
                       />
                     </SettingItem>
