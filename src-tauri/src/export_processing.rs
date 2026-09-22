@@ -77,6 +77,10 @@ pub struct ExportSettings {
     pub destination_type: Option<String>,
     #[serde(default)]
     pub subfolder: Option<String>,
+    // TIFF sample depth: 8 or 16 bits per channel. None = 16 (the historical
+    // behavior); only the external-edit round trip sets 8 today.
+    #[serde(default)]
+    pub tiff_bit_depth: Option<u8>,
 }
 
 #[derive(Clone)]
@@ -504,7 +508,12 @@ fn save_image_with_metadata(
         .unwrap_or("")
         .to_lowercase();
 
-    let mut image_bytes = encode_image_to_bytes(image, &extension, export_settings.jpeg_quality)?;
+    let mut image_bytes = encode_image_to_bytes(
+        image,
+        &extension,
+        export_settings.jpeg_quality,
+        export_settings.tiff_bit_depth.unwrap_or(16),
+    )?;
 
     exif_processing::write_image_with_metadata(
         &mut image_bytes,
@@ -626,6 +635,7 @@ fn encode_image_to_bytes(
     image: &DynamicImage,
     output_format: &str,
     jpeg_quality: u8,
+    tiff_bit_depth: u8,
 ) -> Result<Vec<u8>, String> {
     let mut image_bytes = Vec::new();
     let mut cursor = Cursor::new(&mut image_bytes);
@@ -715,7 +725,12 @@ fn encode_image_to_bytes(
                 .map_err(|e| e.to_string())?;
         }
         "tiff" | "tif" => {
-            DynamicImage::ImageRgb16(image.to_rgb16())
+            let encoded = if tiff_bit_depth == 8 {
+                DynamicImage::ImageRgb8(image.to_rgb8())
+            } else {
+                DynamicImage::ImageRgb16(image.to_rgb16())
+            };
+            encoded
                 .write_to(&mut cursor, image::ImageFormat::Tiff)
                 .map_err(|e| e.to_string())?;
         }
@@ -1532,6 +1547,7 @@ pub async fn run_headless_export(
         preserve_folders: true,
         destination_type: None,
         subfolder: None,
+        tiff_bit_depth: None,
     };
 
     let mut custom_adjustments = None;
@@ -1726,6 +1742,7 @@ pub async fn estimate_export_sizes(
             &processed_preview,
             &output_format,
             export_settings.jpeg_quality,
+            export_settings.tiff_bit_depth.unwrap_or(16),
         )?;
         let preview_byte_size = preview_bytes.len();
 
@@ -1864,6 +1881,7 @@ pub async fn estimate_export_sizes(
             &processed_preview,
             &output_format,
             export_settings.jpeg_quality,
+            export_settings.tiff_bit_depth.unwrap_or(16),
         )?;
         let single_image_estimated_size = preview_bytes.len();
 
@@ -2034,10 +2052,13 @@ pub async fn start_external_edit(
         .file_stem()
         .map(|s| s.to_string_lossy().to_string())
         .ok_or("Couldn't derive a name for the edit file")?;
-    let ext = match format.as_str() {
-        "jpeg" => "jpg",
-        "png" => "png",
-        _ => "tif",
+    // "tiff8" shares the .tif container with "tiff" and only narrows the
+    // sample depth — some editors (and most plugins) still choke on 16-bit.
+    let (ext, tiff_bit_depth) = match format.as_str() {
+        "jpeg" => ("jpg", 16),
+        "png" => ("png", 16),
+        "tiff8" => ("tif", 8),
+        _ => ("tif", 16),
     };
     // Each session gets its own file: -Edit, -Edit-2, … — an existing file is
     // an earlier round-trip that must not be overwritten.
@@ -2060,6 +2081,7 @@ pub async fn start_external_edit(
         preserve_folders: false,
         destination_type: None,
         subfolder: None,
+        tiff_bit_depth: Some(tiff_bit_depth),
     };
 
     let (tx, rx) = tokio::sync::oneshot::channel();
@@ -2108,7 +2130,7 @@ mod tests {
         let image = DynamicImage::ImageRgb8(ImageBuffer::from_fn(64, 48, |x, y| {
             image::Rgb([(x * 4) as u8, (y * 5) as u8, 128])
         }));
-        let bytes = encode_image_to_bytes(&image, "jpg", 90).unwrap();
+        let bytes = encode_image_to_bytes(&image, "jpg", 90, 16).unwrap();
 
         assert_eq!(&bytes[0..2], &[0xFF, 0xD8], "not a JPEG");
 

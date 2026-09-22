@@ -36,6 +36,7 @@ import Text from '../ui/Text';
 import { TextColors, TextVariants, TextWeights } from '../../types/typography';
 import { useOsPlatform } from '../../hooks/useOsPlatform';
 import { open } from '@tauri-apps/plugin-shell';
+import { open as openFileDialog } from '@tauri-apps/plugin-dialog';
 import {
   AiProviderSwitch,
   CanvasInputModeSwitch,
@@ -845,16 +846,34 @@ export default function SettingsPanel({
                         'Path to the editor for "Edit in External Editor" (e.g. Photoshop or Affinity Photo). Leave blank to use the system default app for the rendered file. The image is rendered with your RapidRAW edits next to the original, and saves from the editor appear in the library automatically.',
                       )}
                     >
-                      <Input
-                        className="grow"
-                        onBlur={() => onSettingsChange({ ...appSettings, externalEditorPath })}
-                        onChange={(e: any) => setExternalEditorPath(e.target.value)}
-                        onKeyDown={(e: any) => e.stopPropagation()}
-                        placeholder="C:\Program Files\Adobe\Photoshop\Photoshop.exe"
-                        type="text"
-                        value={externalEditorPath}
-                        bgClassName="bg-bg-primary"
-                      />
+                      <div className="flex grow items-center gap-2">
+                        <Input
+                          className="grow"
+                          onBlur={() => onSettingsChange({ ...appSettings, externalEditorPath })}
+                          onChange={(e: any) => setExternalEditorPath(e.target.value)}
+                          onKeyDown={(e: any) => e.stopPropagation()}
+                          placeholder="C:\Program Files\Adobe\Photoshop\Photoshop.exe"
+                          type="text"
+                          value={externalEditorPath}
+                          bgClassName="bg-bg-primary"
+                        />
+                        <Button
+                          className="shrink-0 bg-bg-primary"
+                          onClick={async () => {
+                            const selected = await openFileDialog({
+                              multiple: false,
+                              title: t('settings.general.externalEditorBrowse', 'Choose the external editor'),
+                              defaultPath: externalEditorPath || undefined,
+                            });
+                            if (typeof selected === 'string' && selected) {
+                              setExternalEditorPath(selected);
+                              onSettingsChange({ ...appSettings, externalEditorPath: selected });
+                            }
+                          }}
+                        >
+                          {t('settings.general.browse', 'Browse…')}
+                        </Button>
+                      </div>
                     </SettingItem>
 
                     <SettingItem
@@ -868,6 +887,7 @@ export default function SettingsPanel({
                         onChange={(value: any) => onSettingsChange({ ...appSettings, externalEditorFormat: value })}
                         options={[
                           { value: 'tiff', label: t('settings.general.externalEditorTiff', 'TIFF (16-bit)') },
+                          { value: 'tiff8', label: t('settings.general.externalEditorTiff8', 'TIFF (8-bit)') },
                           { value: 'png', label: 'PNG' },
                           { value: 'jpeg', label: 'JPEG' },
                         ]}
