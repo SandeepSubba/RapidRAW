@@ -858,7 +858,7 @@ export default function SettingsPanel({
                           bgClassName="bg-bg-primary"
                         />
                         <Button
-                          className="shrink-0 bg-bg-primary"
+                          className="shrink-0 bg-surface text-text-primary border border-border-color hover:bg-card-active"
                           onClick={async () => {
                             const selected = await openFileDialog({
                               multiple: false,
