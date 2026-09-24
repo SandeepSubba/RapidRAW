@@ -55,6 +55,7 @@ export default function Controls() {
     histogram,
     selectedImage,
     isWbPickerActive,
+    isPointPickerActive,
     isWaveformVisible,
     waveform,
     activeWaveformChannel,
@@ -67,6 +68,7 @@ export default function Controls() {
       histogram: state.histogram,
       selectedImage: state.selectedImage,
       isWbPickerActive: state.isWbPickerActive,
+      isPointPickerActive: state.isPointPickerActive,
       isWaveformVisible: state.isWaveformVisible,
       waveform: state.waveform,
       activeWaveformChannel: state.activeWaveformChannel,
@@ -82,6 +84,11 @@ export default function Controls() {
 
   const toggleWbPicker = useCallback(
     () => setEditor((state) => ({ isWbPickerActive: !state.isWbPickerActive })),
+    [setEditor],
+  );
+
+  const togglePointPicker = useCallback(
+    () => setEditor((state) => ({ isPointPickerActive: !state.isPointPickerActive })),
     [setEditor],
   );
 
@@ -327,6 +334,8 @@ export default function Controls() {
                     appSettings={appSettings}
                     isWbPickerActive={isWbPickerActive}
                     toggleWbPicker={toggleWbPicker}
+                    isPointPickerActive={isPointPickerActive}
+                    togglePointPicker={togglePointPicker}
                     onDragStateChange={onDragStateChange}
                   />
                 </CollapsibleSection>

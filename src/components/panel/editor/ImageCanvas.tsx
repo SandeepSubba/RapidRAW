@@ -72,6 +72,8 @@ interface ImageCanvasProps {
   interactivePatch?: { url: string; normX: number; normY: number; normW: number; normH: number } | null;
   isWbPickerActive?: boolean;
   onWbPicked?: () => void;
+  isPointPickerActive?: boolean;
+  onPointColorPicked?: () => void;
   setAdjustments(fn: (prev: Adjustments) => Adjustments): void;
   overlayMode?: OverlayMode;
   overlayRotation?: number;
@@ -1392,6 +1394,8 @@ const ImageCanvas = memo(
     updateSubMask,
     isWbPickerActive = false,
     onWbPicked,
+    isPointPickerActive = false,
+    onPointColorPicked,
     setAdjustments,
     overlayRotation,
     overlayMode,
@@ -2207,6 +2211,115 @@ const ImageCanvas = memo(
       ],
     );
 
+    // Point-color eyedropper: sample the clicked color (like the WB picker),
+    // convert it to the shader's working hue/sat/value space, and append a new
+    // point color with default ranges for the panel to fine-tune.
+    const handlePointColorClick = useCallback(
+      (e: any) => {
+        const sampleUrl = selectedImage?.thumbnailUrl || finalPreviewUrl;
+        if (!isPointPickerActive || !sampleUrl) return;
+
+        const stage = e.target.getStage();
+        const pointerPos = getCanvasPointer(stage);
+        if (!pointerPos) return;
+
+        const x = pointerPos.x / imageRenderSize.scale;
+        const y = pointerPos.y / imageRenderSize.scale;
+        const imgLogicalWidth = imageRenderSize.width / imageRenderSize.scale;
+        const imgLogicalHeight = imageRenderSize.height / imageRenderSize.scale;
+        if (x < 0 || x > imgLogicalWidth || y < 0 || y > imgLogicalHeight) return;
+
+        const img = new Image();
+        img.crossOrigin = 'Anonymous';
+        img.src = sampleUrl;
+
+        img.onload = () => {
+          const radius = 3;
+          const canvas = document.createElement('canvas');
+          const side = radius * 2 + 1;
+          canvas.width = side;
+          canvas.height = side;
+          const ctx = canvas.getContext('2d', { willReadFrequently: true });
+          if (!ctx) return;
+
+          const scaleX = img.width / imgLogicalWidth;
+          const scaleY = img.height / imgLogicalHeight;
+          const srcX = Math.floor(x * scaleX);
+          const srcY = Math.floor(y * scaleY);
+          const startX = Math.max(0, srcX - radius);
+          const startY = Math.max(0, srcY - radius);
+          const sw = Math.min(img.width, srcX + radius + 1) - startX;
+          const sh = Math.min(img.height, srcY + radius + 1) - startY;
+          if (sw <= 0 || sh <= 0) return;
+
+          ctx.drawImage(img, startX, startY, sw, sh, 0, 0, sw, sh);
+          const data = ctx.getImageData(0, 0, sw, sh).data;
+          let rT = 0,
+            gT = 0,
+            bT = 0,
+            count = 0;
+          for (let i = 0; i < data.length; i += 4) {
+            rT += data[i];
+            gT += data[i + 1];
+            bT += data[i + 2];
+            count++;
+          }
+          if (count === 0) return;
+
+          // Hue/sat are matched in the shader's linear-light space, value
+          // perceptually — mirror that split here so the pick lands on target.
+          const lr = Math.pow(rT / count / 255, 2.2);
+          const lg = Math.pow(gT / count / 255, 2.2);
+          const lb = Math.pow(bT / count / 255, 2.2);
+          const mx = Math.max(lr, lg, lb);
+          const mn = Math.min(lr, lg, lb);
+          const d = mx - mn;
+          let h = 0;
+          if (d > 1e-6) {
+            if (mx === lr) h = 60 * (((lg - lb) / d) % 6);
+            else if (mx === lg) h = 60 * ((lb - lr) / d + 2);
+            else h = 60 * ((lr - lg) / d + 4);
+          }
+          h = (h + 360) % 360;
+          const sat = mx > 1e-6 ? d / mx : 0;
+          const lum = Math.pow(mx, 1 / 2.2);
+
+          const point = {
+            hue: Math.round(h * 10) / 10,
+            saturation: Math.round(sat * 1000) / 10,
+            luminance: Math.round(lum * 1000) / 10,
+            hueRange: 30,
+            satRange: 50,
+            lumRange: 50,
+            hueShift: 0,
+            satShift: 0,
+            lumShift: 0,
+          };
+
+          setAdjustments((prev: Adjustments) => {
+            const list = Array.isArray(prev.pointColors) ? [...prev.pointColors] : [];
+            if (list.length >= 4) {
+              list[list.length - 1] = point;
+            } else {
+              list.push(point);
+            }
+            return { ...prev, pointColors: list };
+          });
+
+          onPointColorPicked?.();
+        };
+      },
+      [
+        isPointPickerActive,
+        selectedImage?.thumbnailUrl,
+        finalPreviewUrl,
+        imageRenderSize,
+        onPointColorPicked,
+        setAdjustments,
+        getCanvasPointer,
+      ],
+    );
+
     const handleStart = useCallback(
       (e: any) => {
         if (e.evt && typeof e.evt.button === 'number' && e.evt.button !== 0) {
@@ -2224,6 +2337,11 @@ const ImageCanvas = memo(
             setDraftGuideLine({ p1: uv, p2: uv });
             isDrawing.current = true;
           }
+          return;
+        }
+
+        if (isPointPickerActive) {
+          handlePointColorClick(e);
           return;
         }
 
@@ -2428,6 +2546,8 @@ const ImageCanvas = memo(
         mapScreenToUv,
         isWbPickerActive,
         handleWbClick,
+        isPointPickerActive,
+        handlePointColorClick,
         isInitialDrawing,
         isBrushActive,
         isCloneOrHealActive,
@@ -2469,7 +2589,7 @@ const ImageCanvas = memo(
           return;
         }
 
-        if (isWbPickerActive) {
+        if (isWbPickerActive || isPointPickerActive) {
           return;
         }
 
@@ -2673,6 +2793,7 @@ const ImageCanvas = memo(
         mapScreenToUv,
         isToolActive,
         isWbPickerActive,
+        isPointPickerActive,
         isInitialDrawing,
         activeMaskId,
         activeAiSubMaskId,
@@ -3164,6 +3285,7 @@ const ImageCanvas = memo(
     const effectiveCursor = useMemo(() => {
       if (isGuidedPerspectiveActive && isCropping) return 'crosshair';
       if (isWbPickerActive) return 'crosshair';
+      if (isPointPickerActive) return 'crosshair';
       if (isParametricActive) return 'crosshair';
       if (isInitialDrawing) return 'crosshair';
 
@@ -3191,6 +3313,7 @@ const ImageCanvas = memo(
       isGuidedPerspectiveActive,
       isCropping,
       isWbPickerActive,
+      isPointPickerActive,
       isInitialDrawing,
       isBrushActive,
       isCloneOrHealActive,
@@ -3438,7 +3561,7 @@ const ImageCanvas = memo(
             </div>
           </div>
 
-          {(isMasking || isAiEditing || isWbPickerActive) && (
+          {(isMasking || isAiEditing || isWbPickerActive || isPointPickerActive) && (
             <div
               style={{
                 position: 'absolute',

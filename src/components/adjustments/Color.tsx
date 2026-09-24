@@ -1,10 +1,10 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Pipette, Sliders } from 'lucide-react';
+import { Pipette, Sliders, Trash2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import Slider from '../ui/Slider';
 import ColorWheel from '../ui/ColorWheel';
-import { ColorAdjustment, ColorCalibration, HueSatLum, INITIAL_ADJUSTMENTS } from '../../utils/adjustments';
+import { ColorAdjustment, ColorCalibration, HueSatLum, INITIAL_ADJUSTMENTS, MAX_POINT_COLORS, PointColor } from '../../utils/adjustments';
 import { Adjustments, ColorGrading } from '../../utils/adjustments';
 import { AppSettings } from '../ui/AppProperties';
 import Text from '../ui/Text';
@@ -23,6 +23,8 @@ interface ColorPanelProps {
   isForMask?: boolean;
   isWbPickerActive?: boolean;
   toggleWbPicker?: () => void;
+  isPointPickerActive?: boolean;
+  togglePointPicker?: () => void;
   onDragStateChange?: (isDragging: boolean) => void;
 }
 
@@ -393,6 +395,205 @@ const ColorCalibrationPanel = ({ adjustments, setAdjustments, onDragStateChange 
   );
 };
 
+// Lightroom "Point Color" / Capture One Advanced Color Editor-style targeted
+// editing: pick a color off the image with the eyedropper, tune how far the
+// selection reaches around it, then shift hue/sat/luminance of just that range.
+const PointColorPanel = ({
+  adjustments,
+  setAdjustments,
+  isPointPickerActive,
+  togglePointPicker,
+  onDragStateChange,
+}: ColorPanelProps) => {
+  const { t } = useTranslation();
+  const points: PointColor[] = Array.isArray(adjustments.pointColors) ? adjustments.pointColors : [];
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [showRange, setShowRange] = useState(false);
+
+  // A fresh pick lands at the end of the list — focus it.
+  const pointCount = points.length;
+  useEffect(() => {
+    if (pointCount > 0) setActiveIndex(pointCount - 1);
+  }, [pointCount]);
+
+  const active = points[Math.min(activeIndex, points.length - 1)];
+
+  const updateActive = (key: keyof PointColor, value: string) => {
+    const idx = Math.min(activeIndex, points.length - 1);
+    setAdjustments((prev: Partial<Adjustments>) => ({
+      ...prev,
+      pointColors: (prev.pointColors || []).map((p: PointColor, i: number) =>
+        i === idx ? { ...p, [key]: parseFloat(value) } : p,
+      ),
+    }));
+  };
+
+  const removeActive = () => {
+    const idx = Math.min(activeIndex, points.length - 1);
+    setAdjustments((prev: Partial<Adjustments>) => ({
+      ...prev,
+      pointColors: (prev.pointColors || []).filter((_: PointColor, i: number) => i !== idx),
+    }));
+    setActiveIndex((cur) => Math.max(0, cur - 1));
+  };
+
+  const swatchCss = (p: PointColor) =>
+    `hsl(${Math.round(p.hue)}, ${Math.round(Math.max(p.saturation, 8))}%, ${Math.round(
+      Math.min(Math.max(p.luminance, 20), 80),
+    )}%)`;
+
+  return (
+    <div className="p-2 bg-bg-tertiary rounded-md">
+      <div className="flex justify-between items-center mb-3">
+        <Text variant={TextVariants.heading}>{t('adjustments.color.pointColor', 'Point Color')}</Text>
+        <div className="flex items-center gap-1">
+          {active && (
+            <button
+              onClick={() => setShowRange(!showRange)}
+              className={`p-1.5 rounded-md transition-colors ${
+                showRange ? 'bg-accent text-button-text' : 'hover:bg-bg-secondary text-text-secondary'
+              }`}
+              data-tooltip={t('adjustments.color.pointColorRangeTooltip', 'Fine-tune the color range')}
+            >
+              <Sliders size={16} />
+            </button>
+          )}
+          {active && (
+            <button
+              onClick={removeActive}
+              className="p-1.5 rounded-md transition-colors hover:bg-bg-secondary text-text-secondary"
+              data-tooltip={t('adjustments.color.pointColorDeleteTooltip', 'Remove this point color')}
+            >
+              <Trash2 size={16} />
+            </button>
+          )}
+          {togglePointPicker && (
+            <button
+              onClick={togglePointPicker}
+              className={`p-1.5 rounded-md transition-colors ${
+                isPointPickerActive ? 'bg-accent text-button-text' : 'hover:bg-bg-secondary text-text-secondary'
+              }`}
+              data-tooltip={t('adjustments.color.pointColorPickerTooltip', 'Pick a color from the image')}
+            >
+              <Pipette size={16} />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {points.length === 0 ? (
+        <Text color={TextColors.secondary} className="mb-1">
+          {isPointPickerActive
+            ? t('adjustments.color.pointColorClickImage', 'Click a color in the image…')
+            : t(
+                'adjustments.color.pointColorEmpty',
+                'Use the eyedropper to pick a color from the image, then edit just that color.',
+              )}
+        </Text>
+      ) : (
+        <>
+          <div className="flex gap-3 mb-4 px-1">
+            {points.map((p, i) => (
+              <ColorSwatch
+                key={i}
+                color={swatchCss(p)}
+                isActive={i === Math.min(activeIndex, points.length - 1)}
+                name={String(i)}
+                onClick={() => setActiveIndex(i)}
+                ariaLabel={t('adjustments.color.ariaSelectPointColor', 'Select point color {{num}}', { num: i + 1 })}
+              />
+            ))}
+          </div>
+
+          {active && (
+            <>
+              <Slider
+                label={t('adjustments.color.hue')}
+                min={-180}
+                max={180}
+                step={1}
+                defaultValue={0}
+                value={active.hueShift}
+                onChange={(e: any) => updateActive('hueShift', e.target.value)}
+                onDragStateChange={onDragStateChange}
+                trackClassName="hue-range-track"
+              />
+              <Slider
+                label={t('adjustments.color.saturation')}
+                min={-100}
+                max={100}
+                step={1}
+                defaultValue={0}
+                value={active.satShift}
+                onChange={(e: any) => updateActive('satShift', e.target.value)}
+                onDragStateChange={onDragStateChange}
+              />
+              <Slider
+                label={t('adjustments.color.luminance')}
+                min={-100}
+                max={100}
+                step={1}
+                defaultValue={0}
+                value={active.lumShift}
+                onChange={(e: any) => updateActive('lumShift', e.target.value)}
+                onDragStateChange={onDragStateChange}
+              />
+
+              <AnimatePresence initial={false}>
+                {showRange && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.2, ease: 'easeInOut' }}
+                    className="overflow-hidden"
+                  >
+                    <div className="mt-2 pt-2 border-t border-border-color">
+                      <Text color={TextColors.secondary} className="mb-1">
+                        {t('adjustments.color.pointColorRange', 'Range')}
+                      </Text>
+                      <Slider
+                        label={t('adjustments.color.pointColorHueRange', 'Hue Range')}
+                        min={2}
+                        max={120}
+                        step={1}
+                        defaultValue={30}
+                        value={active.hueRange}
+                        onChange={(e: any) => updateActive('hueRange', e.target.value)}
+                        onDragStateChange={onDragStateChange}
+                      />
+                      <Slider
+                        label={t('adjustments.color.pointColorSatRange', 'Saturation Range')}
+                        min={5}
+                        max={100}
+                        step={1}
+                        defaultValue={50}
+                        value={active.satRange}
+                        onChange={(e: any) => updateActive('satRange', e.target.value)}
+                        onDragStateChange={onDragStateChange}
+                      />
+                      <Slider
+                        label={t('adjustments.color.pointColorLumRange', 'Luminance Range')}
+                        min={5}
+                        max={100}
+                        step={1}
+                        defaultValue={50}
+                        value={active.lumRange}
+                        onChange={(e: any) => updateActive('lumRange', e.target.value)}
+                        onDragStateChange={onDragStateChange}
+                      />
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </>
+          )}
+        </>
+      )}
+    </div>
+  );
+};
+
 export default function ColorPanel({
   adjustments,
   setAdjustments,
@@ -400,6 +601,8 @@ export default function ColorPanel({
   isForMask = false,
   isWbPickerActive = false,
   toggleWbPicker,
+  isPointPickerActive = false,
+  togglePointPicker,
   onDragStateChange,
 }: ColorPanelProps) {
   const { t } = useTranslation();
@@ -608,6 +811,17 @@ export default function ColorPanel({
           onDragStateChange={onDragStateChange}
         />
       </div>
+
+      {!isForMask && (
+        <PointColorPanel
+          adjustments={adjustments}
+          setAdjustments={setAdjustments}
+          appSettings={appSettings}
+          isPointPickerActive={isPointPickerActive}
+          togglePointPicker={togglePointPicker}
+          onDragStateChange={onDragStateChange}
+        />
+      )}
 
       {!isForMask && adjustmentVisibility.colorCalibration !== false && (
         <ColorCalibrationPanel

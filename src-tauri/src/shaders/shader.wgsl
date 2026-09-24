@@ -12,6 +12,23 @@ struct HslColor {
     _pad: f32,
 }
 
+// A picked "point color": reference color, reach around it, and HSL shifts.
+// Mirrors PointColorSettings in image_processing.rs (12 f32 = 48 bytes).
+struct PointColor {
+    hue: f32,
+    saturation: f32,
+    luminance: f32,
+    hue_range: f32,
+    sat_range: f32,
+    lum_range: f32,
+    hue_shift: f32,
+    sat_shift: f32,
+    lum_shift: f32,
+    enabled: f32,
+    _pad1: f32,
+    _pad2: f32,
+}
+
 struct ColorGradeSettings {
     hue: f32,
     saturation: f32,
@@ -98,6 +115,7 @@ struct GlobalAdjustments {
     color_calibration: ColorCalibrationSettings,
 
     hsl: array<HslColor, 8>,
+    point_colors: array<PointColor, 4>,
     luma_curve: array<Point, 16>,
     red_curve: array<Point, 16>,
     green_curve: array<Point, 16>,
@@ -786,6 +804,62 @@ fn apply_hsl_panel(color: vec3<f32>, hsl_adjustments: array<HslColor, 8>, coords
     }
     let final_color = hs_shifted_rgb * (target_luma / new_luma);
     return final_color;
+}
+
+// Targeted color editing from a picked reference (Lightroom Point Color /
+// Capture One Advanced Color Editor style). Each enabled point color defines
+// a soft region in hue/sat/value space; the HSL shifts are weighted by how
+// close the pixel sits to the reference, so edits stay inside the picked
+// range and feather out at its edges.
+fn apply_point_colors(color: vec3<f32>) -> vec3<f32> {
+    var result = color;
+    for (var i = 0u; i < 4u; i = i + 1u) {
+        let pc = adjustments.global.point_colors[i];
+        if (pc.enabled < 0.5) { continue; }
+        if (abs(pc.hue_shift) < 0.01 && abs(pc.sat_shift) < 0.001 && abs(pc.lum_shift) < 0.001) {
+            continue;
+        }
+
+        let safe = max(result, vec3<f32>(0.0));
+        let hsv = rgb_to_hsv(safe);
+
+        // Distances from the reference, each mapped through a smooth falloff:
+        // full effect inside half the range, feathered to zero at the range edge.
+        let hue_dist = min(abs(hsv.x - pc.hue), 360.0 - abs(hsv.x - pc.hue));
+        let w_hue = 1.0 - smoothstep(pc.hue_range * 0.5, pc.hue_range, hue_dist);
+        let w_sat = 1.0 - smoothstep(pc.sat_range * 0.5, pc.sat_range, abs(hsv.y - pc.saturation));
+        // Compare value perceptually so the picked (display-space) luminance
+        // lines up with the linear working space.
+        let value_perceptual = pow(max(hsv.z, 0.0), 1.0 / 2.2);
+        let w_lum = 1.0 - smoothstep(pc.lum_range * 0.5, pc.lum_range, abs(value_perceptual - pc.luminance));
+
+        // Hue is meaningless on near-neutrals, so fade the effect out there —
+        // unless the user deliberately picked a near-neutral reference.
+        var neutral_guard = 1.0;
+        if (pc.saturation > 0.15) {
+            neutral_guard = smoothstep(0.02, 0.12, hsv.y);
+        }
+
+        let w = w_hue * w_sat * w_lum * neutral_guard;
+        if (w < 0.001) { continue; }
+
+        var out_hsv = hsv;
+        out_hsv.x = (out_hsv.x + pc.hue_shift * w + 360.0) % 360.0;
+        out_hsv.y = clamp(out_hsv.y * (1.0 + pc.sat_shift * w), 0.0, 1.0);
+        let shifted = hsv_to_rgb(vec3<f32>(out_hsv.x, out_hsv.y, hsv.z));
+
+        // Luma-preserving application, same approach as the HSL mixer: shift
+        // hue/sat at constant value, then scale toward the target luminance.
+        let orig_luma = get_luma(safe);
+        let new_luma = get_luma(shifted);
+        let target_luma = orig_luma * (1.0 + pc.lum_shift * w);
+        if (new_luma > 0.0001) {
+            result = shifted * (target_luma / new_luma);
+        } else {
+            result = vec3<f32>(max(0.0, target_luma));
+        }
+    }
+    return result;
 }
 
 fn apply_color_grading(color: vec3<f32>, shadows: ColorGradeSettings, midtones: ColorGradeSettings, highlights: ColorGradeSettings, global: ColorGradeSettings, blending: f32, balance: f32) -> vec3<f32> {
@@ -1937,6 +2011,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     composite_rgb_linear = apply_highlights_adjustment(composite_rgb_linear, absolute_coord_i, scale, is_raw, t_highlights);
     composite_rgb_linear = apply_color_calibration(composite_rgb_linear, adjustments.global.color_calibration);
     composite_rgb_linear = apply_hsl_panel(composite_rgb_linear, final_hsl, absolute_coord_i);
+    composite_rgb_linear = apply_point_colors(composite_rgb_linear);
     composite_rgb_linear = apply_hue_shift(composite_rgb_linear, t_hue);
     composite_rgb_linear = apply_creative_color(composite_rgb_linear, t_saturation, t_vibrance);
 

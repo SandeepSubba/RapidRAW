@@ -1290,7 +1290,8 @@
         "tone": "Tone",
         "transformRotation": "Transform & Rotation",
         "vignette": "Vignette",
-        "whiteBalance": "White Balance"
+        "whiteBalance": "White Balance",
+        "pointColor": "Point Color"
       },
       "includedAdjustments": "Included Adjustments",
       "modeMerge": "Merge",

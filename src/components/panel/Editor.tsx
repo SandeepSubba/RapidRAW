@@ -110,6 +110,7 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
   const overlayRotation = useEditorStore((s) => s.overlayRotation);
   const isStraightenActive = useEditorStore((s) => s.isStraightenActive);
   const isWbPickerActive = useEditorStore((s) => s.isWbPickerActive);
+  const isPointPickerActive = useEditorStore((s) => s.isPointPickerActive);
   const liveRotation = useEditorStore((s) => s.liveRotation);
   const brushSettings = useEditorStore((s) => s.brushSettings);
   const activeMaskContainerId = useEditorStore((s) => s.activeMaskContainerId);
@@ -389,6 +390,11 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
   );
 
   const handleWbPicked = useCallback(() => {}, []);
+
+  // A picked point color is a one-shot action: sampling done, drop the tool.
+  const handlePointColorPicked = useCallback(() => {
+    setEditor({ isPointPickerActive: false });
+  }, [setEditor]);
 
   useEffect(() => {
     if (isFullScreen) {
@@ -760,7 +766,8 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
         activeSubMask?.type === Mask.Color ||
         activeSubMask?.type === Mask.Luminance ||
         activeSubMask?.parameters?.isInitialDraw)) ||
-    isWbPickerActive;
+    isWbPickerActive ||
+    isPointPickerActive;
 
   useEffect(() => {
     const container = imageContainerRef.current;
@@ -2453,6 +2460,8 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
             updateSubMask={updateSubMaskLocal}
             isWbPickerActive={isWbPickerActive}
             onWbPicked={handleWbPicked}
+            isPointPickerActive={isPointPickerActive}
+            onPointColorPicked={handlePointColorPicked}
             setAdjustments={setAdjustments}
             overlayRotation={overlayRotation}
             overlayMode={overlayMode}

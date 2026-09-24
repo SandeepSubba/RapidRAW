@@ -1430,6 +1430,28 @@ pub struct HslColor {
     _pad: f32,
 }
 
+// One picked "point color" (Lightroom Point Color / Capture One Advanced
+// Color Editor style): a sampled reference color, the range around it that
+// the edit reaches (with smooth falloff), and the HSL shifts to apply there.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, Pod, Zeroable, Default)]
+#[repr(C)]
+pub struct PointColorSettings {
+    pub hue: f32,        // reference hue, degrees 0-360
+    pub saturation: f32, // reference saturation 0-1
+    pub luminance: f32,  // reference (perceptual) value 0-1
+    pub hue_range: f32,  // falloff extent, degrees
+    pub sat_range: f32,  // falloff extent 0-1
+    pub lum_range: f32,  // falloff extent 0-1
+    pub hue_shift: f32,  // degrees
+    pub sat_shift: f32,  // -1..1 multiplier delta
+    pub lum_shift: f32,  // -1..1 multiplier delta
+    pub enabled: f32,
+    _pad1: f32,
+    _pad2: f32,
+}
+
+pub const MAX_POINT_COLORS: usize = 4;
+
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, Pod, Zeroable, Default)]
 #[repr(C)]
 pub struct ColorGradeSettings {
@@ -1540,6 +1562,7 @@ pub struct GlobalAdjustments {
     pub color_calibration: ColorCalibrationSettings,
 
     pub hsl: [HslColor; 8],
+    pub point_colors: [PointColorSettings; MAX_POINT_COLORS],
     pub luma_curve: [Point; 16],
     pub red_curve: [Point; 16],
     pub green_curve: [Point; 16],
@@ -1758,6 +1781,30 @@ fn parse_hsl_adjustments(js_hsl: &serde_json::Value) -> [HslColor; 8] {
         }
     }
     hsl_array
+}
+
+fn parse_point_colors(js_points: &serde_json::Value) -> [PointColorSettings; MAX_POINT_COLORS] {
+    let mut out = [PointColorSettings::default(); MAX_POINT_COLORS];
+    if let Some(list) = js_points.as_array() {
+        for (i, p) in list.iter().take(MAX_POINT_COLORS).enumerate() {
+            let f = |key: &str, default: f64| p[key].as_f64().unwrap_or(default) as f32;
+            out[i] = PointColorSettings {
+                hue: f("hue", 0.0),
+                saturation: f("saturation", 0.0) / 100.0,
+                luminance: f("luminance", 0.0) / 100.0,
+                hue_range: f("hueRange", 30.0).max(1.0),
+                sat_range: (f("satRange", 50.0) / 100.0).max(0.01),
+                lum_range: (f("lumRange", 50.0) / 100.0).max(0.01),
+                hue_shift: f("hueShift", 0.0),
+                sat_shift: f("satShift", 0.0) / 100.0,
+                lum_shift: f("lumShift", 0.0) / 100.0,
+                enabled: 1.0,
+                _pad1: 0.0,
+                _pad2: 0.0,
+            };
+        }
+    }
+    out
 }
 
 fn parse_color_grade_settings(js_cg: &serde_json::Value) -> ColorGradeSettings {
@@ -2368,6 +2415,11 @@ fn get_global_adjustments_from_json(
             parse_hsl_adjustments(&js_adjustments.get("hsl").cloned().unwrap_or_default())
         } else {
             [HslColor::default(); 8]
+        },
+        point_colors: if is_visible("color") {
+            parse_point_colors(&js_adjustments.get("pointColors").cloned().unwrap_or_default())
+        } else {
+            [PointColorSettings::default(); MAX_POINT_COLORS]
         },
         luma_curve: convert_points_to_aligned(luma_points.clone()),
         red_curve: convert_points_to_aligned(red_points.clone()),

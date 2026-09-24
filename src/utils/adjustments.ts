@@ -184,6 +184,22 @@ export interface AdjustmentSnapshot {
   state: Partial<Adjustments>;
 }
 
+// One picked "point color" (Lightroom Point Color-style targeted edit):
+// the sampled reference, the reach around it, and the shifts to apply.
+export interface PointColor {
+  hue: number;        // reference hue 0-360
+  saturation: number; // reference saturation 0-100
+  luminance: number;  // reference brightness 0-100
+  hueRange: number;   // falloff extent in degrees
+  satRange: number;   // falloff extent 0-100
+  lumRange: number;   // falloff extent 0-100
+  hueShift: number;   // -180..180
+  satShift: number;   // -100..100
+  lumShift: number;   // -100..100
+}
+
+export const MAX_POINT_COLORS = 4;
+
 export interface Adjustments {
   [index: string]: any;
   aiPatches: Array<AiPatch>;
@@ -220,6 +236,7 @@ export interface Adjustments {
   halationAmount: number;
   highlights: number;
   hsl: Hsl;
+  pointColors: PointColor[];
   hue: number;
   lensBlurAmount: number;
   lensBlurDiffusion: number;
@@ -580,6 +597,7 @@ export const INITIAL_ADJUSTMENTS: Adjustments = {
     reds: { hue: 0, saturation: 0, luminance: 0 },
     yellows: { hue: 0, saturation: 0, luminance: 0 },
   },
+  pointColors: [],
   hue: 0,
   lensBlurAmount: 40,
   lensBlurDiffusion: 0,
@@ -778,6 +796,7 @@ export const normalizeLoadedAdjustments = (loadedAdjustments: Adjustments): any 
     colorCalibration: { ...INITIAL_ADJUSTMENTS.colorCalibration, ...(loadedAdjustments.colorCalibration || {}) },
     colorGrading: { ...INITIAL_ADJUSTMENTS.colorGrading, ...(loadedAdjustments.colorGrading || {}) },
     hsl: { ...INITIAL_ADJUSTMENTS.hsl, ...(loadedAdjustments.hsl || {}) },
+    pointColors: Array.isArray(loadedAdjustments.pointColors) ? loadedAdjustments.pointColors : [],
     curves: loadedAdjustments.curves ? deepCloneCurves(loadedAdjustments.curves) : getDefaultCurves(),
     pointCurves: loadedAdjustments.pointCurves ? deepCloneCurves(loadedAdjustments.pointCurves) : getDefaultCurves(),
     parametricCurve: loadedAdjustments.parametricCurve
@@ -830,6 +849,7 @@ export const ADJUSTMENT_GROUPS: Record<string, AdjustmentGroup[]> = {
     },
     { label: 'modals.copyPaste.groups.colorGrading', keys: [ColorAdjustment.ColorGrading] },
     { label: 'modals.copyPaste.groups.colorMixer', keys: [ColorAdjustment.Hsl] },
+    { label: 'modals.copyPaste.groups.pointColor', keys: ['pointColors'] },
     { label: 'modals.copyPaste.groups.colorCalibration', keys: ['colorCalibration'] },
   ],
   details: [
@@ -943,6 +963,7 @@ export const ADJUSTMENT_SECTIONS: Sections = {
     ColorAdjustment.Tint,
     ColorAdjustment.Vibrance,
     ColorAdjustment.Hsl,
+    'pointColors',
     ColorAdjustment.ColorGrading,
     'colorCalibration',
     ColorAdjustment.Hue,
