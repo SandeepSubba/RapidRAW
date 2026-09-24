@@ -1450,7 +1450,7 @@ pub struct PointColorSettings {
     _pad2: f32,
 }
 
-pub const MAX_POINT_COLORS: usize = 4;
+pub const MAX_POINT_COLORS: usize = 8;
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, Pod, Zeroable, Default)]
 #[repr(C)]

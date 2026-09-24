@@ -198,7 +198,7 @@ export interface PointColor {
   lumShift: number;   // -100..100
 }
 
-export const MAX_POINT_COLORS = 4;
+export const MAX_POINT_COLORS = 8;
 
 export interface Adjustments {
   [index: string]: any;

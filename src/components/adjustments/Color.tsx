@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import Slider from '../ui/Slider';
 import ColorWheel from '../ui/ColorWheel';
-import { ColorAdjustment, ColorCalibration, HueSatLum, INITIAL_ADJUSTMENTS, MAX_POINT_COLORS, PointColor } from '../../utils/adjustments';
+import { ColorAdjustment, ColorCalibration, HueSatLum, INITIAL_ADJUSTMENTS, PointColor } from '../../utils/adjustments';
 import { Adjustments, ColorGrading } from '../../utils/adjustments';
 import { AppSettings } from '../ui/AppProperties';
 import Text from '../ui/Text';
@@ -492,7 +492,7 @@ const PointColorPanel = ({
         </Text>
       ) : (
         <>
-          <div className="flex gap-3 mb-4 px-1">
+          <div className="flex flex-wrap gap-3 mb-4 px-1">
             {points.map((p, i) => (
               <ColorSwatch
                 key={i}

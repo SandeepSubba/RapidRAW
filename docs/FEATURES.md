@@ -169,7 +169,7 @@ and dated.
   style) — an eyedropper in the Color panel samples any color off the image;
   hue / saturation / luminance sliders then edit **just that color**, with
   Range sliders (hue / saturation / luminance reach, smooth falloff) to fine-
-  tune how far the selection extends. Up to 4 point colors per image; they
+  tune how far the selection extends. Up to 8 point colors per image; they
   ride in the normal adjustments (undo, presets, copy/paste — "Point Color"
   group) and render on the GPU next to the 8-band mixer.
 - **Capture One–style keyboard shortcuts** for the core tonal & color sliders —

@@ -5,7 +5,7 @@ import { Stage, Layer, Ellipse, Line, Transformer, Group, Circle, Rect, Arrow } 
 import { PercentCrop, Crop } from 'react-image-crop';
 import { Stamp, Bandage, Spline, BrushCleaning } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
-import { Adjustments, AiPatch, Coord, MaskContainer, GuideLine, GuideOrientation } from '../../../utils/adjustments';
+import { MAX_POINT_COLORS, Adjustments, AiPatch, Coord, MaskContainer, GuideLine, GuideOrientation } from '../../../utils/adjustments';
 import { Mask, SubMask, SubMaskMode, ToolType } from '../right/Masks';
 import { AppSettings, BrushSettings, SelectedImage } from '../../ui/AppProperties';
 import { RenderSize } from '../../../hooks/useImageRenderSize';
@@ -2298,7 +2298,7 @@ const ImageCanvas = memo(
 
           setAdjustments((prev: Adjustments) => {
             const list = Array.isArray(prev.pointColors) ? [...prev.pointColors] : [];
-            if (list.length >= 4) {
+            if (list.length >= MAX_POINT_COLORS) {
               list[list.length - 1] = point;
             } else {
               list.push(point);

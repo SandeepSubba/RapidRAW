@@ -115,7 +115,7 @@ struct GlobalAdjustments {
     color_calibration: ColorCalibrationSettings,
 
     hsl: array<HslColor, 8>,
-    point_colors: array<PointColor, 4>,
+    point_colors: array<PointColor, 8>,
     luma_curve: array<Point, 16>,
     red_curve: array<Point, 16>,
     green_curve: array<Point, 16>,
@@ -813,7 +813,7 @@ fn apply_hsl_panel(color: vec3<f32>, hsl_adjustments: array<HslColor, 8>, coords
 // range and feather out at its edges.
 fn apply_point_colors(color: vec3<f32>) -> vec3<f32> {
     var result = color;
-    for (var i = 0u; i < 4u; i = i + 1u) {
+    for (var i = 0u; i < 8u; i = i + 1u) {
         let pc = adjustments.global.point_colors[i];
         if (pc.enabled < 0.5) { continue; }
         if (abs(pc.hue_shift) < 0.01 && abs(pc.sat_shift) < 0.001 && abs(pc.lum_shift) < 0.001) {
