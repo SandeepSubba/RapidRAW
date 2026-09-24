@@ -764,6 +764,7 @@ export function ViewOptionsDropdown({
                             onLibraryRefresh?.();
                           }
                         }}
+                        trackClassName="bg-surface"
                       />
                       <Switch
                         checked={appSettings?.groupEditedFiles ?? true}
@@ -775,6 +776,7 @@ export function ViewOptionsDropdown({
                             onLibraryRefresh?.();
                           }
                         }}
+                        trackClassName="bg-surface"
                       />
                     </div>
                   </motion.div>

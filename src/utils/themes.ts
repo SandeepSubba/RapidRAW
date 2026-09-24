@@ -62,18 +62,3 @@ export const THEMES: Array<ThemeProps> = [
 ];
 
 export const DEFAULT_THEME_ID = Theme.Dark;
-
-// Editor canvas presets: the area around the image only, independent of the UI
-// theme. Neutral greys so the surround doesn't bias colour/tone judgement.
-// 'theme' (or unset) keeps the theme's own background.
-export const EDITOR_CANVAS_COLORS: Array<{ id: string; name: string; rgb: [number, number, number] | null }> = [
-  { id: 'theme', name: 'settings.general.editorCanvasTheme', rgb: null },
-  { id: 'white', name: 'settings.general.editorCanvasWhite', rgb: [255, 255, 255] },
-  { id: 'lightGrey', name: 'settings.general.editorCanvasLightGrey', rgb: [204, 204, 204] },
-  { id: 'midGrey', name: 'settings.general.editorCanvasMidGrey', rgb: [128, 128, 128] },
-  { id: 'darkGrey', name: 'settings.general.editorCanvasDarkGrey', rgb: [64, 64, 64] },
-  { id: 'black', name: 'settings.general.editorCanvasBlack', rgb: [0, 0, 0] },
-];
-
-export const editorCanvasRgb = (id?: string | null): [number, number, number] | null =>
-  EDITOR_CANVAS_COLORS.find((c) => c.id === id)?.rgb ?? null;

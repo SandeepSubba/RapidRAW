@@ -28,7 +28,7 @@ import Dropdown, { OptionItem } from '../ui/Dropdown';
 import Switch from '../ui/Switch';
 import Input from '../ui/Input';
 import Slider from '../ui/Slider';
-import { ThemeProps, THEMES, DEFAULT_THEME_ID, EDITOR_CANVAS_COLORS } from '../../utils/themes';
+import { ThemeProps, THEMES, DEFAULT_THEME_ID } from '../../utils/themes';
 import { useTranslation } from 'react-i18next';
 import { Invokes } from '../ui/AppProperties';
 import { ADJUSTMENT_NUDGES, KEYBIND_DEFINITIONS, KEYBIND_SECTIONS, resolveNudgeStep } from '../../utils/keyboardUtils';
@@ -803,20 +803,6 @@ export default function SettingsPanel({
                       />
                     </SettingItem>
 
-                    <SettingItem
-                      label={t('settings.general.editorCanvas')}
-                      description={t('settings.general.editorCanvasDesc')}
-                    >
-                      <Dropdown
-                        onChange={(value: any) =>
-                          onSettingsChange({ ...appSettings, editorCanvasColor: value === 'theme' ? undefined : value })
-                        }
-                        options={EDITOR_CANVAS_COLORS.map((c) => ({ value: c.id, label: t(c.name as any) }))}
-                        value={appSettings?.editorCanvasColor || 'theme'}
-                        triggerClassName="bg-bg-primary"
-                      />
-                    </SettingItem>
-
                     <SettingItem label={t('settings.language')} description={t('settings.languageDesc')}>
                       <Dropdown
                         onChange={(value: any) => onSettingsChange({ ...appSettings, language: value })}
@@ -953,6 +939,18 @@ export default function SettingsPanel({
                         id="folder-image-counts-toggle"
                         label={t('settings.general.showImageCounts')}
                         onChange={(checked) => onSettingsChange({ ...appSettings, enableFolderImageCounts: checked })}
+                      />
+                    </SettingItem>
+
+                    <SettingItem
+                      label={t('settings.general.neutralGreyCanvas')}
+                      description={t('settings.general.neutralGreyCanvasDesc')}
+                    >
+                      <Switch
+                        checked={appSettings?.editorNeutralGreyBg ?? false}
+                        id="neutral-grey-bg-toggle"
+                        label={t('settings.general.enableNeutralGreyCanvas')}
+                        onChange={(checked) => onSettingsChange({ ...appSettings, editorNeutralGreyBg: checked })}
                       />
                     </SettingItem>
 
@@ -1779,24 +1777,6 @@ export default function SettingsPanel({
                     {t('settings.processing.preprocessing.title')}
                   </Text>
                   <div className="space-y-8">
-                    <SettingItem
-                      label={t('settings.processing.preprocessing.highlightRecovery')}
-                      description={t('settings.processing.preprocessing.highlightRecoveryDesc')}
-                    >
-                      <Slider
-                        label={t('settings.tagging.amount')}
-                        min={1}
-                        max={10}
-                        step={0.1}
-                        value={processingSettings.rawHighlightCompression}
-                        defaultValue={2.5}
-                        onChange={(e: any) =>
-                          handleProcessingSettingChange('rawHighlightCompression', parseFloat(e.target.value))
-                        }
-                        fillOrigin="min"
-                      />
-                    </SettingItem>
-
                     <SettingItem
                       label={t('settings.processing.preprocessing.colorNr')}
                       description={t('settings.processing.preprocessing.colorNrDesc')}

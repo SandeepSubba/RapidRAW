@@ -35,6 +35,8 @@ export const FILENAME_VARIABLES: Array<string> = [
   '{mm}',
 ];
 
+export type TiffBitDepth = 8 | 16;
+
 // The original author's default export filename template.
 export const DEFAULT_FILENAME_TEMPLATE = '{original_filename}_edited';
 
@@ -57,6 +59,7 @@ export function sanitizeFilenameTemplate(template: string | null | undefined): s
 export interface ExportSettings {
   filenameTemplate: string | null;
   jpegQuality: number;
+  tiffBitDepth: TiffBitDepth;
   keepMetadata: boolean;
   preserveTimestamps: boolean;
   resize: {
@@ -126,6 +129,7 @@ export interface ExportPreset {
   name: string;
   fileFormat: string;
   jpegQuality: number;
+  tiffBitDepth?: TiffBitDepth;
   enableResize: boolean;
   resizeMode: string;
   resizeValue: number;

@@ -17,7 +17,6 @@ interface KeyboardShortcutsProps {
   handleGoHome(): void;
   handleImageSelect(path: string, openInEditor?: boolean): void;
   handlePasteFiles(str: string): void;
-  handleToggleFullScreen(): void;
   handleZoomChange(zoomValue: number, fitToWindow?: boolean): void;
 }
 
@@ -28,7 +27,6 @@ export const useKeyboardShortcuts = ({
   handleGoHome,
   handleImageSelect,
   handlePasteFiles,
-  handleToggleFullScreen,
   handleZoomChange,
 }: KeyboardShortcutsProps) => {
   const { setAdjustments, handleRotate, handleCopyAdjustments, handlePasteAdjustments, toggleShowOriginal } = useEditorActions();
@@ -322,9 +320,9 @@ export const useKeyboardShortcuts = ({
       },
       toggle_fullscreen: {
         shouldFire: (s: any) => !!s.editor.selectedImage,
-        execute: (e: any) => {
+        execute: (e: any, s: any) => {
           e.preventDefault();
-          handleToggleFullScreen();
+          s.ui.toggleFullScreen();
         },
       },
       show_original: {
@@ -635,7 +633,7 @@ export const useKeyboardShortcuts = ({
           else if (s.editor.activeMaskId) s.editor.setEditor({ activeMaskId: null });
           else if (s.editor.activeMaskContainerId) s.editor.setEditor({ activeMaskContainerId: null });
           else if (s.ui.activePanel === Panel.Crop) s.ui.setPanel(Panel.Adjustments);
-          else if (s.ui.isFullScreen) handleToggleFullScreen();
+          else if (s.ui.isFullScreen) s.ui.toggleFullScreen();
           else if (s.ui.activeView === 'editor') handleBackToLibrary();
           else if (s.ui.activeView === 'library' && s.library.rootPaths?.length > 0) handleGoHome();
         },
@@ -942,7 +940,6 @@ export const useKeyboardShortcuts = ({
     handleGoHome,
     handleImageSelect,
     handlePasteFiles,
-    handleToggleFullScreen,
     handleZoomChange,
     setAdjustments,
     handleRotate,

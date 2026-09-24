@@ -169,6 +169,7 @@ pub struct AppState {
     // fast drag) can detect they've been superseded and bail before doing work.
     pub uncropped_preview_generation: Arc<AtomicUsize>,
     pub full_warped_cache: Mutex<Option<(u64, Arc<DynamicImage>)>>,
+    pub patched_warped_cache: Mutex<Option<(u64, Arc<DynamicImage>)>>,
     pub full_transformed_cache: Mutex<Option<TransformedImageCache>>,
     pub decoded_image_cache: Mutex<DecodedImageCache>,
     /// Only one full-resolution decode at a time. Arrowing through a folder

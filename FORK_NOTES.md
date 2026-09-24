@@ -139,6 +139,40 @@ analysis) retired fork code in favour of upstream equivalents:
 - `is_tethering_supported` is implemented on the fork's `tether-usb`
   feature (upstream keys it on their `tethering` feature).
 
+### v1.6.4 sync notes
+
+The v1.6.4 merge again retired fork code where upstream shipped an equivalent:
+
+- **Editor canvas color → neutral grey toggle.** The fork's
+  `editorCanvasColor` preset dropdown (theme/white/greys/black, "Editor
+  Canvas" in Settings → General, `EDITOR_CANVAS_COLORS` in themes.ts) is
+  gone; upstream's `editorNeutralGreyBg` switch ("Neutral Grey Canvas")
+  replaces it for the color-judgement use case. Old settings files carrying
+  `editorCanvasColor` simply drop the key on the next save.
+- **TIFF bit depth → upstream `TiffBitDepth`.** The fork's
+  `ExportSettings.tiff_bit_depth: Option<u8>` (added for the external-editor
+  8-bit option days before upstream's PR #1466 landed the same field) was
+  replaced by upstream's `TiffBitDepth` enum + Export-panel dropdown +
+  true-16-bit GPU pipeline. `start_external_edit` maps its `tiff8` format
+  onto `TiffBitDepth::Eight`; 16-bit external edits now render through the
+  high-precision (Rgba16Float) GPU path instead of upscaled 8-bit.
+- **GPU readback hybrid.** Upstream's 16-bit path reads each tile from the
+  float tile texture (the Rgba8Unorm working texture would truncate it); the
+  fork's single whole-ROI readback optimization is kept for 8-bit exports
+  (`run()` picks per-tile vs whole-ROI by `RenderOutputPrecision`).
+- **RAW highlight desaturation → `recover_clipped_pixel`.** The fork's
+  `HIGHLIGHT_DESAT_RANGE` roll-to-white was dropped for upstream's highlight
+  color recovery (`40cfa3df`, `85bf424a`). The `rawHighlightCompression`
+  setting is now ignored by the pipeline (upstream `_highlight_compression`),
+  so its Settings slider is hidden like upstream's; the serde field stays.
+- **Upstream's "external edit" is not ours.** Their `launch_request.rs` /
+  `useExternalEditSession` make RapidRAW act as the editor for *other* apps
+  (`rapidraw --edit <in> --output <out>`); the fork's "Edit in External
+  Editor" (send a rendered TIFF *to* Photoshop/Affinity and watch for saves)
+  is unrelated and both coexist.
+- Settings tab layout kept the fork's structure (upstream reordered General/
+  Processing); upstream's new toggles were slotted into the fork's lists.
+
 ## Build / run
 
 ```bash

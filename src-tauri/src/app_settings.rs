@@ -457,10 +457,6 @@ pub struct AppSettings {
     pub sort_criteria: Option<SortCriteria>,
     pub filter_criteria: Option<FilterCriteria>,
     pub theme: Option<String>,
-    // Editor canvas (the area around the image) preset, independent of the UI
-    // theme: "theme" | "white" | "lightGrey" | "midGrey" | "darkGrey" | "black".
-    #[serde(default)]
-    pub editor_canvas_color: Option<String>,
     #[serde(default)]
     pub font_family: Option<String>,
     pub decorations: Option<bool>,
@@ -538,6 +534,8 @@ pub struct AppSettings {
     pub active_waveform_channel: Option<String>,
     #[serde(default)]
     pub use_wgpu_renderer: Option<bool>,
+    #[serde(default)]
+    pub editor_neutral_grey_bg: Option<bool>,
     #[serde(default)]
     pub canvas_input_mode: Option<String>,
     #[serde(default)]
@@ -625,7 +623,6 @@ impl Default for AppSettings {
             sort_criteria: None,
             filter_criteria: None,
             theme: Some("dark".to_string()),
-            editor_canvas_color: None,
             font_family: None,
             decorations: Some(false),
             ai_connector_address: None,
@@ -640,7 +637,7 @@ impl Default for AppSettings {
             thumbnail_size: Some("small".to_string()),
             #[cfg(not(target_os = "android"))]
             thumbnail_size: Some("medium".to_string()),
-            thumbnail_aspect_ratio: Some("cover".to_string()),
+            thumbnail_aspect_ratio: Some("contain".to_string()),
             ai_provider: Some("cpu".to_string()),
             assistant_provider: Some("lmstudio".to_string()),
             assistant_endpoint: None,
@@ -676,6 +673,7 @@ impl Default for AppSettings {
             use_wgpu_renderer: Some(false),
             #[cfg(not(any(target_os = "linux", target_os = "android")))]
             use_wgpu_renderer: Some(true),
+            editor_neutral_grey_bg: Some(false),
             canvas_input_mode: Some("mouse".to_string()),
             zoom_speed_multiplier: Some(1.0),
             zoom_photo_to_pixel_click: Some(false),

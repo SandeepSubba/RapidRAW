@@ -2,8 +2,8 @@
   "adjustments": {
     "basic": {
       "blacks": "Затемнение",
+      "brightness": "Яркость",
       "contrast": "Контрастность",
-      "evShift": "Сдвиг экспозиции",
       "exposure": "Экспозиция",
       "highlights": "Света",
       "mappers": {
@@ -844,7 +844,10 @@
     },
     "file": {
       "quality": "Качество",
-      "qualityLossless": "Качество (без потерь)"
+      "qualityLossless": "Качество (без потерь)",
+      "tiffBitDepth": "Глубина цвета TIFF",
+      "tiffBitDepth16": "16 бит",
+      "tiffBitDepth8": "8 бит"
     },
     "labels": {
       "image": "Изображение",
@@ -1010,6 +1013,9 @@
         "clearSearch": "Очистить поиск",
         "collapse": "Свернуть",
         "expand": "Развернуть",
+        "moreOptions": "Опции",
+        "navBack": "Назад",
+        "navForward": "Вперед",
         "sortFolders": "Сортировать папки"
       }
     },
@@ -1131,6 +1137,7 @@
     },
     "thumbnailFit": {
       "fillSquare": "Заполнить квадрат",
+      "justified": "Мозаика",
       "originalRatio": "Исходный формат"
     },
     "thumbnailSize": {
@@ -1614,6 +1621,7 @@
       "displayEditIcon": "Показывать индикатор изменений",
       "displayEditIconDesc": "Показывать небольшой значок ползунка на эскизах тех кадров, которые были изменены.",
       "enableFocusMode": "Включить фокусный режим",
+      "enableNeutralGreyCanvas": "Включить нейтрально-серый фон",
       "enableOsTitlebar": "Использовать заголовок окна ОС",
       "enableXmpSync": "Включить синхронизацию XMP",
       "focusMode": "Фокусный режим",
@@ -1624,6 +1632,8 @@
       "fontDesc": "Изменить шрифт интерфейса приложения.",
       "nativeTitlebar": "Системный заголовок окна",
       "nativeTitlebarDesc": "Использовать стандартный заголовок окна вашей операционной системы вместо кастомного заголовка RapidRAW.",
+      "neutralGreyCanvas": "Нейтрально-серый холст",
+      "neutralGreyCanvasDesc": "Используйте нейтрально-серый холст для более точной цветокоррекции и настройки экспозиции без изменения темы приложения.",
       "poppins": "Poppins",
       "showImageCounts": "Показывать счетчик изображений",
       "system": "Системный по умолчанию",

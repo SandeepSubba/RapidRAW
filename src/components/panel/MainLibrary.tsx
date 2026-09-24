@@ -53,6 +53,10 @@ export interface ColumnWidths {
   date: number;
   rating: number;
   color: number;
+  shutter: number;
+  aperture: number;
+  iso: number;
+  focal: number;
 }
 
 interface MainLibraryProps {
@@ -92,18 +96,6 @@ interface MainLibraryProps {
   thumbnailProgress: Progress;
   thumbnailSize: ThumbnailSize;
   onNavigateToCommunity(): void;
-}
-
-export interface ColumnWidths {
-  thumbnail: number;
-  name: number;
-  date: number;
-  rating: number;
-  color: number;
-  shutter: number;
-  aperture: number;
-  iso: number;
-  focal: number;
 }
 
 interface DisplayModeSwitchProps {
@@ -246,8 +238,9 @@ export default function MainLibrary(props: MainLibraryProps) {
 
   const translatedThumbnailAspectRatioOptions = useMemo(
     () => [
-      { id: ThumbnailAspectRatio.Cover, label: t('library.thumbnailFit.fillSquare') },
       { id: ThumbnailAspectRatio.Contain, label: t('library.thumbnailFit.originalRatio') },
+      { id: ThumbnailAspectRatio.Cover, label: t('library.thumbnailFit.fillSquare') },
+      { id: ThumbnailAspectRatio.Justified, label: t('library.thumbnailFit.justified') },
     ],
     [t],
   );
