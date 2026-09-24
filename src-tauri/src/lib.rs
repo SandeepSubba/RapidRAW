@@ -1769,6 +1769,17 @@ pub fn run() {
             let size = match event {
                 tauri::WindowEvent::Resized(size) => *size,
                 tauri::WindowEvent::ScaleFactorChanged { new_inner_size, .. } => *new_inner_size,
+                // Regaining focus repaints at the current size. While the window
+                // sits behind another one the compositor drops the native
+                // layer's contents, and nothing else asks it to redraw: the
+                // canvas then shows straight through to whatever is behind the
+                // window until the user pans, zooms or resizes. The size is
+                // unchanged here, so apply_pending_size is a no-op and this
+                // costs one frame.
+                tauri::WindowEvent::Focused(true) => match window.inner_size() {
+                    Ok(size) => size,
+                    Err(_) => return,
+                },
                 _ => return,
             };
             let state = window.state::<AppState>();
