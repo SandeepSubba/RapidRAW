@@ -295,6 +295,8 @@ export interface AppSettings {
   activeWaveformChannel?: string;
   useWgpuRenderer?: boolean;
   editorNeutralGreyBg?: boolean;
+  // Editor canvas preset (see EDITOR_CANVAS_COLORS); unset falls back to editorNeutralGreyBg.
+  editorCanvasColor?: string;
   canvasInputMode?: 'mouse' | 'trackpad';
   zoomSpeedMultiplier?: number;
   zoomPhotoToPixelClick?: boolean;

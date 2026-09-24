@@ -536,6 +536,10 @@ pub struct AppSettings {
     pub use_wgpu_renderer: Option<bool>,
     #[serde(default)]
     pub editor_neutral_grey_bg: Option<bool>,
+    // Editor canvas preset (see EDITOR_CANVAS_COLORS): "white" | "lightGrey" |
+    // "midGrey" | "darkGrey" | "black". Unset falls back to the grey toggle.
+    #[serde(default)]
+    pub editor_canvas_color: Option<String>,
     #[serde(default)]
     pub canvas_input_mode: Option<String>,
     #[serde(default)]
@@ -674,6 +678,7 @@ impl Default for AppSettings {
             #[cfg(not(any(target_os = "linux", target_os = "android")))]
             use_wgpu_renderer: Some(true),
             editor_neutral_grey_bg: Some(false),
+            editor_canvas_color: None,
             canvas_input_mode: Some("mouse".to_string()),
             zoom_speed_multiplier: Some(1.0),
             zoom_photo_to_pixel_click: Some(false),

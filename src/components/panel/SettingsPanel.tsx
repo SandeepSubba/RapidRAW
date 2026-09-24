@@ -28,7 +28,7 @@ import Dropdown, { OptionItem } from '../ui/Dropdown';
 import Switch from '../ui/Switch';
 import Input from '../ui/Input';
 import Slider from '../ui/Slider';
-import { ThemeProps, THEMES, DEFAULT_THEME_ID } from '../../utils/themes';
+import { ThemeProps, THEMES, DEFAULT_THEME_ID, EDITOR_CANVAS_COLORS } from '../../utils/themes';
 import { useTranslation } from 'react-i18next';
 import { Invokes } from '../ui/AppProperties';
 import { ADJUSTMENT_NUDGES, KEYBIND_DEFINITIONS, KEYBIND_SECTIONS, resolveNudgeStep } from '../../utils/keyboardUtils';
@@ -943,14 +943,21 @@ export default function SettingsPanel({
                     </SettingItem>
 
                     <SettingItem
-                      label={t('settings.general.neutralGreyCanvas')}
-                      description={t('settings.general.neutralGreyCanvasDesc')}
+                      label={t('settings.general.editorCanvas')}
+                      description={t('settings.general.editorCanvasDesc')}
                     >
-                      <Switch
-                        checked={appSettings?.editorNeutralGreyBg ?? false}
-                        id="neutral-grey-bg-toggle"
-                        label={t('settings.general.enableNeutralGreyCanvas')}
-                        onChange={(checked) => onSettingsChange({ ...appSettings, editorNeutralGreyBg: checked })}
+                      <Dropdown
+                        onChange={(value: any) =>
+                          onSettingsChange({
+                            ...appSettings,
+                            editorCanvasColor: value === 'theme' ? undefined : value,
+                            // Kept in step so upstream's own toggle still reads true for grey.
+                            editorNeutralGreyBg: value === 'midGrey',
+                          })
+                        }
+                        options={EDITOR_CANVAS_COLORS.map((c) => ({ value: c.id, label: t(c.name as any) }))}
+                        value={appSettings?.editorCanvasColor || (appSettings?.editorNeutralGreyBg ? 'midGrey' : 'theme')}
+                        triggerClassName="bg-bg-primary"
                       />
                     </SettingItem>
 
