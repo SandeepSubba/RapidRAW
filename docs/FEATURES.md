@@ -179,6 +179,17 @@ and dated.
 - **Keyboard filmstrip selection** — build a multi-image selection from the keyboard
   in the develop module, without reaching for the mouse.
 
+## Merge (panorama / HDR / focus stacking)
+
+- **Panorama quality** (fork improvements on the upstream stitcher):
+  the panorama is anchored on the **center** of the match tree instead of an
+  end frame, so projective stretch is split evenly instead of accumulating
+  toward one edge; per-frame **exposure gain compensation** (solved over the
+  overlap regions, normalized to keep overall brightness) removes the
+  brightness steps that auto-exposure drift leaves at seams; and feature
+  detection retries at lower corner thresholds on low-texture frames
+  (skies, water), so borderline frames no longer drop out of the stitch.
+
 ## Export
 
 - **sRGB ICC profile embedded in JPEG exports** — files are colour-tagged instead of

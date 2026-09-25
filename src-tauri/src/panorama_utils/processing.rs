@@ -62,13 +62,31 @@ pub fn normalize_grayscale(img: &GrayImage) -> GrayImage {
     })
 }
 
+// Below this, RANSAC starves: pairwise overlaps only see a fraction of each
+// frame's features, and a low-texture frame (sky, water, plain walls) ends up
+// with borderline inlier counts that drop whole images from the panorama.
+const MIN_GOOD_FEATURE_COUNT: usize = 800;
+
 pub fn find_features(img: &GrayImage, brief_pairs: &[(Point2<i32>, Point2<i32>)]) -> Vec<Feature> {
-    find_features_tuned(
+    // Adaptive detection: start at the normal corner threshold and, when a
+    // frame is feature-poor, retry with progressively more permissive
+    // settings instead of letting the match stage fail.
+    let mut best = find_features_tuned(
         img,
         brief_pairs,
         FAST_THRESHOLD,
         NON_MAXIMA_SUPPRESSION_RADIUS,
-    )
+    );
+    for &(threshold, radius) in &[(8u8, 10.0f32), (4u8, 7.0f32)] {
+        if best.len() >= MIN_GOOD_FEATURE_COUNT {
+            break;
+        }
+        let retry = find_features_tuned(img, brief_pairs, threshold, radius);
+        if retry.len() > best.len() {
+            best = retry;
+        }
+    }
+    best
 }
 
 pub fn find_features_tuned(

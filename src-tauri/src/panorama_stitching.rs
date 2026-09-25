@@ -356,11 +356,42 @@ fn stitch_images(image_paths: Vec<String>, app_handle: AppHandle) -> Result<Dyna
     let start_time = Instant::now();
     let _ = app_handle.emit("panorama-progress", "Determining stitching order...");
     println!("Determining stitching order...");
-    let (ordered_indices, global_homographies) =
+    let (ordered_indices, global_homographies, mst_adj) =
         build_stitching_order(&image_data, &pairwise_matches);
 
     if ordered_indices.len() < 2 {
         return Err("Could not find a connected sequence of at least two images.".to_string());
+    }
+
+    // Equalize exposure across frames before blending: auto-exposure drift
+    // between shots otherwise shows up as brightness steps at every seam,
+    // no matter how good the seam itself is.
+    let _ = app_handle.emit("panorama-progress", "Equalizing exposure between frames...");
+    let gains = compute_gain_compensation(
+        &image_data,
+        &mst_adj,
+        &global_homographies,
+        ordered_indices[0],
+    );
+    for info in image_data.iter_mut() {
+        if let Some(&g) = gains.get(&info.id) {
+            if (g - 1.0).abs() > 0.005 {
+                println!(
+                    "  - Gain {:.3} applied to '{}'",
+                    g,
+                    Path::new(&info.filename)
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                );
+                let g = g as f32;
+                for p in info.image.pixels_mut() {
+                    p.0[0] *= g;
+                    p.0[1] *= g;
+                    p.0[2] *= g;
+                }
+            }
+        }
     }
 
     let ordered_filenames: Vec<_> = ordered_indices
@@ -444,9 +475,13 @@ impl Dsu {
 fn build_stitching_order(
     images: &[ImageInfo],
     matches: &HashMap<(usize, usize), MatchInfo>,
-) -> (Vec<usize>, HashMap<usize, Matrix3<f64>>) {
+) -> (
+    Vec<usize>,
+    HashMap<usize, Matrix3<f64>>,
+    HashMap<usize, Vec<usize>>,
+) {
     if images.is_empty() {
-        return (vec![], HashMap::new());
+        return (vec![], HashMap::new(), HashMap::new());
     }
     let n = images.len();
     if n < 2 {
@@ -454,7 +489,7 @@ fn build_stitching_order(
         if n == 1 {
             homographies.insert(0, Matrix3::identity());
         }
-        return ((0..n).collect(), homographies);
+        return ((0..n).collect(), homographies, HashMap::new());
     }
 
     let mut edges = Vec::new();
@@ -479,9 +514,33 @@ fn build_stitching_order(
         }
     }
 
+    // Anchor the panorama on the CENTER of the match tree, not a leaf.
+    // Every other image is projected onto the reference frame's plane, so
+    // projective distortion grows with hop distance — starting from an end
+    // frame makes the far end stretch grotesquely, while the tree center
+    // splits the chain in half and keeps the warp symmetric and small.
+    let bfs_eccentricity = |s: usize| -> usize {
+        let mut dist: HashMap<usize, usize> = HashMap::new();
+        dist.insert(s, 0);
+        let mut q = VecDeque::from([s]);
+        let mut ecc = 0usize;
+        while let Some(u) = q.pop_front() {
+            let d = dist[&u];
+            ecc = ecc.max(d);
+            if let Some(nbrs) = mst_adj.get(&u) {
+                for &v in nbrs {
+                    if !dist.contains_key(&v) {
+                        dist.insert(v, d + 1);
+                        q.push_back(v);
+                    }
+                }
+            }
+        }
+        ecc
+    };
     let start_node = (0..n)
         .filter(|i| mst_adj.contains_key(i))
-        .min_by_key(|&i| mst_adj.get(&i).map_or(usize::MAX, |v| v.len()))
+        .min_by_key(|&i| (bfs_eccentricity(i), i))
         .unwrap_or_else(|| mst_adj.keys().next().copied().unwrap_or(0));
 
     let mut ordered_indices = Vec::new();
@@ -518,5 +577,101 @@ fn build_stitching_order(
         }
     }
 
-    (ordered_indices, global_homographies)
+    (ordered_indices, global_homographies, mst_adj)
+}
+
+/// Per-image multiplicative gains that equalize exposure across the panorama.
+///
+/// For every match-tree edge, the mean luminance of both frames is sampled
+/// over their overlap region (via the global homographies); gains then
+/// propagate outward from the reference frame so each pair agrees in the
+/// overlap, and are finally normalized to a geometric mean of 1.0 so the
+/// panorama's overall brightness stays where the photographer put it.
+fn compute_gain_compensation(
+    images: &[ImageInfo],
+    mst_adj: &HashMap<usize, Vec<usize>>,
+    global_homographies: &HashMap<usize, Matrix3<f64>>,
+    reference: usize,
+) -> HashMap<usize, f64> {
+    let mut gains: HashMap<usize, f64> = HashMap::new();
+    gains.insert(reference, 1.0);
+    let mut visited = HashSet::from([reference]);
+    let mut q = VecDeque::from([reference]);
+
+    while let Some(u) = q.pop_front() {
+        let g_u = gains[&u];
+        let Some(nbrs) = mst_adj.get(&u) else { continue };
+        for &v in nbrs {
+            if visited.contains(&v) {
+                continue;
+            }
+            visited.insert(v);
+            let ratio = match (global_homographies.get(&u), global_homographies.get(&v)) {
+                (Some(h_u), Some(h_v)) => overlap_luminance_ratio(&images[u], &images[v], h_u, h_v),
+                _ => 1.0,
+            };
+            // A single bad overlap must not blow up the whole chain.
+            let g_v = (g_u * ratio).clamp(0.4, 2.5);
+            gains.insert(v, g_v);
+            q.push_back(v);
+        }
+    }
+
+    // Geometric-mean normalization: correct relative differences without
+    // shifting the panorama's average exposure.
+    let log_mean =
+        gains.values().map(|g| g.ln()).sum::<f64>() / gains.len().max(1) as f64;
+    let norm = (-log_mean).exp();
+    for g in gains.values_mut() {
+        *g *= norm;
+    }
+    gains
+}
+
+/// mean_lum(u) / mean_lum(v) over the overlap of frames u and v, sampled on a
+/// coarse grid of v's pixels mapped through the global homographies. Returns
+/// 1.0 when the overlap is too small to trust.
+fn overlap_luminance_ratio(
+    info_u: &ImageInfo,
+    info_v: &ImageInfo,
+    h_u: &Matrix3<f64>,
+    h_v: &Matrix3<f64>,
+) -> f64 {
+    let Some(h_u_inv) = h_u.try_inverse() else {
+        return 1.0;
+    };
+    let h_v_to_u = h_u_inv * h_v;
+
+    let (wv, hv) = info_v.image.dimensions();
+    let (wu, hu) = info_u.image.dimensions();
+    let step = (wv.max(hv) / 100).max(4) as usize;
+
+    let mut sum_u = 0.0f64;
+    let mut sum_v = 0.0f64;
+    let mut count = 0usize;
+
+    for y in (0..hv).step_by(step) {
+        for x in (0..wv).step_by(step) {
+            let p = nalgebra::Point3::new(x as f64, y as f64, 1.0);
+            let tp = h_v_to_u * p;
+            if tp.z.abs() < 1e-9 {
+                continue;
+            }
+            let ux = tp.x / tp.z;
+            let uy = tp.y / tp.z;
+            if ux < 0.0 || ux >= (wu - 1) as f64 || uy < 0.0 || uy >= (hu - 1) as f64 {
+                continue;
+            }
+            let pv = info_v.image.get_pixel(x, y);
+            let pu = stitching::sample_bilinear(&info_u.image, ux, uy);
+            sum_v += (pv[0] as f64 + pv[1] as f64 + pv[2] as f64) / 3.0;
+            sum_u += (pu[0] as f64 + pu[1] as f64 + pu[2] as f64) / 3.0;
+            count += 1;
+        }
+    }
+
+    if count < 50 || sum_v <= 1e-6 || sum_u <= 1e-6 {
+        return 1.0;
+    }
+    sum_u / sum_v
 }

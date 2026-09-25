@@ -657,6 +657,11 @@ pub fn warp_image_homography(
         .expect("warp buffer dimensions must match output image")
 }
 
+/// Bilinear sample, shared with gain compensation in panorama_stitching.
+pub(crate) fn sample_bilinear(img: &Rgb32FImage, x: f64, y: f64) -> Rgb<f32> {
+    get_interpolated_pixel(img, x, y)
+}
+
 fn get_interpolated_pixel(img: &Rgb32FImage, x: f64, y: f64) -> Rgb<f32> {
     let (width, height) = img.dimensions();
     let x_floor = x.floor() as u32;
