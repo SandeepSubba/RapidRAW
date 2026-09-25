@@ -7,6 +7,7 @@ import debounce from 'lodash.debounce';
 
 import { ImageDimensions, RenderSize, useImageRenderSize } from '../../hooks/useImageRenderSize';
 import { Adjustments, AiPatch, MaskContainer, INITIAL_ADJUSTMENTS } from '../../utils/adjustments';
+import { editorCanvasRgb } from '../../utils/themes';
 import {
   calculateCenteredCrop,
   getOrientedDimensions,
@@ -1440,6 +1441,10 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
     const rootStyle = getComputedStyle(document.documentElement);
     const bgPrimaryStr = rootStyle.getPropertyValue('--app-bg-primary') || 'rgb(24, 24, 24)';
     const bgSecondaryStr = rootStyle.getPropertyValue('--app-bg-secondary') || 'rgb(35, 35, 35)';
+    // An explicit preset wins; otherwise the neutral-grey toggle still decides.
+    // Either way it lands in bgSecondary, which display.wgsl paints around the
+    // image, so only the canvas changes and the app keeps its theme.
+    const presetRgb = editorCanvasRgb(appSettings?.editorCanvasColor);
     const isNeutralGrey = appSettings?.editorNeutralGreyBg ?? false;
 
     wgpuStateRef.current = {
@@ -1451,11 +1456,16 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
       uncroppedAdjustedPreviewUrl,
       showOriginal,
       bgPrimary: parseRgb(bgPrimaryStr),
-      bgSecondary: isNeutralGrey ? NEUTRAL_GREY_RGB : parseRgb(bgSecondaryStr),
+      bgSecondary: presetRgb
+        ? [presetRgb[0] / 255, presetRgb[1] / 255, presetRgb[2] / 255, 1.0]
+        : isNeutralGrey
+          ? NEUTRAL_GREY_RGB
+          : parseRgb(bgSecondaryStr),
     };
   }, [
     appSettings?.useWgpuRenderer,
     appSettings?.editorNeutralGreyBg,
+    appSettings?.editorCanvasColor,
     selectedImage?.isReady,
     hasRenderedFirstFrame,
     isCropping,
@@ -1464,6 +1474,7 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
     showOriginal,
     appSettings?.theme,
     appSettings?.editorNeutralGreyBg,
+    appSettings?.editorCanvasColor,
     finalPreviewUrl,
   ]);
 
@@ -1472,6 +1483,7 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
   }, [
     appSettings?.useWgpuRenderer,
     appSettings?.editorNeutralGreyBg,
+    appSettings?.editorCanvasColor,
     selectedImage?.isReady,
     hasRenderedFirstFrame,
     isCropping,
@@ -2343,6 +2355,10 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
   const isWgpuActive = appSettings?.useWgpuRenderer !== false && hasRenderedFirstFrame;
   // Same preset for the CSS paths (WebGL renderer, before the first native
   // frame), so the canvas doesn't flash the theme colour on load.
+  const canvasPresetRgb = editorCanvasRgb(appSettings?.editorCanvasColor);
+  const canvasPresetCss = canvasPresetRgb ? `rgb(${canvasPresetRgb.join(',')})` : null;
+  // Same preset for the CSS paths (WebGL renderer, before the first native
+  // frame), so the canvas doesn't flash the theme colour on load.
   const hasRenderedAnyPreview = hasRenderedFirstFrame || !!finalPreviewUrl;
 
   return (
@@ -2390,9 +2406,14 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
           'flex-1 relative overflow-hidden touch-none',
           isFullScreen ? 'rounded-none' : 'rounded-lg',
           appSettings?.useWgpuRenderer !== false && !isFullScreen && 'ring-[9999px] ring-bg-secondary',
-          !isWgpuActive && (appSettings?.editorNeutralGreyBg ? 'bg-[#808080]' : 'bg-bg-secondary'),
+          !isWgpuActive &&
+            !canvasPresetCss &&
+            (appSettings?.editorNeutralGreyBg ? 'bg-[#808080]' : 'bg-bg-secondary'),
         )}
-        style={{ cursor: cursorStyle }}
+        style={{
+          cursor: cursorStyle,
+          ...(!isWgpuActive && canvasPresetCss ? { backgroundColor: canvasPresetCss } : {}),
+        }}
         onContextMenu={onContextMenu}
         ref={imageContainerRef}
         onPointerDownCapture={handlePointerDown}
