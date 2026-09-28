@@ -1137,12 +1137,103 @@ fn resolve_config(app_handle: &AppHandle) -> Result<ResolvedConfig, String> {
     })
 }
 
+/// The Claude Code CLI's OAuth access token, if one is available and not
+/// expired. Sources, in order: the CLAUDE_CODE_OAUTH_TOKEN environment
+/// variable (headless setups), then the CLI's credentials file
+/// ($CLAUDE_CONFIG_DIR or ~/.claude, .credentials.json -> claudeAiOauth).
+/// Read-only; the token is only ever sent to the Anthropic API.
+fn claude_cli_oauth_token() -> Option<String> {
+    if let Ok(t) = std::env::var("CLAUDE_CODE_OAUTH_TOKEN") {
+        let t = t.trim().to_string();
+        if !t.is_empty() {
+            return Some(t);
+        }
+    }
+
+    let config_dir = std::env::var("CLAUDE_CONFIG_DIR")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            std::env::var("HOME")
+                .ok()
+                .or_else(|| std::env::var("USERPROFILE").ok())
+                .map(|h| std::path::PathBuf::from(h).join(".claude"))
+        })?;
+    let text = std::fs::read_to_string(config_dir.join(".credentials.json")).ok()?;
+    let v: Value = serde_json::from_str(&text).ok()?;
+    let oauth = v.get("claudeAiOauth")?;
+    let token = oauth.get("accessToken")?.as_str()?.trim().to_string();
+    if token.is_empty() {
+        return None;
+    }
+    // Don't send a token we can see is stale (60s margin); the CLI refreshes
+    // it on its own next run, and refreshing here would race its rotation.
+    if let Some(expires_ms) = oauth.get("expiresAt").and_then(|e| e.as_i64()) {
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()?
+            .as_millis() as i64;
+        if expires_ms <= now_ms + 60_000 {
+            return None;
+        }
+    }
+    Some(token)
+}
+
+/// Live model list through the Claude Code OAuth token. None on any failure —
+/// the caller falls back to a curated list.
+async fn fetch_models_via_cli_oauth() -> Option<Vec<String>> {
+    let token = claude_cli_oauth_token()?;
+    let base = std::env::var("ANTHROPIC_BASE_URL")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "https://api.anthropic.com".to_string());
+    let url = format!("{}/v1/models?limit=100", base.trim_end_matches('/'));
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(&url)
+        .bearer_auth(&token)
+        .header("anthropic-version", "2023-06-01")
+        // OAuth (subscription) tokens are only accepted with this beta flag.
+        .header("anthropic-beta", "oauth-2025-04-20")
+        .send()
+        .await
+        .ok()?;
+    if !resp.status().is_success() {
+        log::info!(
+            "[assistant] OAuth model listing not available (HTTP {}), using the built-in list",
+            resp.status()
+        );
+        return None;
+    }
+    let v: Value = resp.json().await.ok()?;
+    let models: Vec<String> = v["data"]
+        .as_array()?
+        .iter()
+        .filter_map(|m| m["id"].as_str())
+        .filter(|id| id.starts_with("claude"))
+        .map(|s| s.to_string())
+        .collect();
+    if models.is_empty() { None } else { Some(models) }
+}
+
 async fn fetch_models(provider: &str, endpoint: &str, api_key: &str) -> Result<Vec<String>, String> {
-    // Claude Code has no /models endpoint; offer the current Claude models.
-    // (Kept in release order, newest first. Anything missing here can always
-    // be typed into the custom-model field — the CLI takes any model ID your
-    // subscription can use.)
+    // Claude Code has no list-models command of its own, but the CLI's OAuth
+    // token (the login you already have) is accepted by the Anthropic models
+    // API — try that first so the list stays current by itself. Any failure
+    // (no token, expired, offline, API change) falls back to a curated list
+    // of the current Claude family; the custom-model field always works
+    // regardless.
     if provider == "claudecode" {
+        if let Some(models) = fetch_models_via_cli_oauth().await {
+            log::info!(
+                "[assistant] model list fetched with the Claude Code OAuth token ({} models)",
+                models.len()
+            );
+            return Ok(models);
+        }
         return Ok(vec![
             "claude-fable-5-1".to_string(),
             "claude-opus-5".to_string(),
