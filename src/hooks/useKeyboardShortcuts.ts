@@ -32,6 +32,20 @@ export const useKeyboardShortcuts = ({
   const { setAdjustments, handleRotate, handleCopyAdjustments, handlePasteAdjustments, toggleShowOriginal } = useEditorActions();
   const { handleRate, handleSetColorLabel, handleRotateSelected } = useLibraryActions();
 
+  const rotateActiveAndSelection = useCallback(
+    (s: any, degrees: number) => {
+      if (s.ui.activeView === 'editor' && s.editor.selectedImage) {
+        handleRotate(degrees);
+        const activePath = s.editor.selectedImage.path;
+        const others = (s.library.multiSelectedPaths || []).filter((p: string) => p !== activePath);
+        if (others.length > 0) handleRotateSelected(degrees, others);
+      } else {
+        handleRotateSelected(degrees);
+      }
+    },
+    [handleRotate, handleRotateSelected],
+  );
+
   const sortedListRef = useRef(sortedImageList);
   useEffect(() => {
     sortedListRef.current = sortedImageList;
@@ -282,23 +296,25 @@ export const useKeyboardShortcuts = ({
         },
       },
       rotate_left: {
-        // In the editor: rotate the open image. In the library: batch-rotate the
-        // whole selection. In library view `selectedImage` is also set (it feeds
-        // the metadata/preview panels), so gate on the active view — otherwise a
-        // multi-selection would collapse to rotating just the one active image.
+        // In the editor: rotate the open image (undoable, through the editor's
+        // adjustment state) — and when the filmstrip carries a multi-selection,
+        // batch-rotate the other selected images through the sidecar command
+        // too, so a selection behaves the same in the editor as in the library.
+        // In the library: batch-rotate the whole selection. In library view
+        // `selectedImage` is also set (it feeds the metadata/preview panels),
+        // so gate on the active view — otherwise a multi-selection would
+        // collapse to rotating just the one active image.
         shouldFire: (s: any) => !!s.editor.selectedImage || s.library.multiSelectedPaths.length > 0,
         execute: (e: any, s: any) => {
           e.preventDefault();
-          if (s.ui.activeView === 'editor' && s.editor.selectedImage) handleRotate(-90);
-          else handleRotateSelected(-90);
+          rotateActiveAndSelection(s, -90);
         },
       },
       rotate_right: {
         shouldFire: (s: any) => !!s.editor.selectedImage || s.library.multiSelectedPaths.length > 0,
         execute: (e: any, s: any) => {
           e.preventDefault();
-          if (s.ui.activeView === 'editor' && s.editor.selectedImage) handleRotate(90);
-          else handleRotateSelected(90);
+          rotateActiveAndSelection(s, 90);
         },
       },
       undo: {
