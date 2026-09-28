@@ -672,6 +672,72 @@ fn process_image_for_export(
     apply_export_resize_and_watermark(processed_image, export_settings)
 }
 
+/// Render one panorama frame with its own sidecar edits, so a stitched
+/// panorama looks like the edited frames instead of the flat default RAW
+/// conversion (which ignores exposure and every other edit, and came out dark).
+///
+/// Anything that moves pixels is neutralised — crop, rotation, flips,
+/// perspective, lens distortion — because stitching aligns the frames as they
+/// were shot. Creative vignette, grain and lens blur go too: applied per frame
+/// they would repeat at every seam. Tone, colour, detail and masks stay.
+///
+/// Returns None for a frame without edits, so the caller keeps its default.
+pub fn render_frame_with_edits(
+    path: &str,
+    bytes: &[u8],
+    settings: &crate::app_settings::AppSettings,
+    app_handle: &tauri::AppHandle,
+) -> Result<Option<DynamicImage>, String> {
+    let (_, sidecar_path) = parse_virtual_path(path);
+    let mut adjustments = exif_processing::load_sidecar(&sidecar_path).adjustments;
+    let Some(obj) = adjustments.as_object_mut() else {
+        return Ok(None);
+    };
+    if obj.is_empty() {
+        return Ok(None);
+    }
+    for key in ["crop", "aspectRatio", "guidedPerspective"] {
+        obj.insert(key.to_string(), Value::Null);
+    }
+    for key in [
+        "rotation",
+        "orientationSteps",
+        "transformDistortion",
+        "transformVertical",
+        "transformHorizontal",
+        "transformRotate",
+        "transformAspect",
+        "transformXOffset",
+        "transformYOffset",
+        "vignetteAmount",
+        "grainAmount",
+    ] {
+        obj.insert(key.to_string(), serde_json::json!(0));
+    }
+    obj.insert("transformScale".to_string(), serde_json::json!(100));
+    for key in ["flipHorizontal", "flipVertical", "lensDistortionEnabled", "lensBlurEnabled"] {
+        obj.insert(key.to_string(), serde_json::json!(false));
+    }
+
+    let state = app_handle.state::<AppState>();
+    hydrate_adjustments(&state, &mut adjustments);
+    let base = load_and_composite(bytes, path, &adjustments, false, settings, None)
+        .map_err(|e| format!("Failed to load {}: {}", path, e))?;
+    let context = get_or_init_gpu_context(&state, app_handle)?;
+    let rendered = process_image_for_export_pipeline(
+        path,
+        &base,
+        &adjustments,
+        &context,
+        &state,
+        is_raw_file(path),
+        "panorama_frame",
+        app_handle,
+        RenderOutputPrecision::SixteenBit,
+    )?;
+    Ok(Some(rendered))
+}
+
 fn build_single_mask_adjustments(all: &AllAdjustments, mask_index: usize) -> AllAdjustments {
     let mut single = AllAdjustments {
         global: all.global,
