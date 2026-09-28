@@ -52,6 +52,8 @@ pub struct AssistantResponse {
     pub color_label: Option<Value>,
     pub filename: Option<Value>,
     pub select: Option<Value>,
+    pub masks: Option<Value>,
+    pub mask_updates: Option<Value>,
     pub provider: String,
     pub model: String,
 }
@@ -98,7 +100,22 @@ Nested groups — send only the parts you change; the app merges them into the c
 - colorCalibration: {"shadowsTint", "redHue", "redSaturation", "greenHue", "greenSaturation", "blueHue", "blueSaturation"}, each -100..100
 - parametricCurve: {"luma"|"red"|"green"|"blue": {"darks", "shadows", "highlights", "lights": -100..100, "whiteLevel": -100..0, "blackLevel": 0..100}} (switches the tone curve to parametric mode)
 
-Not available from chat: masks and other local adjustments, object removal and AI patches, point colors, LUTs, lens blur, point-curve editing, and film-negative conversion. If asked for one, say so and name the RapidRAW panel that does it; still do whatever else was asked.
+MASKS — local adjustments. Put new masks in "masks": [ ... ] (up to 6 per reply). Each entry is one mask with its own adjustments:
+  {"name": "Window", "type": "<type>", <placement for that type>, "invert": false, "opacity": 100, "adjustments": {<mask adjustments>}}
+All coordinates are _canvas pixels — the attached view — exactly like crop and inspect. Types and their placement:
+- "subject" (alias "object"): AI selection of the object inside "box": {"x", "y", "width", "height"}. Draw the box tightly around ONE object (a window, a person, a sofa); the AI finds its edges. Optional "grow" -100..100 and "feather" 0..100.
+- "sky", "foreground", "background" (= inverted foreground): AI-detected, no placement. Optional "grow", "feather".
+- "eyes", "mouth": AI face regions, no placement.
+- "depth": AI depth range, "minDepth" and "maxDepth" 0..100 (0 = nearest).
+- "radial": ellipse, "center": {"x","y"}, "radius": {"x","y"}, "rotation" degrees, "feather" 0..1. The effect is INSIDE; set "invert": true for outside (e.g. darkening the edges around a subject).
+- "linear": graduated filter, "from": {"x","y"} (full effect) to "to": {"x","y"} (no effect) — e.g. from the top edge down to the horizon to darken a sky.
+- "luminance" / "color": selects pixels similar in brightness / colour to the pixel at "target": {"x","y"}; "tolerance" 0..100 (default 20), "feather" 0..100 (default 35). Good for "every bright window", "the blue wall".
+- "all": the whole image.
+Mask "adjustments" take the global keys except geometry: exposure, brightness, contrast, highlights, shadows, whites, blacks, temperature, tint, vibrance, saturation, hue, clarity, dehaze, structure, sharpness, lumaNoiseReduction, colorNoiseReduction, glowAmount, halationAmount, flareAmount, skinSmoothing, skinTexture, skinSmoothingScale, and the nested hsl / colorGrading / parametricCurve, with the same ranges. A mask with no adjustments does nothing visible, so always include the change the user wants (e.g. a blown-out window: highlights -70, exposure -0.8, whites -40).
+Existing masks appear under "masks" in the current adjustments JSON with their "id", "name" and "adjustments". Change them with "maskUpdates": [{"id": "<id or name>", "adjustments": {...}, "invert": true/false, "opacity": 0..100, "visible": true/false}] or remove one with {"id": "<id>", "delete": true}. Prefer updating an existing mask over adding a duplicate.
+After you create or change masks the app renders the result and shows it to you (see "result_attached") so you can refine them.
+
+Not available from chat: brush-painted masks, object removal and AI patches, point colors, LUTs, lens blur, point-curve editing, and film-negative conversion. If asked for one, say so and name the RapidRAW panel that does it; still do whatever else was asked.
 
 You may also set these TEXT metadata fields (string values, written to the image's metadata). Use exactly these lowercase keys:
 - title (the image title / description)
@@ -123,7 +140,7 @@ APP FOLLOW-UP TURNS. The inspect loop and the accuracy check are driven by the a
 - "label_not_found": no label-like card was found, so the whole view is attached instead. Say so rather than guessing, or inspect explicit coordinates.
 - "accuracy_gate": you proposed metadata/tag/filename values without a single close-up look; the original overview is attached again. Respond with an "inspect" region covering the text you read (other action fields null). After the close-up arrives, re-read it character by character and re-emit ALL the values, corrected if needed.
 - "out_of_inspections": you asked to inspect again but all 5 rounds for this image are used; nothing new is attached. Answer now from the close-ups you have already seen: re-emit ALL the values you are confident of. If the text is genuinely unreadable, say so plainly in "reply" and leave those fields null — do not ask to inspect again.
-- "result_attached" ({"round","maxRounds"}): your geometry adjustments were applied and the image, re-rendered with them, is attached — the same view as before. The adjustments JSON now shows the values in effect. Judge the result against the user's goal: for perspective work, are verticals vertical and walls and horizontal lines straight, with no blank corners? If it is right, set "adjustments" to null and say in "reply" what you changed. If not, return corrected ABSOLUTE values for only the fields that still need to change (a value that overshot in one direction means go back part of the way). Set every other action field (crop, inspect, metadata, tags, rating, colorLabel, filename, select) to null in this turn.
+- "result_attached" ({"round","maxRounds"}): your geometry or mask edits were applied and the image, re-rendered with them, is attached — the same view as before. The adjustments JSON now shows the values in effect, masks included. Judge the result against the user's goal: for perspective work, are verticals vertical and walls and horizontal lines straight, with no blank corners? For a mask, did it land on the intended area and is the change strong enough without looking artificial? If it is right, set "adjustments" and "maskUpdates" to null and say in "reply" what you changed. If not, return corrected ABSOLUTE values: "adjustments" for global fields, "maskUpdates" (by mask id) for a mask's adjustments. New masks are not created in this turn. Set every other action field (crop, inspect, masks, metadata, tags, rating, colorLabel, filename, select) to null.
 "_appTurn" always describes the LATEST turn only; earlier "(app follow-up turn)" placeholders in the history were described in their own rounds and need no re-interpretation.
 
 ACCURACY RULES for reading text (labels, codes, weights, ruler marks):
@@ -148,8 +165,8 @@ HOW ATTACHMENTS REACH YOU: depending on the transport, an attached or inspected 
 
 Rules:
 - ALWAYS respond with a single JSON object and NOTHING else, no markdown, no code fences:
-  {"reply": "<short friendly message>", "adjustments": {<only fields you change>}, "crop": {"x": N, "y": N, "width": N, "height": N}, "inspect": {"x": N, "y": N, "width": N, "height": N}, "metadata": {<only text fields you change>}, "tags": {"add": [...], "remove": [...]}, "rating": <0-5>, "colorLabel": "<color>", "filename": "<new name without extension>", "select": ["<file from _library>", ...]}
-- Set any field you are NOT changing to null (adjustments, crop, inspect, metadata, tags, rating, colorLabel, filename, select).
+  {"reply": "<short friendly message>", "adjustments": {<only fields you change>}, "crop": {"x": N, "y": N, "width": N, "height": N}, "inspect": {"x": N, "y": N, "width": N, "height": N}, "metadata": {<only text fields you change>}, "tags": {"add": [...], "remove": [...]}, "rating": <0-5>, "colorLabel": "<color>", "filename": "<new name without extension>", "select": ["<file from _library>", ...], "masks": [...], "maskUpdates": [...]}
+- Set any field you are NOT changing to null (adjustments, crop, inspect, metadata, tags, rating, colorLabel, filename, select, masks, maskUpdates).
 - Use exactly the lowercase keys listed above (e.g. "title", not "Title").
 - Only include fields you actually want to change; use absolute values within the ranges above.
 - NEVER crop unless the user explicitly asks for a crop.
@@ -263,6 +280,8 @@ struct Parsed {
     color_label: Option<Value>,
     filename: Option<Value>,
     select: Option<Value>,
+    masks: Option<Value>,
+    mask_updates: Option<Value>,
 }
 
 fn extract(v: &Value, original: &str) -> Parsed {
@@ -297,6 +316,15 @@ fn extract(v: &Value, original: &str) -> Parsed {
             .get("select")
             .cloned()
             .filter(|s| s.as_array().is_some_and(|a| !a.is_empty())),
+        masks: v
+            .get("masks")
+            .cloned()
+            .filter(|m| m.as_array().is_some_and(|a| !a.is_empty())),
+        mask_updates: v
+            .get("maskUpdates")
+            .or_else(|| v.get("mask_updates"))
+            .cloned()
+            .filter(|m| m.as_array().is_some_and(|a| !a.is_empty())),
     }
 }
 
@@ -1172,6 +1200,8 @@ pub async fn assistant_chat(
         color_label: parsed.color_label,
         filename: parsed.filename,
         select: parsed.select,
+        masks: parsed.masks,
+        mask_updates: parsed.mask_updates,
         provider: cfg.provider,
         model,
     })

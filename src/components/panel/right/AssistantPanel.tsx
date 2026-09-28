@@ -38,6 +38,11 @@ import { useSettingsStore } from '../../../store/useSettingsStore';
 import { useAssistantStore, nextMessageId, AssistantMessage } from '../../../store/useAssistantStore';
 import { useEditorActions } from '../../../hooks/useEditorActions';
 import { useLibraryActions } from '../../../hooks/useLibraryActions';
+import { getTransformAdjustments } from '../../../hooks/useAiMasking';
+import { INITIAL_MASK_ADJUSTMENTS, INITIAL_MASK_CONTAINER } from '../../../utils/adjustments';
+import { createSubMask } from '../../../utils/maskUtils';
+import { Mask, SubMaskMode } from './Masks';
+import { v4 as uuidv4 } from 'uuid';
 
 // The develop-slider fields the assistant is allowed to set, with their valid
 // ranges. Values coming back from the model are clamped to these before we
@@ -376,7 +381,7 @@ const REPEAT_FOLLOW_UP = /\b(?:same|again|repeat|redo|continue|next one)\b/;
 // it look better") need the photo even without "scan" or "look at". An
 // explicit "don't scan" still wins, since scanStance runs first.
 const VISUAL_EDIT =
-  /\b(?:perspective|straight(?:en)?|keystone|distort(?:ion)?|barrel|tilt(?:ed)?|horizon|crooked|lean(?:ing)?|converg\w*|verticals?|enhance|improve|retouch|auto[- ]?edit|look (?:better|nicer|good)|white balance|colou?r (?:cast|correct\w*))\b/;
+  /\b(?:mask(?:s|ed|ing)?|local(?:ly)?|selective(?:ly)?|perspective|straight(?:en)?|keystone|distort(?:ion)?|barrel|tilt(?:ed)?|horizon|crooked|lean(?:ing)?|converg\w*|verticals?|enhance|improve|retouch|auto[- ]?edit|look (?:better|nicer|good)|white balance|colou?r (?:cast|correct\w*))\b/;
 
 function wantsImage(text: string, priorUserText: string[]): boolean {
   const own = scanStance(text);
@@ -607,6 +612,231 @@ async function renderForReview(
   } catch {
     return null;
   }
+}
+
+// Mask types the chat can create, by the name the model uses. "background"
+// is the foreground mask inverted.
+const MASK_TYPES: Record<string, Mask> = {
+  subject: Mask.AiSubject,
+  object: Mask.AiSubject,
+  sky: Mask.AiSky,
+  foreground: Mask.AiForeground,
+  background: Mask.AiForeground,
+  radial: Mask.Radial,
+  linear: Mask.Linear,
+  gradient: Mask.Linear,
+  luminance: Mask.Luminance,
+  color: Mask.Color,
+  colour: Mask.Color,
+  eyes: Mask.AiEyes,
+  mouth: Mask.AiMouth,
+  depth: Mask.AiDepth,
+  all: Mask.All,
+};
+const MAX_MASKS_PER_TURN = 6;
+
+// Everything needed to turn the model's view-space coordinates into mask
+// parameters. Masks live in full (oriented, uncropped) image pixels — the view
+// plus the crop offset — the same space the Masks panel writes.
+interface MaskContext {
+  path: string;
+  adjustments: any;
+  offsetX: number;
+  offsetY: number;
+  canvas: { width: number; height: number } | null;
+}
+
+function viewPoint(p: any, ctx: MaskContext): { x: number; y: number } | null {
+  const x = toNumber(p?.x);
+  const y = toNumber(p?.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  const cx = ctx.canvas ? clampTo(x, [0, ctx.canvas.width]) : x;
+  const cy = ctx.canvas ? clampTo(y, [0, ctx.canvas.height]) : y;
+  return { x: cx + ctx.offsetX, y: cy + ctx.offsetY };
+}
+
+const numberOr = (v: any, fallback: number) => {
+  const n = toNumber(v);
+  return Number.isFinite(n) ? n : fallback;
+};
+
+// A mask's own adjustments: the global sanitizer, limited to the keys a mask
+// accepts (tone, colour, detail, HSL, grading, curve — no geometry).
+function sanitizeMaskAdjustments(raw: any, current: any) {
+  const { patch, changes } = sanitizeAdjustments(raw, current);
+  for (const k of Object.keys(patch)) if (!(k in INITIAL_MASK_ADJUSTMENTS)) delete patch[k];
+  for (const k of Object.keys(changes)) if (!(k.split('.')[0] in INITIAL_MASK_ADJUSTMENTS)) delete changes[k];
+  return { patch, changes };
+}
+
+// Build one mask container from a model spec. AI masks are generated here, so
+// nothing reaches the image until every requested mask exists.
+async function buildMaskContainer(spec: any, ctx: MaskContext): Promise<{ container: any; label: string }> {
+  const kind = String(spec?.type || '').toLowerCase();
+  const type = MASK_TYPES[kind];
+  if (!type) throw new Error(`unknown mask type "${spec?.type}"`);
+  const invert = Boolean(spec?.invert) !== (kind === 'background');
+  const view = {
+    rotation: ctx.adjustments.rotation || 0,
+    flipHorizontal: !!ctx.adjustments.flipHorizontal,
+    flipVertical: !!ctx.adjustments.flipVertical,
+    orientationSteps: ctx.adjustments.orientationSteps || 0,
+  };
+  const aiArgs = { jsAdjustments: getTransformAdjustments(ctx.adjustments), ...view };
+  const sub: any = createSubMask(
+    type,
+    { width: ctx.canvas?.width ?? 1000, height: ctx.canvas?.height ?? 1000 } as any,
+    SubMaskMode.Additive,
+  );
+  const grow = clampTo(numberOr(spec?.grow, 0), [-100, 100]);
+  const aiFeather = clampTo(numberOr(spec?.feather, 0), [0, 100]);
+  let params: any = { ...(sub.parameters || {}) };
+
+  switch (type) {
+    case Mask.AiSubject: {
+      const b = spec?.box;
+      const a = viewPoint(b, ctx);
+      const e = viewPoint({ x: toNumber(b?.x) + toNumber(b?.width), y: toNumber(b?.y) + toNumber(b?.height) }, ctx);
+      if (!a || !e) throw new Error('a subject mask needs a "box"');
+      const out: any = await invoke(Invokes.GenerateAiSubjectMask, {
+        ...aiArgs,
+        path: ctx.path,
+        startPoint: [a.x, a.y],
+        endPoint: [e.x, e.y],
+      });
+      params = { ...params, grow, feather: aiFeather, startX: a.x, startY: a.y, endX: e.x, endY: e.y, ...out };
+      break;
+    }
+    case Mask.AiSky:
+      params = { ...params, grow, feather: aiFeather, ...((await invoke(Invokes.GenerateAiSkyMask, aiArgs)) as any) };
+      break;
+    case Mask.AiForeground:
+      params = {
+        ...params,
+        grow,
+        feather: aiFeather,
+        ...((await invoke(Invokes.GenerateAiForegroundMask, aiArgs)) as any),
+      };
+      break;
+    case Mask.AiEyes:
+    case Mask.AiMouth:
+      params = {
+        ...params,
+        ...((await invoke(Invokes.GenerateAiFaceRegionMask, {
+          ...aiArgs,
+          region: type === Mask.AiEyes ? 'eyes' : 'mouth',
+        })) as any),
+      };
+      break;
+    case Mask.AiDepth: {
+      const depth = {
+        minDepth: clampTo(numberOr(spec?.minDepth, 20), [0, 100]),
+        maxDepth: clampTo(numberOr(spec?.maxDepth, 80), [0, 100]),
+        minFade: 15,
+        maxFade: 15,
+        feather: 10,
+      };
+      params = {
+        ...params,
+        ...depth,
+        ...((await invoke('generate_ai_depth_mask', { ...aiArgs, path: ctx.path, ...depth })) as any),
+      };
+      break;
+    }
+    case Mask.Radial: {
+      const c = viewPoint(spec?.center, ctx);
+      if (!c) throw new Error('a radial mask needs a "center"');
+      const rx = Math.max(1, numberOr(spec?.radius?.x, 200));
+      const ry = Math.max(1, numberOr(spec?.radius?.y, rx));
+      const f = numberOr(spec?.feather, 0.5);
+      params = {
+        centerX: c.x,
+        centerY: c.y,
+        radiusX: rx,
+        radiusY: ry,
+        rotation: clampTo(numberOr(spec?.rotation, 0), [-180, 180]),
+        // 0..1 here; accept a percentage too.
+        feather: clampTo(f > 1 ? f / 100 : f, [0, 1]),
+      };
+      break;
+    }
+    case Mask.Linear: {
+      // The model drags "from" (full effect) to "to" (none), like a graduated
+      // filter. The stored line is the gradient's midline, with the full-effect
+      // side on its left (mask_generation's perpendicular), so convert.
+      const f = viewPoint(spec?.from, ctx);
+      const tt = viewPoint(spec?.to, ctx);
+      if (!f || !tt) throw new Error('a linear mask needs "from" and "to"');
+      const gx = tt.x - f.x;
+      const gy = tt.y - f.y;
+      const len = Math.hypot(gx, gy);
+      if (len < 1) throw new Error('linear mask "from" and "to" are the same point');
+      const ux = gx / len;
+      const uy = gy / len;
+      const mx = (f.x + tt.x) / 2;
+      const my = (f.y + tt.y) / 2;
+      const half = len / 2;
+      params = { startX: mx, startY: my, endX: mx + uy * half, endY: my - ux * half, range: half };
+      break;
+    }
+    case Mask.Luminance:
+    case Mask.Color: {
+      const p = viewPoint(spec?.target, ctx);
+      if (!p) throw new Error(`a ${kind} mask needs a "target" point`);
+      params = {
+        targetX: p.x,
+        targetY: p.y,
+        tolerance: clampTo(numberOr(spec?.tolerance, 20), [0, 100]),
+        feather: clampTo(numberOr(spec?.feather, 35), [0, 100]),
+        grow: 0,
+        ...view,
+      };
+      break;
+    }
+    default:
+      params = {};
+  }
+
+  const { patch, changes } = sanitizeMaskAdjustments(spec?.adjustments, INITIAL_MASK_ADJUSTMENTS);
+  const name = String(spec?.name || '').trim().slice(0, 40) || `${kind} mask`;
+  const container = {
+    ...INITIAL_MASK_CONTAINER,
+    id: uuidv4(),
+    name,
+    invert,
+    opacity: clampTo(numberOr(spec?.opacity, 100), [0, 100]),
+    subMasks: [{ ...sub, parameters: params }],
+    adjustments: { ...INITIAL_MASK_ADJUSTMENTS, ...patch },
+  };
+  const detail = formatPatch(changes) || 'no adjustments yet';
+  return { container, label: `mask "${name}" (${kind}${invert ? ', inverted' : ''}): ${detail}` };
+}
+
+// Edit or delete existing masks, matched by id or name.
+function applyMaskUpdates(updates: any, masks: any[]): { masks: any[]; labels: string[] } {
+  if (!Array.isArray(updates)) return { masks, labels: [] };
+  const next = [...masks];
+  const labels: string[] = [];
+  for (const u of updates.slice(0, 20)) {
+    const key = String(u?.id ?? u?.name ?? '');
+    const idx = next.findIndex((m) => m.id === key || m.name === key);
+    if (idx < 0) continue;
+    const m = next[idx];
+    if (u?.delete === true) {
+      next.splice(idx, 1);
+      labels.push(`deleted mask "${m.name}"`);
+      continue;
+    }
+    const { patch, changes } = sanitizeMaskAdjustments(u?.adjustments, m.adjustments);
+    const updated = { ...m, adjustments: { ...m.adjustments, ...patch } };
+    if (typeof u?.invert === 'boolean') updated.invert = u.invert;
+    if (typeof u?.visible === 'boolean') updated.visible = u.visible;
+    const op = toNumber(u?.opacity);
+    if (Number.isFinite(op)) updated.opacity = clampTo(op, [0, 100]);
+    next[idx] = updated;
+    labels.push(`mask "${m.name}": ${formatPatch(changes) || 'updated'}`);
+  }
+  return { masks: next, labels };
 }
 
 async function fileToAttachment(file: File, maxDim: number): Promise<Attachment> {
@@ -1503,18 +1733,63 @@ export default function AssistantPanel() {
         );
       }
 
-      // Result check for geometry: the model sees the rendered edit and may
-      // correct it (absolute values), until it's satisfied or the rounds run
-      // out. Needs the photo, so only when this turn is allowed to look.
+      // Masks: "masks" creates local adjustments, "maskUpdates" edits or
+      // deletes existing ones. Coordinates are in the view the model saw, so
+      // they're offset by the crop that was in place then.
+      const maskLabels: string[] = [];
+      let masksNow: any[] | null = null;
+      if (currentImage && (Array.isArray(response?.masks) || Array.isArray(response?.maskUpdates))) {
+        const before: any = { ...baseAdjustments, ...patch, ...(cropPatch ?? {}) };
+        const ctx: MaskContext = {
+          path: currentImage.path,
+          adjustments: before,
+          offsetX: existingCrop ? Math.round(existingCrop.x) : 0,
+          offsetY: existingCrop ? Math.round(existingCrop.y) : 0,
+          canvas: viewCanvas,
+        };
+        const built: any[] = [];
+        for (const spec of (Array.isArray(response?.masks) ? response.masks : []).slice(0, MAX_MASKS_PER_TURN)) {
+          if (cancelRef.current) break;
+          try {
+            const b = await buildMaskContainer(spec, ctx);
+            built.push(b.container);
+            maskLabels.push(b.label);
+          } catch (e: any) {
+            maskLabels.push(`mask "${spec?.name || spec?.type}" not created: ${e?.message || e}`);
+          }
+        }
+        const updated = applyMaskUpdates(response?.maskUpdates, before.masks || []);
+        maskLabels.push(...updated.labels);
+        if (built.length || updated.labels.length) {
+          masksNow = [...updated.masks, ...built];
+          const masksToSet = masksNow;
+          setAdjustments((prev: any) => ({ ...prev, masks: masksToSet }));
+        }
+      }
+
+      // Result check for geometry and masks: the model sees the rendered edit
+      // and may correct it (absolute values), until it's satisfied or the
+      // rounds run out. Needs the photo, so only when this turn may look.
       let finalReply: string = response?.reply || t('editor.assistant.emptyReply', 'Done.');
       if (
         currentImage &&
         !imagesOff &&
-        Object.keys(changes).some((k) => GEOMETRY_KEYS.has(k)) &&
+        (Object.keys(changes).some((k) => GEOMETRY_KEYS.has(k)) || masksNow !== null) &&
         !cancelRef.current
       ) {
-        addMessage({ id: nextMessageId(), role: 'assistant', content: finalReply, appliedAdjustments: { ...changes } });
-        let current: any = { ...baseAdjustments, ...patch, ...(cropPatch ?? {}) };
+        addMessage({
+          id: nextMessageId(),
+          role: 'assistant',
+          content: finalReply,
+          appliedAdjustments: Object.keys(changes).length ? { ...changes } : null,
+          appliedOrganization: maskLabels.length ? maskLabels.join(' · ') : null,
+        });
+        let current: any = {
+          ...baseAdjustments,
+          ...patch,
+          ...(cropPatch ?? {}),
+          ...(masksNow ? { masks: masksNow } : {}),
+        };
         let reviewHistory = [...loopHistory, { role: 'assistant', content: finalReply }];
         for (let round = 1; round <= MAX_REVIEW_ROUNDS && !cancelRef.current; round++) {
           addMessage({
@@ -1540,11 +1815,19 @@ export default function AssistantPanel() {
           finalReply = review?.reply || finalReply;
           reviewHistory = [...reviewHistory, { role: 'assistant', content: review?.reply || '(reviewed)' }];
           const next = sanitizeAdjustments(review?.adjustments, current);
-          if (Object.keys(next.patch).length === 0) break;
-          setAdjustments((prev: any) => ({ ...prev, ...next.patch }));
-          current = { ...current, ...next.patch };
-          Object.assign(patch, next.patch);
-          Object.assign(changes, next.changes);
+          const maskFix = applyMaskUpdates(review?.maskUpdates, current.masks || []);
+          if (Object.keys(next.patch).length === 0 && maskFix.labels.length === 0) break;
+          if (Object.keys(next.patch).length > 0) {
+            setAdjustments((prev: any) => ({ ...prev, ...next.patch }));
+            current = { ...current, ...next.patch };
+            Object.assign(patch, next.patch);
+            Object.assign(changes, next.changes);
+          }
+          if (maskFix.labels.length > 0) {
+            setAdjustments((prev: any) => ({ ...prev, masks: maskFix.masks }));
+            current = { ...current, masks: maskFix.masks };
+            maskLabels.push(...maskFix.labels);
+          }
         }
       }
 
@@ -1554,6 +1837,10 @@ export default function AssistantPanel() {
         const res = await applyMetaOrg(response, currentImage.path, intent);
         metaPatch = res.metaPatch;
         appliedOrganization = res.org;
+      }
+      if (maskLabels.length > 0) {
+        const masksNote = maskLabels.join(' · ');
+        appliedOrganization = appliedOrganization ? `${appliedOrganization} · ${masksNote}` : masksNote;
       }
 
       // "select": filenames from _library the model picked out. Selecting them
