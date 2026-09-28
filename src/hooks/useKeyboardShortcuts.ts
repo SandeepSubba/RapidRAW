@@ -29,21 +29,19 @@ export const useKeyboardShortcuts = ({
   handlePasteFiles,
   handleZoomChange,
 }: KeyboardShortcutsProps) => {
-  const { setAdjustments, handleRotate, handleCopyAdjustments, handlePasteAdjustments, toggleShowOriginal } = useEditorActions();
+  const { setAdjustments, handleRotateWithSelection, handleCopyAdjustments, handlePasteAdjustments, toggleShowOriginal } =
+    useEditorActions();
   const { handleRate, handleSetColorLabel, handleRotateSelected } = useLibraryActions();
 
   const rotateActiveAndSelection = useCallback(
     (s: any, degrees: number) => {
       if (s.ui.activeView === 'editor' && s.editor.selectedImage) {
-        handleRotate(degrees);
-        const activePath = s.editor.selectedImage.path;
-        const others = (s.library.multiSelectedPaths || []).filter((p: string) => p !== activePath);
-        if (others.length > 0) handleRotateSelected(degrees, others);
+        handleRotateWithSelection(degrees);
       } else {
         handleRotateSelected(degrees);
       }
     },
-    [handleRotate, handleRotateSelected],
+    [handleRotateWithSelection, handleRotateSelected],
   );
 
   const sortedListRef = useRef(sortedImageList);
@@ -958,7 +956,7 @@ export const useKeyboardShortcuts = ({
     handlePasteFiles,
     handleZoomChange,
     setAdjustments,
-    handleRotate,
+    handleRotateWithSelection,
     handleCopyAdjustments,
     handleCopyImagePaths,
     handlePasteAdjustments,

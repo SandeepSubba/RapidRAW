@@ -70,6 +70,28 @@ export function useEditorActions() {
     [setAdjustments],
   );
 
+  // Rotate the open image (undoable, through the editor's adjustment state)
+  // and, when the filmstrip carries a multi-selection, batch-rotate the other
+  // selected images through the sidecar command too — a selection behaves the
+  // same whether you rotate from the crop panel, the shortcuts, or the
+  // library grid.
+  const handleRotateWithSelection = useCallback(
+    (degrees: number) => {
+      handleRotate(degrees);
+      const activePath = useEditorStore.getState().selectedImage?.path;
+      const others = useLibraryStore
+        .getState()
+        .multiSelectedPaths.filter((p: string) => p !== activePath);
+      if (others.length > 0) {
+        invoke(Invokes.ApplyOrientationToPaths, { paths: others, direction: degrees }).catch((err) => {
+          console.error(err);
+          toast.error(`Failed to rotate selected images: ${err}`);
+        });
+      }
+    },
+    [handleRotate],
+  );
+
   const handleAutoAdjustments = useCallback(async () => {
     const selectedImage = useEditorStore.getState().selectedImage;
     if (!selectedImage?.isReady) return;
@@ -401,6 +423,7 @@ export function useEditorActions() {
   return {
     setAdjustments,
     handleRotate,
+    handleRotateWithSelection,
     handleAutoAdjustments,
     handleLutSelect,
     setLutPreviewOverride,

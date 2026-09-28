@@ -91,7 +91,7 @@ export default function CropPanel() {
   const activeOverlay = useEditorStore((s) => s.overlayMode);
   const cropToolActive = useEditorStore((s) => s.cropToolActive);
   const setEditor = useEditorStore((s) => s.setEditor);
-  const { setAdjustments, handleRotate } = useEditorActions();
+  const { setAdjustments, handleRotateWithSelection } = useEditorActions();
 
   const [customW, setCustomW] = useState('');
   const [customH, setCustomH] = useState('');
@@ -1118,7 +1118,7 @@ export default function CropPanel() {
               <div className="grid grid-cols-2 gap-2">
                 <motion.div
                   className="flex flex-col items-center justify-center p-3 cursor-pointer rounded-lg transition-colors bg-surface text-text-secondary hover:bg-card-active hover:text-text-primary"
-                  onClick={() => handleRotate(-90)}
+                  onClick={() => handleRotateWithSelection(-90)}
                   data-tooltip={t('editor.crop.tooltips.rotateLeft')}
                   whileTap={{ scale: 0.98 }}
                   transition={{ type: 'spring', stiffness: 400, damping: 17 }}
@@ -1128,7 +1128,7 @@ export default function CropPanel() {
                 </motion.div>
                 <motion.div
                   className="flex flex-col items-center justify-center p-3 cursor-pointer rounded-lg transition-colors bg-surface text-text-secondary hover:bg-card-active hover:text-text-primary"
-                  onClick={() => handleRotate(90)}
+                  onClick={() => handleRotateWithSelection(90)}
                   data-tooltip={t('editor.crop.tooltips.rotateRight')}
                   whileTap={{ scale: 0.98 }}
                   transition={{ type: 'spring', stiffness: 400, damping: 17 }}
