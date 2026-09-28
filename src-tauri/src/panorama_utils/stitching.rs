@@ -51,9 +51,9 @@ pub fn progressive_seam_stitcher(
     images: &[&ImageInfo],
     global_homographies: &HashMap<usize, Matrix3<f64>>,
     app_handle: AppHandle,
-) -> Rgb32FImage {
+) -> (Rgb32FImage, GrayImage) {
     if images.is_empty() {
-        return Rgb32FImage::new(0, 0);
+        return (Rgb32FImage::new(0, 0), GrayImage::new(0, 0));
     }
 
     let mut min_x = f64::INFINITY;
@@ -381,7 +381,55 @@ pub fn progressive_seam_stitcher(
         }
     }
 
-    panorama
+    (panorama, panorama_mask)
+}
+
+/// Largest axis-aligned rectangle fully inside the stitched content
+/// (mask > 0), for auto-cropping the ragged panorama boundary. Classic
+/// maximal-rectangle-in-binary-matrix: per row, maintain a histogram of
+/// consecutive content heights and scan it with a monotonic stack.
+/// Returns (x, y, width, height).
+pub fn largest_content_rect(mask: &GrayImage) -> Option<(u32, u32, u32, u32)> {
+    let (w, h) = mask.dimensions();
+    if w == 0 || h == 0 {
+        return None;
+    }
+    let w_us = w as usize;
+    let mut heights = vec![0u32; w_us];
+    let mut best: (u32, u32, u32, u32) = (0, 0, 0, 0);
+    let mut best_area: u64 = 0;
+
+    for y in 0..h {
+        for (x, hval) in heights.iter_mut().enumerate() {
+            *hval = if mask.get_pixel(x as u32, y)[0] > 0 {
+                *hval + 1
+            } else {
+                0
+            };
+        }
+
+        let mut stack: Vec<usize> = Vec::new();
+        for x in 0..=w_us {
+            let cur = if x < w_us { heights[x] } else { 0 };
+            while let Some(&top) = stack.last() {
+                if heights[top] <= cur {
+                    break;
+                }
+                let rect_h = heights[top];
+                stack.pop();
+                let left = stack.last().map_or(0, |&i| i + 1);
+                let rect_w = (x - left) as u32;
+                let area = rect_h as u64 * rect_w as u64;
+                if area > best_area {
+                    best_area = area;
+                    best = (left as u32, y + 1 - rect_h, rect_w, rect_h);
+                }
+            }
+            stack.push(x);
+        }
+    }
+
+    if best_area == 0 { None } else { Some(best) }
 }
 
 fn find_adaptive_seam(ctx: &SeamContext) -> Option<SeamInfo> {

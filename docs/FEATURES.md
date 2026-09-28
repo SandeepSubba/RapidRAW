@@ -196,7 +196,9 @@ and dated.
   switches to cylindrical past ~65°, where planar composition would stretch
   the edge frames without bound. Cylindrical warps every frame onto a
   cylinder first (validity-masked, re-matched), keeping distortion bounded
-  at any panorama width.
+  at any panorama width. An **auto-crop to content** pass (on by default,
+  toggleable in the dialog) trims the ragged stitched boundary to the
+  largest clean rectangle.
 
 ## Export
 

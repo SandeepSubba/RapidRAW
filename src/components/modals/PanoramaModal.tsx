@@ -16,7 +16,7 @@ interface PanoramaModalProps {
   onClose(): void;
   onOpenFile(path: string): void;
   onSave(): Promise<string>;
-  onStitch(projection: string): void;
+  onStitch(projection: string, autoCrop: boolean): void;
   progressMessage: string | null;
 }
 
@@ -39,6 +39,7 @@ export default function PanoramaModal({
   const [isSaving, setIsSaving] = useState(false);
   const [savedPath, setSavedPath] = useState<string | null>(null);
   const [projection, setProjection] = useState<'auto' | 'perspective' | 'cylindrical'>('auto');
+  const [autoCrop, setAutoCrop] = useState(true);
 
   const mouseDownTarget = useRef<EventTarget | null>(null);
 
@@ -232,6 +233,21 @@ export default function PanoramaModal({
           </button>
         ))}
       </div>
+      <button
+        onClick={() => setAutoCrop(!autoCrop)}
+        className={`mt-1 flex items-center gap-2 px-3 py-1.5 rounded-md text-sm transition-colors ${
+          autoCrop ? 'text-text-primary' : 'text-text-secondary'
+        } hover:bg-card-active`}
+      >
+        <span
+          className={`w-4 h-4 rounded-sm border flex items-center justify-center text-[10px] leading-none ${
+            autoCrop ? 'bg-accent border-accent text-button-text' : 'border-text-secondary'
+          }`}
+        >
+          {autoCrop ? '\u2713' : ''}
+        </span>
+        {t('modals.panorama.autoCrop', 'Auto crop to content')}
+      </button>
     </div>
   );
 
@@ -270,7 +286,7 @@ export default function PanoramaModal({
         </button>
 
         <Button
-          onClick={() => onStitch(projection)}
+          onClick={() => onStitch(projection, autoCrop)}
           disabled={isProcessing}
           variant={finalImageBase64 ? 'secondary' : 'primary'}
         >

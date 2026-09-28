@@ -60,6 +60,7 @@ pub struct MatchInfo {
 pub async fn stitch_panorama(
     paths: Vec<String>,
     projection: Option<String>,
+    auto_crop: Option<bool>,
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
@@ -75,7 +76,8 @@ pub async fn stitch_panorama(
     let panorama_result_handle = state.panorama_result.clone();
 
     let task = tokio::task::spawn_blocking(move || {
-        let panorama_result = stitch_images(source_paths, projection, app_handle.clone());
+        let panorama_result =
+            stitch_images(source_paths, projection, auto_crop.unwrap_or(true), app_handle.clone());
 
         match panorama_result {
             Ok(panorama_image) => {
@@ -359,6 +361,7 @@ fn estimate_span_degrees(
 fn stitch_images(
     image_paths: Vec<String>,
     projection: Option<String>,
+    auto_crop: bool,
     app_handle: AppHandle,
 ) -> Result<DynamicImage, String> {
     if image_paths.len() < 2 {
@@ -600,13 +603,34 @@ fn stitch_images(
     let _ = app_handle.emit("panorama-progress", "Warping and blending images...");
     println!("Warping and blending full-resolution images with progressive optimal seams...");
 
-    let panorama = stitching::progressive_seam_stitcher(
+    let (mut panorama, panorama_mask) = stitching::progressive_seam_stitcher(
         &stitched_images_info,
         &global_homographies,
         app_handle.clone(),
     );
 
     println!("Stitching completed in {:.2?}\n", start_time.elapsed());
+
+    // Auto-crop to content: the stitched boundary is ragged (especially for
+    // cylindrical projections, whose frames have curved tops and bottoms).
+    // Crop to the largest rectangle that contains only real content.
+    if auto_crop {
+        let _ = app_handle.emit("panorama-progress", "Cropping to content...");
+        if let Some((cx, cy, cw, ch)) = stitching::largest_content_rect(&panorama_mask) {
+            if cw > 0 && ch > 0 && (cw < panorama.width() || ch < panorama.height()) {
+                println!(
+                    "  - Auto-crop to content: {}x{} at ({}, {}) from {}x{}",
+                    cw,
+                    ch,
+                    cx,
+                    cy,
+                    panorama.width(),
+                    panorama.height()
+                );
+                panorama = image::imageops::crop_imm(&panorama, cx, cy, cw, ch).to_image();
+            }
+        }
+    }
 
     let _ = app_handle.emit("panorama-progress", "Finalizing panorama...");
 

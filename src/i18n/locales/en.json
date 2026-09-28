@@ -1503,7 +1503,8 @@
       "projection": "Projection",
       "projectionAuto": "Auto",
       "projectionPerspective": "Perspective",
-      "projectionCylindrical": "Cylindrical"
+      "projectionCylindrical": "Cylindrical",
+      "autoCrop": "Auto crop to content"
     },
     "renameAlbum": {
       "placeholder": "Enter new album name..."
