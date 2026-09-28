@@ -2039,34 +2039,55 @@ export default function SettingsPanel({
                           </button>
                         </div>
                         {(assistantModelsError || (!assistantModelsLoading && assistantModels.length === 0)) && (
-                          <>
-                            <Text variant={TextVariants.small} color={TextColors.secondary}>
-                              {assistantModelsError
-                                ? t(
-                                    'settings.assistant.modelsError',
-                                    "Couldn't list models — is the provider running? You can still type a name below.",
-                                  )
-                                : t(
-                                    'settings.assistant.modelsEmpty',
-                                    'No models found. Load one in your provider, then hit refresh — or type a name below.',
-                                  )}
-                            </Text>
-                            <Input
-                              className="grow"
-                              onBlur={() => onSettingsChange({ ...appSettings, assistantModel })}
-                              onChange={(e: any) => setAssistantModel(e.target.value)}
-                              onKeyDown={(e: any) => e.stopPropagation()}
-                              placeholder={t(
-                                'settings.assistant.modelPlaceholder',
-                                'Model name (blank = provider default)',
-                              )}
-                              type="text"
-                              value={assistantModel}
-                              bgClassName="bg-bg-primary"
-                            />
-                          </>
+                          <Text variant={TextVariants.small} color={TextColors.secondary}>
+                            {assistantModelsError
+                              ? t(
+                                  'settings.assistant.modelsError',
+                                  "Couldn't list models — is the provider running? You can still type a name below.",
+                                )
+                              : t(
+                                  'settings.assistant.modelsEmpty',
+                                  'No models found. Load one in your provider, then hit refresh — or type a name below.',
+                                )}
+                          </Text>
                         )}
+                        {/* Always available: new models ship faster than any
+                            built-in list — type any model ID your provider or
+                            subscription accepts and it overrides the dropdown. */}
+                        <Input
+                          className="grow"
+                          onBlur={() => onSettingsChange({ ...appSettings, assistantModel })}
+                          onChange={(e: any) => setAssistantModel(e.target.value)}
+                          onKeyDown={(e: any) => e.stopPropagation()}
+                          placeholder={t(
+                            'settings.assistant.modelPlaceholder',
+                            'Or type any model ID (blank = provider default)',
+                          )}
+                          type="text"
+                          value={assistantModel}
+                          bgClassName="bg-bg-primary"
+                        />
                       </div>
+                    </SettingItem>
+
+                    <SettingItem
+                      label={t('settings.assistant.thinking', 'Thinking')}
+                      description={t(
+                        'settings.assistant.thinkingDesc',
+                        'Extended thinking budget for the assistant. Higher levels reason longer before answering — better for tricky edits and batch runs, slower and more token-hungry. Off keeps the previous behavior.',
+                      )}
+                    >
+                      <Dropdown
+                        onChange={(value: any) => onSettingsChange({ ...appSettings, assistantThinking: value })}
+                        options={[
+                          { value: 'off', label: t('settings.assistant.thinkingOff', 'Off') },
+                          { value: 'low', label: t('settings.assistant.thinkingLow', 'Low') },
+                          { value: 'medium', label: t('settings.assistant.thinkingMedium', 'Medium') },
+                          { value: 'high', label: t('settings.assistant.thinkingHigh', 'High') },
+                        ]}
+                        value={appSettings?.assistantThinking || 'off'}
+                        triggerClassName="bg-bg-primary"
+                      />
                     </SettingItem>
 
                     <SettingItem

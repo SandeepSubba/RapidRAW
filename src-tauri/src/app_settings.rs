@@ -484,6 +484,9 @@ pub struct AppSettings {
     pub assistant_api_key: Option<String>,
     #[serde(default)]
     pub assistant_model: Option<String>,
+    #[serde(default)]
+    // Extended-thinking level for the assistant: "off" | "low" | "medium" | "high".
+    pub assistant_thinking: Option<String>,
     // Developer mode: path to the user's RapidRAW checkout that the assistant
     // may modify (claudecode provider only).
     #[serde(default)]
@@ -647,6 +650,7 @@ impl Default for AppSettings {
             assistant_endpoint: None,
             assistant_api_key: None,
             assistant_model: None,
+            assistant_thinking: None,
             assistant_dev_repo_path: None,
             external_editor_path: None,
             external_editor_format: None,

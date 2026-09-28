@@ -254,6 +254,7 @@ export interface AppSettings {
   assistantEndpoint?: string;
   assistantApiKey?: string;
   assistantModel?: string;
+  assistantThinking?: string;
   assistantDevRepoPath?: string;
   externalEditorPath?: string;
   externalEditorFormat?: string;

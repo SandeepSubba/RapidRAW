@@ -436,6 +436,7 @@ async fn call_openai_compatible(
     messages: &[ChatMessage],
     images: &[ImageAttachment],
     provider_label: &str,
+    reasoning_effort: Option<&str>,
 ) -> Result<String, String> {
     let url = build_url(base, "/chat/completions");
     let last_idx = messages.len().saturating_sub(1);
@@ -456,11 +457,17 @@ async fn call_openai_compatible(
     // other than their fixed default and 400 the whole request. The JSON schema
     // constrains the output shape regardless, so a custom temperature isn't worth
     // the compatibility cost.
-    let base_body = json!({
+    let mut base_body = json!({
         "model": model,
         "messages": msgs,
         "stream": false,
     });
+    // Reasoning models (OpenAI o-series / gpt-5, and LM Studio's supported
+    // models) accept an effort hint; OpenAI-compatible servers ignore unknown
+    // fields, so this is only sent when the user picked a thinking level.
+    if let Some(effort) = reasoning_effort {
+        base_body["reasoning_effort"] = json!(effort);
+    }
 
     // One attempt with a specific body; returns Ok(content) or Err(message).
     let attempt = |body: Value| {
@@ -529,6 +536,7 @@ async fn call_anthropic(
     system: &str,
     messages: &[ChatMessage],
     images: &[ImageAttachment],
+    thinking_budget_tokens: Option<u32>,
 ) -> Result<String, String> {
     if api_key.is_empty() {
         return Err("Anthropic API key is not set (Settings → AI Assistant).".to_string());
@@ -545,8 +553,10 @@ async fn call_anthropic(
         })
         .collect();
     // Force a structured tool call so the model can't just narrate ("I set the
-    // title…") without emitting the fields we actually apply.
-    let body = json!({
+    // title…") without emitting the fields we actually apply. With extended
+    // thinking enabled the API rejects a forced tool choice, so thinking runs
+    // with tool_choice auto and relies on the tool description + text fallback.
+    let mut body = json!({
         "model": model,
         "max_tokens": 1024,
         "system": system,
@@ -554,6 +564,11 @@ async fn call_anthropic(
         "tools": [apply_edits_tool()],
         "tool_choice": { "type": "tool", "name": "apply_edits" },
     });
+    if let Some(budget) = thinking_budget_tokens {
+        body["thinking"] = json!({ "type": "enabled", "budget_tokens": budget });
+        body["max_tokens"] = json!(budget + 2048);
+        body["tool_choice"] = json!({ "type": "auto" });
+    }
 
     let client = reqwest::Client::new();
     let resp = client
@@ -744,6 +759,7 @@ async fn call_claude_code(
     system: &str,
     messages: &[ChatMessage],
     images: &[ImageAttachment],
+    thinking_budget_tokens: Option<u32>,
 ) -> Result<String, String> {
     let binary = binary.trim().to_string();
     let binary = if binary.is_empty() { "claude".to_string() } else { binary };
@@ -810,6 +826,10 @@ async fn call_claude_code(
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        // Extended thinking: the CLI reads the budget from the environment.
+        if let Some(budget) = thinking_budget_tokens {
+            cmd.env("MAX_THINKING_TOKENS", budget.to_string());
+        }
         // The CLI is a console app, so Windows hands it a console window that
         // flashes up for the life of every chat turn. All three streams are piped
         // — nothing is ever shown there — so suppress it.
@@ -950,12 +970,21 @@ pub async fn assistant_dev_chat(
         .clone()
         .filter(|m| !m.trim().is_empty())
         .unwrap_or_else(|| "claude-sonnet-5".to_string());
+    let dev_thinking = thinking_budget(
+        settings
+            .assistant_thinking
+            .as_deref()
+            .unwrap_or("off"),
+    );
 
     tauri::async_runtime::spawn_blocking(move || {
         use std::io::BufRead as _;
         use tauri::Emitter as _;
 
         let mut cmd = Command::new(&binary);
+        if let Some(budget) = dev_thinking {
+            cmd.env("MAX_THINKING_TOKENS", budget.to_string());
+        }
         cmd.current_dir(&repo_path)
             .arg("-p")
             .arg("--verbose")
@@ -1060,6 +1089,20 @@ struct ResolvedConfig {
     endpoint: String,
     api_key: String,
     model: String,
+    thinking: String, // "off" | "low" | "medium" | "high"
+}
+
+/// Extended-thinking token budget for a thinking level. Applied as
+/// MAX_THINKING_TOKENS for the Claude Code CLI and as the `thinking`
+/// budget for the Anthropic API; OpenAI-compatible providers get the
+/// level passed as `reasoning_effort` instead.
+fn thinking_budget(level: &str) -> Option<u32> {
+    match level {
+        "low" => Some(4096),
+        "medium" => Some(16384),
+        "high" => Some(32768),
+        _ => None,
+    }
 }
 
 fn resolve_config(app_handle: &AppHandle) -> Result<ResolvedConfig, String> {
@@ -1080,22 +1123,33 @@ fn resolve_config(app_handle: &AppHandle) -> Result<ResolvedConfig, String> {
         .clone()
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| default_model(&provider).to_string());
+    let thinking = settings
+        .assistant_thinking
+        .clone()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "off".to_string());
     Ok(ResolvedConfig {
         provider,
         endpoint,
         api_key,
         model,
+        thinking,
     })
 }
 
 async fn fetch_models(provider: &str, endpoint: &str, api_key: &str) -> Result<Vec<String>, String> {
     // Claude Code has no /models endpoint; offer the current Claude models.
+    // (Kept in release order, newest first. Anything missing here can always
+    // be typed into the custom-model field — the CLI takes any model ID your
+    // subscription can use.)
     if provider == "claudecode" {
         return Ok(vec![
+            "claude-fable-5-1".to_string(),
             "claude-opus-5".to_string(),
             "claude-sonnet-5".to_string(),
             "claude-haiku-4-5".to_string(),
             "claude-opus-4-8".to_string(),
+            "claude-opus-4-6".to_string(),
         ]);
     }
     let url = models_url(endpoint);
@@ -1156,6 +1210,7 @@ pub async fn assistant_test_connection(app_handle: AppHandle) -> Result<String, 
             "Reply with ONLY {\"reply\":\"ok\"}",
             &ping,
             &[],
+            None,
         )
         .await?;
         return Ok("Connected to Claude Code (using your Claude subscription)".to_string());
@@ -1225,13 +1280,54 @@ pub async fn assistant_chat(
     );
 
     let content = match cfg.provider.as_str() {
-        "anthropic" => call_anthropic(&cfg.endpoint, &cfg.api_key, &model, &system, &messages, &images).await?,
-        "claudecode" => call_claude_code(&cfg.endpoint, &model, &system, &messages, &images).await?,
+        "anthropic" => {
+            call_anthropic(
+                &cfg.endpoint,
+                &cfg.api_key,
+                &model,
+                &system,
+                &messages,
+                &images,
+                thinking_budget(&cfg.thinking),
+            )
+            .await?
+        }
+        "claudecode" => {
+            call_claude_code(
+                &cfg.endpoint,
+                &model,
+                &system,
+                &messages,
+                &images,
+                thinking_budget(&cfg.thinking),
+            )
+            .await?
+        }
         "openai" => {
-            call_openai_compatible(&cfg.endpoint, &cfg.api_key, &model, &system, &messages, &images, "OpenAI").await?
+            call_openai_compatible(
+                &cfg.endpoint,
+                &cfg.api_key,
+                &model,
+                &system,
+                &messages,
+                &images,
+                "OpenAI",
+                thinking_budget(&cfg.thinking).map(|_| cfg.thinking.as_str()),
+            )
+            .await?
         }
         _ => {
-            call_openai_compatible(&cfg.endpoint, &cfg.api_key, &model, &system, &messages, &images, "LM Studio").await?
+            call_openai_compatible(
+                &cfg.endpoint,
+                &cfg.api_key,
+                &model,
+                &system,
+                &messages,
+                &images,
+                "LM Studio",
+                thinking_budget(&cfg.thinking).map(|_| cfg.thinking.as_str()),
+            )
+            .await?
         }
     };
 

@@ -87,6 +87,13 @@ and dated.
   or **Claude Code** — the last drives the `claude` CLI so an existing Claude
   subscription works with no API key.
 - **OCR & metadata extraction** through cloud vision models.
+- **Model picker that keeps up** — the model list refreshes from the provider
+  (live `/models` for OpenAI/Anthropic/LM Studio; a maintained current-Claude
+  list for Claude Code), and a free-text field accepts **any model ID** the
+  day it ships. A **Thinking** level (Off/Low/Medium/High) enables extended
+  thinking: budget via `MAX_THINKING_TOKENS` for the Claude Code CLI, the
+  `thinking` budget for the Anthropic API, and `reasoning_effort` for
+  OpenAI-compatible providers.
 - **Developer mode** (wrench toggle, Claude Code provider only) — chat messages
   become change requests for the app itself: the CLI runs inside the configured
   RapidRAW checkout with edit/git tools allowed, makes the change, verifies it
