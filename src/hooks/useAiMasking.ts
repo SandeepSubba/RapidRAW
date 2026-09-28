@@ -8,7 +8,7 @@ import { SubMask } from '../components/panel/right/Masks';
 import { Invokes } from '../components/ui/AppProperties';
 import { useAuth } from '@clerk/react';
 
-const getTransformAdjustments = (adj: Adjustments) => ({
+export const getTransformAdjustments = (adj: Adjustments) => ({
   transformDistortion: adj.transformDistortion,
   transformVertical: adj.transformVertical,
   transformHorizontal: adj.transformHorizontal,

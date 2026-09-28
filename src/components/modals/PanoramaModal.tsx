@@ -1,8 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
+import { invoke } from '@tauri-apps/api/core';
+import { Invokes } from '../ui/AppProperties';
 import { CheckCircle, XCircle, Loader2, Save, RefreshCw, Layers } from 'lucide-react';
 import { motion } from 'framer-motion';
 import Button from '../ui/Button';
+import Slider from '../ui/Slider';
 import Text from '../ui/Text';
 import { TextColors, TextVariants, TextWeights } from '../../types/typography';
 
@@ -38,7 +41,15 @@ export default function PanoramaModal({
   const [show, setShow] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [savedPath, setSavedPath] = useState<string | null>(null);
-  const [projection, setProjection] = useState<'auto' | 'perspective' | 'cylindrical'>('auto');
+  const [projection, setProjection] = useState<'auto' | 'perspective' | 'cylindrical' | 'straight'>('auto');
+  // Straight lines strength: 100 = fully rectilinear (every line straight, the
+  // edges stretch), 0 = classic Pannini (natural edges, slight bow left).
+  const [straightness, setStraightness] = useState(70);
+  // Live slider: once a Straight-lines result is on screen, moving the slider
+  // re-projects the kept cylinder instead of re-stitching.
+  const [stitchedStraight, setStitchedStraight] = useState(false);
+  const [livePreview, setLivePreview] = useState<string | null>(null);
+  const liveSeq = useRef(0);
   const [autoCrop, setAutoCrop] = useState(true);
 
   const mouseDownTarget = useRef<EventTarget | null>(null);
@@ -54,10 +65,34 @@ export default function PanoramaModal({
         setIsMounted(false);
         setSavedPath(null);
         setIsSaving(false);
+        setStitchedStraight(false);
+        setLivePreview(null);
       }, 300);
       return () => clearTimeout(timer);
     }
   }, [isOpen]);
+
+  // A new stitch result replaces any live re-projection.
+  useEffect(() => {
+    setLivePreview(null);
+  }, [finalImageBase64]);
+
+  const liveEnabled =
+    stitchedStraight && projection === 'straight' && !!finalImageBase64 && !isProcessing && !savedPath;
+
+  useEffect(() => {
+    if (!liveEnabled) return;
+    const seq = ++liveSeq.current;
+    const timer = setTimeout(async () => {
+      try {
+        const url = await invoke<string>(Invokes.RestraightenPanorama, { strength: straightness, autoCrop });
+        if (seq === liveSeq.current) setLivePreview(url);
+      } catch (e) {
+        console.error('Live straighten failed:', e);
+      }
+    }, 60);
+    return () => clearTimeout(timer);
+  }, [straightness, autoCrop, liveEnabled]);
 
   const handleClose = useCallback(() => {
     if (isSaving) return;
@@ -116,7 +151,7 @@ export default function PanoramaModal({
         <div className="w-full">
           <div className="w-full max-h-[440px] bg-[#111] rounded-lg overflow-hidden border border-surface flex items-center justify-center">
             <img
-              src={finalImageBase64}
+              src={livePreview ?? finalImageBase64}
               alt="Stitched Panorama"
               className="w-full h-full object-contain max-h-[440px]"
             />
@@ -218,6 +253,7 @@ export default function PanoramaModal({
             ['auto', t('modals.panorama.projectionAuto', 'Auto')],
             ['perspective', t('modals.panorama.projectionPerspective', 'Perspective')],
             ['cylindrical', t('modals.panorama.projectionCylindrical', 'Cylindrical')],
+            ['straight', t('modals.panorama.projectionStraight', 'Straight lines')],
           ] as const
         ).map(([value, label]) => (
           <button
@@ -248,6 +284,25 @@ export default function PanoramaModal({
         </span>
         {t('modals.panorama.autoCrop', 'Auto crop to content')}
       </button>
+      {projection === 'straight' && (
+        <div className="w-72 mt-1">
+          <Slider
+            label={t('modals.panorama.straightness', 'Straightness')}
+            min={0}
+            max={100}
+            step={1}
+            defaultValue={70}
+            value={straightness}
+            onChange={(e) => setStraightness(Number(e.target.value))}
+          />
+          <Text variant={TextVariants.small} className="opacity-60 text-center mt-1">
+            {t(
+              'modals.panorama.straightnessHint',
+              'Keeps verticals straight. Higher straightens the walls more but stretches the edges.',
+            )}
+          </Text>
+        </div>
+      )}
     </div>
   );
 
@@ -286,7 +341,11 @@ export default function PanoramaModal({
         </button>
 
         <Button
-          onClick={() => onStitch(projection, autoCrop)}
+          onClick={() => {
+            setStitchedStraight(projection === 'straight');
+            setLivePreview(null);
+            onStitch(projection === 'straight' ? `straight:${straightness}` : projection, autoCrop);
+          }}
           disabled={isProcessing}
           variant={finalImageBase64 ? 'secondary' : 'primary'}
         >

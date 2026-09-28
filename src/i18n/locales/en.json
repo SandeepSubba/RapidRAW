@@ -1504,6 +1504,9 @@
       "projectionAuto": "Auto",
       "projectionPerspective": "Perspective",
       "projectionCylindrical": "Cylindrical",
+      "projectionStraight": "Straight lines",
+      "straightness": "Straightness",
+      "straightnessHint": "Keeps verticals straight. Higher straightens the walls more but stretches the edges.",
       "autoCrop": "Auto crop to content"
     },
     "renameAlbum": {

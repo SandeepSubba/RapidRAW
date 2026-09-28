@@ -47,15 +47,13 @@ struct SeamInfo {
     dy: f64,
 }
 
-pub fn progressive_seam_stitcher(
+/// Canvas extents (min_x, max_x, min_y, max_y) of the frames under their
+/// global homographies. A canvas pixel is reference-frame coordinates minus
+/// (min_x, min_y); the straight-lines remap needs that to find the horizon.
+pub fn canvas_bounds(
     images: &[&ImageInfo],
     global_homographies: &HashMap<usize, Matrix3<f64>>,
-    app_handle: AppHandle,
-) -> (Rgb32FImage, GrayImage) {
-    if images.is_empty() {
-        return (Rgb32FImage::new(0, 0), GrayImage::new(0, 0));
-    }
-
+) -> (f64, f64, f64, f64) {
     let mut min_x = f64::INFINITY;
     let mut max_x = f64::NEG_INFINITY;
     let mut min_y = f64::INFINITY;
@@ -80,6 +78,19 @@ pub fn progressive_seam_stitcher(
             max_y = max_y.max(ty);
         }
     }
+    (min_x, max_x, min_y, max_y)
+}
+
+pub fn progressive_seam_stitcher(
+    images: &[&ImageInfo],
+    global_homographies: &HashMap<usize, Matrix3<f64>>,
+    app_handle: AppHandle,
+) -> (Rgb32FImage, GrayImage) {
+    if images.is_empty() {
+        return (Rgb32FImage::new(0, 0), GrayImage::new(0, 0));
+    }
+
+    let (min_x, max_x, min_y, max_y) = canvas_bounds(images, global_homographies);
 
     let offset_x = -min_x;
     let offset_y = -min_y;

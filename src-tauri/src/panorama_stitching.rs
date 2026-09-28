@@ -82,27 +82,7 @@ pub async fn stitch_panorama(
         match panorama_result {
             Ok(panorama_image) => {
                 let _ = app_handle.emit("panorama-progress", "Creating preview...");
-
-                let (w, h) = panorama_image.dimensions();
-                let (new_w, new_h) = if w > h {
-                    (800, (800.0 * h as f32 / w as f32).round() as u32)
-                } else {
-                    ((800.0 * w as f32 / h as f32).round() as u32, 800)
-                };
-
-                let preview_f32 =
-                    crate::image_processing::downscale_f32_image(&panorama_image, new_w, new_h);
-
-                let preview_u8 = preview_f32.to_rgb8();
-
-                let mut buf = Cursor::new(Vec::new());
-
-                if let Err(e) = preview_u8.write_to(&mut buf, ImageFormat::Png) {
-                    return Err(format!("Failed to encode panorama preview: {}", e));
-                }
-
-                let base64_str = general_purpose::STANDARD.encode(buf.get_ref());
-                let final_base64 = format!("data:image/png;base64,{}", base64_str);
+                let final_base64 = preview_data_url(&panorama_image)?;
 
                 *panorama_result_handle.lock().unwrap() = Some(panorama_image);
 
@@ -133,6 +113,11 @@ pub async fn save_panorama(
     first_path_str: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<String, String> {
+    let result_handle = state.panorama_result.clone();
+    tauri::async_runtime::spawn_blocking(move || rerender_straight_if_needed(&result_handle))
+        .await
+        .map_err(|e| format!("Panorama task failed: {}", e))??;
+
     let panorama_image = state
         .panorama_result
         .lock()
@@ -177,7 +162,125 @@ pub async fn save_panorama(
     let _ =
         crate::exif_processing::write_rrexif_sidecar(&real_path.to_string_lossy(), &output_path);
 
+    // Saved: the cylinder behind a Straight-lines result is no longer needed.
+    *straight_source() = None;
+
     Ok(output_path.to_string_lossy().to_string())
+}
+
+/// The stitched cylinder behind a Straight-lines result, kept so the dialog's
+/// strength slider can re-project without re-stitching. The slider renders
+/// from `preview`, a small copy, so it updates instantly; the full-size remap
+/// runs once, in save_panorama, at whatever strength the slider ended on.
+struct StraightSource {
+    full: Rgb32FImage,
+    full_mask: GrayImage,
+    focal: f64,
+    horizon_y: f64,
+    preview: Rgb32FImage,
+    preview_mask: GrayImage,
+    preview_scale: f64,
+    auto_crop: bool,
+    /// What the stored panorama_result was rendered with.
+    rendered: (u8, bool),
+}
+
+static STRAIGHT_SOURCE: std::sync::Mutex<Option<StraightSource>> = std::sync::Mutex::new(None);
+
+/// Long side of the copy the live slider re-projects.
+const STRAIGHT_PREVIEW_WIDTH: u32 = 1600;
+
+fn straight_source() -> std::sync::MutexGuard<'static, Option<StraightSource>> {
+    STRAIGHT_SOURCE.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+fn crop_to_content(img: Rgb32FImage, mask: &GrayImage) -> Rgb32FImage {
+    if let Some((cx, cy, cw, ch)) = stitching::largest_content_rect(mask) {
+        if cw > 0 && ch > 0 && (cw < img.width() || ch < img.height()) {
+            return image::imageops::crop_imm(&img, cx, cy, cw, ch).to_image();
+        }
+    }
+    img
+}
+
+/// 800px PNG data URL of a panorama, for the dialog.
+fn preview_data_url(image: &DynamicImage) -> Result<String, String> {
+    let (w, h) = image.dimensions();
+    let (new_w, new_h) = if w > h {
+        (800, ((800.0 * h as f32 / w as f32).round() as u32).max(1))
+    } else {
+        (((800.0 * w as f32 / h as f32).round() as u32).max(1), 800)
+    };
+    let preview_u8 = crate::image_processing::downscale_f32_image(image, new_w, new_h).to_rgb8();
+    let mut buf = Cursor::new(Vec::new());
+    preview_u8
+        .write_to(&mut buf, ImageFormat::Png)
+        .map_err(|e| format!("Failed to encode panorama preview: {}", e))?;
+    Ok(format!(
+        "data:image/png;base64,{}",
+        general_purpose::STANDARD.encode(buf.get_ref())
+    ))
+}
+
+/// Re-project the last Straight-lines stitch at a new strength (0-100), for
+/// the dialog's live slider. Returns a preview data URL; nothing is saved.
+#[tauri::command]
+pub async fn restraighten_panorama(strength: f64, auto_crop: Option<bool>) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut guard = straight_source();
+        let src = guard
+            .as_mut()
+            .ok_or_else(|| "Stitch with Straight lines first.".to_string())?;
+        let pct = strength.clamp(0.0, 100.0).round() as u8;
+        if let Some(ac) = auto_crop {
+            src.auto_crop = ac;
+        }
+        let (img, mask) = crate::panorama_utils::projection::straighten_cylindrical(
+            &src.preview,
+            &src.preview_mask,
+            src.focal * src.preview_scale,
+            src.horizon_y * src.preview_scale,
+            pct as f64 / 100.0,
+        );
+        // Remembered so save_panorama renders full size to match.
+        REQUESTED_STRENGTH.store(pct as u32, std::sync::atomic::Ordering::Relaxed);
+        let img = if src.auto_crop { crop_to_content(img, &mask) } else { img };
+        preview_data_url(&DynamicImage::ImageRgb32F(img))
+    })
+    .await
+    .map_err(|e| format!("Panorama task failed: {}", e))?
+}
+
+/// Strength the live slider last asked for.
+static REQUESTED_STRENGTH: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// Before saving a Straight-lines result, render it full size if the slider
+/// or the crop box changed since the stitch.
+fn rerender_straight_if_needed(
+    result: &std::sync::Arc<std::sync::Mutex<Option<DynamicImage>>>,
+) -> Result<(), String> {
+    let mut guard = straight_source();
+    let Some(src) = guard.as_mut() else {
+        return Ok(());
+    };
+    let wanted = (
+        REQUESTED_STRENGTH.load(std::sync::atomic::Ordering::Relaxed) as u8,
+        src.auto_crop,
+    );
+    if wanted == src.rendered {
+        return Ok(());
+    }
+    let (img, mask) = crate::panorama_utils::projection::straighten_cylindrical(
+        &src.full,
+        &src.full_mask,
+        src.focal,
+        src.horizon_y,
+        wanted.0 as f64 / 100.0,
+    );
+    let img = if wanted.1 { crop_to_content(img, &mask) } else { img };
+    *result.lock().unwrap_or_else(|e| e.into_inner()) = Some(DynamicImage::ImageRgb32F(img));
+    src.rendered = wanted;
+    Ok(())
 }
 
 /// Panorama projection surface, selectable from the Stitch Panorama dialog
@@ -191,6 +294,10 @@ enum Projection {
     Perspective,
     /// Warp frames onto a cylinder first (bounded distortion at any width).
     Cylindrical,
+    /// Cylindrical stitch, then a Pannini re-projection that straightens
+    /// lines, for interiors and architecture. The value is the strength in
+    /// percent: 100 is fully rectilinear, 0 classic Pannini.
+    Straight(u8),
 }
 
 impl Projection {
@@ -198,6 +305,15 @@ impl Projection {
         match s.map(|s| s.to_ascii_lowercase()).as_deref() {
             Some("perspective") | Some("planar") => Projection::Perspective,
             Some("cylindrical") | Some("cylinder") => Projection::Cylindrical,
+            Some("rectilinear") => Projection::Straight(100),
+            // "straight" or "straight:<0-100>": the strength rides in the
+            // projection string so the command signature stays unchanged.
+            Some(p) if p == "straight" || p.starts_with("straight:") => Projection::Straight(
+                p.strip_prefix("straight:")
+                    .and_then(|v| v.trim().parse::<f64>().ok())
+                    .map(|v| v.clamp(0.0, 100.0).round() as u8)
+                    .unwrap_or(DEFAULT_STRAIGHT_STRENGTH),
+            ),
             _ => Projection::Auto,
         }
     }
@@ -206,6 +322,10 @@ impl Projection {
 /// Auto mode switches to cylindrical past this estimated horizontal span.
 /// Perspective composition visibly stretches edge frames from roughly 60-70°.
 const AUTO_CYLINDRICAL_SPAN_DEG: f64 = 65.0;
+
+/// Straight-lines strength when none is given: mostly straight walls without
+/// the full 1/cos² edge stretch of a rectilinear map.
+const DEFAULT_STRAIGHT_STRENGTH: u8 = 70;
 
 /// Build an ImageInfo (grayscale, features, low-detail and scale metadata)
 /// from a full-resolution frame — used for the initial load and again after
@@ -368,6 +488,7 @@ fn stitch_images(
         return Err("At least two images are required for a panorama.".to_string());
     }
     let projection = Projection::parse(projection.as_deref());
+    *straight_source() = None;
 
     let _ = app_handle.emit("panorama-progress", "Starting panorama process...");
     println!(
@@ -401,18 +522,41 @@ fn stitch_images(
             let file_bytes = fs::read(filename)
                 .map_err(|e| format!("Failed to read image {}: {}", filename, e))?;
 
-            let mut dynamic_image = crate::image_loader::load_base_image_from_bytes(
-                &file_bytes,
+            // The frame's own edits (exposure, colour, masks...) when it has
+            // any, so the panorama matches the edited frames; otherwise the
+            // flat default conversion, as before.
+            let edited = match crate::export_processing::render_frame_with_edits(
                 filename,
-                false,
+                &file_bytes,
                 &settings,
-                None,
-            )
-            .map_err(|e| format!("Failed to load image {}: {}", filename, e))?;
-
-            if is_raw_file(filename) {
-                apply_cpu_default_raw_processing(&mut dynamic_image);
-            }
+                &app_handle,
+            ) {
+                Ok(edited) => edited,
+                Err(e) => {
+                    println!("    ! Couldn't apply this frame's edits ({}); using defaults", e);
+                    None
+                }
+            };
+            let dynamic_image = match edited {
+                Some(image) => {
+                    println!("    - Using the frame's own edits");
+                    image
+                }
+                None => {
+                    let mut image = crate::image_loader::load_base_image_from_bytes(
+                        &file_bytes,
+                        filename,
+                        false,
+                        &settings,
+                        None,
+                    )
+                    .map_err(|e| format!("Failed to load image {}: {}", filename, e))?;
+                    if is_raw_file(filename) {
+                        apply_cpu_default_raw_processing(&mut image);
+                    }
+                    image
+                }
+            };
 
             let image_f32 = dynamic_image.to_rgb32f();
 
@@ -455,6 +599,8 @@ fn stitch_images(
     // the pairwise homographies (rotation-only assumption, OpenCV-style)
     // and re-warp every frame onto a cylinder before the real stitch.
     // ------------------------------------------------------------------
+    // Cylinder radius, kept for the straight-lines re-projection after the stitch.
+    let mut cylinder_focal: Option<f64> = None;
     if projection != Projection::Perspective {
         let focal = crate::panorama_utils::projection::estimate_focal(
             pairwise_matches.iter().map(|(&(i, j), m)| {
@@ -467,7 +613,7 @@ fn stitch_images(
         );
 
         let use_cylindrical = match (projection, focal) {
-            (Projection::Cylindrical, _) => true,
+            (Projection::Cylindrical, _) | (Projection::Straight(_), _) => true,
             (Projection::Auto, Some(f)) => {
                 let (ordered, globals, _) = build_stitching_order(&image_data, &pairwise_matches);
                 if ordered.len() < 2 {
@@ -493,6 +639,7 @@ fn stitch_images(
                 .max()
                 .unwrap_or(1) as f64;
             let f = focal.unwrap_or(0.7 * max_w);
+            cylinder_focal = Some(f);
             let _ = app_handle.emit(
                 "panorama-progress",
                 "Projecting frames onto a cylinder...",
@@ -603,13 +750,59 @@ fn stitch_images(
     let _ = app_handle.emit("panorama-progress", "Warping and blending images...");
     println!("Warping and blending full-resolution images with progressive optimal seams...");
 
-    let (mut panorama, panorama_mask) = stitching::progressive_seam_stitcher(
+    let (mut panorama, mut panorama_mask) = stitching::progressive_seam_stitcher(
         &stitched_images_info,
         &global_homographies,
         app_handle.clone(),
     );
 
     println!("Stitching completed in {:.2?}\n", start_time.elapsed());
+
+    // Straight lines: re-project the cylinder so walls come out straight. The
+    // horizon is the reference frame's optical axis, located on the canvas
+    // the same way the stitcher placed it.
+    if let (Projection::Straight(strength), Some(f)) = (projection, cylinder_focal) {
+        let _ = app_handle.emit("panorama-progress", "Straightening lines...");
+        let reference = &image_data[ordered_indices[0]];
+        let (rw, rh) = reference.image.dimensions();
+        let centre = global_homographies[&reference.id]
+            * nalgebra::Point3::new(rw as f64 / 2.0, rh as f64 / 2.0, 1.0);
+        let (_, _, min_y, _) = stitching::canvas_bounds(&stitched_images_info, &global_homographies);
+        let horizon_y = centre.y / centre.z - min_y;
+        println!(
+            "  - Straight lines at {}% (focal {:.0}px, horizon row {:.0})",
+            strength, f, horizon_y
+        );
+        let (straight, straight_mask) = crate::panorama_utils::projection::straighten_cylindrical(
+            &panorama,
+            &panorama_mask,
+            f,
+            horizon_y,
+            strength as f64 / 100.0,
+        );
+        let preview_scale =
+            (STRAIGHT_PREVIEW_WIDTH as f64 / panorama.width().max(1) as f64).min(1.0);
+        let pw = ((panorama.width() as f64 * preview_scale).round() as u32).max(1);
+        let ph = ((panorama.height() as f64 * preview_scale).round() as u32).max(1);
+        let preview =
+            image::imageops::resize(&panorama, pw, ph, image::imageops::FilterType::Triangle);
+        let preview_mask =
+            image::imageops::resize(&panorama_mask, pw, ph, image::imageops::FilterType::Nearest);
+        let cylinder = std::mem::replace(&mut panorama, straight);
+        let cylinder_mask = std::mem::replace(&mut panorama_mask, straight_mask);
+        REQUESTED_STRENGTH.store(strength as u32, std::sync::atomic::Ordering::Relaxed);
+        *straight_source() = Some(StraightSource {
+            full: cylinder,
+            full_mask: cylinder_mask,
+            focal: f,
+            horizon_y,
+            preview,
+            preview_mask,
+            preview_scale,
+            auto_crop,
+            rendered: (strength, auto_crop),
+        });
+    }
 
     // Auto-crop to content: the stitched boundary is ragged (especially for
     // cylindrical projections, whose frames have curved tops and bottoms).

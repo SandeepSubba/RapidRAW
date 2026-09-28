@@ -2261,6 +2261,7 @@ pub fn run() {
             image_loader::is_image_cached,
             panorama_stitching::stitch_panorama,
             panorama_stitching::save_panorama,
+            panorama_stitching::restraighten_panorama,
             export_processing::export_images,
             export_processing::start_external_edit,
             export_processing::cancel_export,
