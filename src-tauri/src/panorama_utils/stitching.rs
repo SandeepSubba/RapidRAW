@@ -12,11 +12,27 @@ struct SeamContext<'a> {
     pano: &'a Rgb32FImage,
     pano_mask: &'a GrayImage,
     img_to_add: &'a Rgb32FImage,
+    add_valid: Option<&'a GrayImage>,
     h_add: &'a Matrix3<f64>,
     offset_x: f64,
     offset_y: f64,
     out_width: u32,
     out_height: u32,
+}
+
+/// Whether a source-space sample position holds real content. Frames warped
+/// onto a cylinder are barrel-shaped inside their bounding rect; the gaps
+/// must never be treated as image content.
+#[inline]
+fn source_valid(mask: Option<&GrayImage>, sx: f64, sy: f64) -> bool {
+    match mask {
+        None => true,
+        Some(m) => {
+            let x = (sx.round() as u32).min(m.width().saturating_sub(1));
+            let y = (sy.round() as u32).min(m.height().saturating_sub(1));
+            m.get_pixel(x, y)[0] > 0
+        }
+    }
 }
 
 enum SeamOrientation {
@@ -95,6 +111,7 @@ pub fn progressive_seam_stitcher(
                     && sx < base_img_info.image.width() as f64
                     && sy >= 0.0
                     && sy < base_img_info.image.height() as f64
+                    && source_valid(base_img_info.valid_mask.as_ref(), sx, sy)
                 {
                     let color = get_interpolated_pixel(&base_img_info.image, sx, sy);
                     let start = x as usize * 3;
@@ -125,6 +142,7 @@ pub fn progressive_seam_stitcher(
             pano: &panorama,
             pano_mask: &panorama_mask,
             img_to_add,
+            add_valid: img_to_add_info.valid_mask.as_ref(),
             h_add,
             offset_x,
             offset_y,
@@ -190,7 +208,8 @@ pub fn progressive_seam_stitcher(
                             let is_on_add = sx >= 0.0
                                 && sx < img_to_add.width() as f64
                                 && sy >= 0.0
-                                && sy < img_to_add.height() as f64;
+                                && sy < img_to_add.height() as f64
+                                && source_valid(img_to_add_info.valid_mask.as_ref(), sx, sy);
 
                             let is_on_pano = mask_row[x as usize] > 0;
 
@@ -282,7 +301,8 @@ pub fn progressive_seam_stitcher(
                             let is_on_add = sx >= 0.0
                                 && sx < img_to_add.width() as f64
                                 && sy >= 0.0
-                                && sy < img_to_add.height() as f64;
+                                && sy < img_to_add.height() as f64
+                                && source_valid(img_to_add_info.valid_mask.as_ref(), sx, sy);
 
                             let is_on_pano = mask_row[x as usize] > 0;
 
@@ -381,7 +401,12 @@ fn find_adaptive_seam(ctx: &SeamContext) -> Option<SeamInfo> {
                 let source_p = h_add_inv * target_p;
                 let sx = source_p.x / source_p.z;
                 let sy = source_p.y / source_p.z;
-                if sx >= 0.0 && sx < w_add as f64 && sy >= 0.0 && sy < h_add_img as f64 {
+                if sx >= 0.0
+                    && sx < w_add as f64
+                    && sy >= 0.0
+                    && sy < h_add_img as f64
+                    && source_valid(ctx.add_valid, sx, sy)
+                {
                     has_overlap = true;
                     min_ox = min_ox.min(x);
                     max_ox = max_ox.max(x);
@@ -452,7 +477,12 @@ fn find_pairwise_seam_dp_vertical(ctx: &SeamContext) -> Vec<i32> {
             let source_p = h_add_inv * target_p;
             let sx = source_p.x / source_p.z;
             let sy = source_p.y / source_p.z;
-            if sx >= 0.0 && sx < w_add as f64 - 1.0 && sy >= 0.0 && sy < h_add_img as f64 - 1.0 {
+            if sx >= 0.0
+                && sx < w_add as f64 - 1.0
+                && sy >= 0.0
+                && sy < h_add_img as f64 - 1.0
+                && source_valid(ctx.add_valid, sx, sy)
+            {
                 let p_pano = ctx.pano.get_pixel(x_out as u32, y_out as u32);
                 let p_add = get_interpolated_pixel(ctx.img_to_add, sx, sy);
                 let energy = ((p_pano[0] as f64 - p_add[0] as f64).powi(2)
@@ -554,7 +584,12 @@ fn find_pairwise_seam_dp_horizontal(ctx: &SeamContext) -> Vec<i32> {
             let source_p = h_add_inv * target_p;
             let sx = source_p.x / source_p.z;
             let sy = source_p.y / source_p.z;
-            if sx >= 0.0 && sx < w_add as f64 - 1.0 && sy >= 0.0 && sy < h_add_img as f64 - 1.0 {
+            if sx >= 0.0
+                && sx < w_add as f64 - 1.0
+                && sy >= 0.0
+                && sy < h_add_img as f64 - 1.0
+                && source_valid(ctx.add_valid, sx, sy)
+            {
                 let p_pano = ctx.pano.get_pixel(x_out as u32, y_out as u32);
                 let p_add = get_interpolated_pixel(ctx.img_to_add, sx, sy);
                 let energy = ((p_pano[0] as f64 - p_add[0] as f64).powi(2)

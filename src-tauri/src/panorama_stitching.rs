@@ -41,6 +41,10 @@ pub struct ImageInfo {
     pub id: usize,
     pub filename: String,
     pub image: Rgb32FImage,
+    // 255 where `image` holds real content. None = fully valid (unwarped
+    // frames); cylindrically warped frames are barrel-shaped inside their
+    // bounding rect and the gaps must be excluded from seams and blending.
+    pub valid_mask: Option<GrayImage>,
     pub low_detail_mask: GrayImage,
     pub scale_factor: f64,
     pub features: Vec<Feature>,
@@ -55,6 +59,7 @@ pub struct MatchInfo {
 #[tauri::command]
 pub async fn stitch_panorama(
     paths: Vec<String>,
+    projection: Option<String>,
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
@@ -70,7 +75,7 @@ pub async fn stitch_panorama(
     let panorama_result_handle = state.panorama_result.clone();
 
     let task = tokio::task::spawn_blocking(move || {
-        let panorama_result = stitch_images(source_paths, app_handle.clone());
+        let panorama_result = stitch_images(source_paths, projection, app_handle.clone());
 
         match panorama_result {
             Ok(panorama_image) => {
@@ -173,103 +178,74 @@ pub async fn save_panorama(
     Ok(output_path.to_string_lossy().to_string())
 }
 
-fn stitch_images(image_paths: Vec<String>, app_handle: AppHandle) -> Result<DynamicImage, String> {
-    if image_paths.len() < 2 {
-        return Err("At least two images are required for a panorama.".to_string());
-    }
+/// Panorama projection surface, selectable from the Stitch Panorama dialog
+/// (mirrors Photoshop Photomerge's layout options).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Projection {
+    /// Cylindrical when the estimated field of view is wide, else perspective.
+    Auto,
+    /// Compose on the reference frame's plane (best under ~60° of view;
+    /// keeps straight lines straight).
+    Perspective,
+    /// Warp frames onto a cylinder first (bounded distortion at any width).
+    Cylindrical,
+}
 
-    let _ = app_handle.emit("panorama-progress", "Starting panorama process...");
-    println!(
-        "Starting panorama stitching process for {} images...",
-        image_paths.len()
-    );
-
-    let settings = load_settings(app_handle.clone()).unwrap_or_default();
-
-    let start_time = Instant::now();
-    let _ = app_handle.emit("panorama-progress", "Loading and preparing images...");
-    println!("Loading and preparing images (in parallel)...");
-    let brief_pairs = processing::generate_brief_pairs();
-
-    let image_data_results: Vec<Result<ImageInfo, String>> = image_paths
-        .par_iter()
-        .enumerate()
-        .map(|(i, filename)| {
-            let _ = app_handle.emit(
-                "panorama-progress",
-                format!(
-                    "Processing '{}'",
-                    Path::new(filename)
-                        .file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                ),
-            );
-            println!("  - Processing '{}'", filename);
-
-            let file_bytes = fs::read(filename)
-                .map_err(|e| format!("Failed to read image {}: {}", filename, e))?;
-
-            let mut dynamic_image = crate::image_loader::load_base_image_from_bytes(
-                &file_bytes,
-                filename,
-                false,
-                &settings,
-                None,
-            )
-            .map_err(|e| format!("Failed to load image {}: {}", filename, e))?;
-
-            if is_raw_file(filename) {
-                apply_cpu_default_raw_processing(&mut dynamic_image);
-            }
-
-            let image_f32 = dynamic_image.to_rgb32f();
-
-            let color_full_u8 = dynamic_image.to_rgb8();
-            let gray_full = image::imageops::colorops::grayscale(&color_full_u8);
-
-            let (w, h) = gray_full.dimensions();
-            let (new_w, new_h, scale_factor) = processing::calculate_downscale_dimensions(w, h);
-
-            let gray_small = image::imageops::resize(
-                &gray_full,
-                new_w,
-                new_h,
-                image::imageops::FilterType::Triangle,
-            );
-
-            let low_detail_mask = processing::generate_low_detail_mask(&gray_full);
-
-            let features = processing::find_features(&gray_small, &brief_pairs);
-            println!("    Found {} features in '{}'", features.len(), filename);
-
-            Ok(ImageInfo {
-                id: i,
-                filename: filename.to_string(),
-                image: image_f32,
-                low_detail_mask,
-                scale_factor,
-                features,
-            })
-        })
-        .collect();
-
-    let mut image_data = Vec::new();
-    for result in image_data_results {
-        {
-            let info = result?;
-            image_data.push(info)
+impl Projection {
+    fn parse(s: Option<&str>) -> Self {
+        match s.map(|s| s.to_ascii_lowercase()).as_deref() {
+            Some("perspective") | Some("planar") => Projection::Perspective,
+            Some("cylindrical") | Some("cylinder") => Projection::Cylindrical,
+            _ => Projection::Auto,
         }
     }
+}
 
-    println!(
-        "Image loading and feature detection completed in {:.2?}\n",
-        start_time.elapsed()
+/// Auto mode switches to cylindrical past this estimated horizontal span.
+/// Perspective composition visibly stretches edge frames from roughly 60-70°.
+const AUTO_CYLINDRICAL_SPAN_DEG: f64 = 65.0;
+
+/// Build an ImageInfo (grayscale, features, low-detail and scale metadata)
+/// from a full-resolution frame — used for the initial load and again after
+/// cylindrical warping, so both passes go through identical preparation.
+fn prepare_image_info(
+    id: usize,
+    filename: &str,
+    image_f32: Rgb32FImage,
+    valid_mask: Option<GrayImage>,
+    brief_pairs: &[(nalgebra::Point2<i32>, nalgebra::Point2<i32>)],
+) -> ImageInfo {
+    let color_full_u8 = DynamicImage::ImageRgb32F(image_f32.clone()).to_rgb8();
+    let gray_full = image::imageops::colorops::grayscale(&color_full_u8);
+
+    let (w, h) = gray_full.dimensions();
+    let (new_w, new_h, scale_factor) = processing::calculate_downscale_dimensions(w, h);
+
+    let gray_small = image::imageops::resize(
+        &gray_full,
+        new_w,
+        new_h,
+        image::imageops::FilterType::Triangle,
     );
 
-    let start_time = Instant::now();
-    let _ = app_handle.emit("panorama-progress", "Finding image matches...");
-    println!("Finding all pairwise matches (in parallel)...");
+    let low_detail_mask = processing::generate_low_detail_mask(&gray_full);
+    let features = processing::find_features(&gray_small, brief_pairs);
+    println!("    Found {} features in '{}'", features.len(), filename);
+
+    ImageInfo {
+        id,
+        filename: filename.to_string(),
+        image: image_f32,
+        valid_mask,
+        low_detail_mask,
+        scale_factor,
+        features,
+    }
+}
+
+/// All pairwise RANSAC homographies (in full-resolution pixel coordinates)
+/// between frames with enough shared features.
+fn compute_pairwise_matches(image_data: &[ImageInfo]) -> HashMap<(usize, usize), MatchInfo> {
     let mut pairwise_matches: HashMap<(usize, usize), MatchInfo> = HashMap::new();
 
     let pairs_to_check: Vec<(usize, usize)> = (0..image_data.len())
@@ -341,6 +317,123 @@ fn stitch_images(image_paths: Vec<String>, app_handle: AppHandle) -> Result<Dyna
     for result in match_results.into_iter().flatten() {
         pairwise_matches.insert(result.0, result.1);
     }
+    pairwise_matches
+}
+
+/// Estimated horizontal angular span of the panorama, from the planar
+/// composition extents and the estimated focal length.
+fn estimate_span_degrees(
+    image_data: &[ImageInfo],
+    ordered_indices: &[usize],
+    global_homographies: &HashMap<usize, Matrix3<f64>>,
+    focal: f64,
+) -> f64 {
+    let reference = ordered_indices[0];
+    let (rw, _rh) = image_data[reference].image.dimensions();
+    let ref_cx = rw as f64 / 2.0;
+
+    let mut min_x = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    for &i in ordered_indices {
+        let h = &global_homographies[&i];
+        let (w, hgt) = image_data[i].image.dimensions();
+        for (cx, cy) in [
+            (0.0, 0.0),
+            (w as f64, 0.0),
+            (w as f64, hgt as f64),
+            (0.0, hgt as f64),
+        ] {
+            let tp = h * nalgebra::Point3::new(cx, cy, 1.0);
+            if tp.z.abs() > 1e-9 {
+                let x = tp.x / tp.z;
+                min_x = min_x.min(x);
+                max_x = max_x.max(x);
+            }
+        }
+    }
+    let left = ((min_x - ref_cx) / focal).atan();
+    let right = ((max_x - ref_cx) / focal).atan();
+    (right - left).to_degrees()
+}
+
+fn stitch_images(
+    image_paths: Vec<String>,
+    projection: Option<String>,
+    app_handle: AppHandle,
+) -> Result<DynamicImage, String> {
+    if image_paths.len() < 2 {
+        return Err("At least two images are required for a panorama.".to_string());
+    }
+    let projection = Projection::parse(projection.as_deref());
+
+    let _ = app_handle.emit("panorama-progress", "Starting panorama process...");
+    println!(
+        "Starting panorama stitching process for {} images...",
+        image_paths.len()
+    );
+
+    let settings = load_settings(app_handle.clone()).unwrap_or_default();
+
+    let start_time = Instant::now();
+    let _ = app_handle.emit("panorama-progress", "Loading and preparing images...");
+    println!("Loading and preparing images (in parallel)...");
+    let brief_pairs = processing::generate_brief_pairs();
+
+    let image_data_results: Vec<Result<ImageInfo, String>> = image_paths
+        .par_iter()
+        .enumerate()
+        .map(|(i, filename)| {
+            let _ = app_handle.emit(
+                "panorama-progress",
+                format!(
+                    "Processing '{}'",
+                    Path::new(filename)
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                ),
+            );
+            println!("  - Processing '{}'", filename);
+
+            let file_bytes = fs::read(filename)
+                .map_err(|e| format!("Failed to read image {}: {}", filename, e))?;
+
+            let mut dynamic_image = crate::image_loader::load_base_image_from_bytes(
+                &file_bytes,
+                filename,
+                false,
+                &settings,
+                None,
+            )
+            .map_err(|e| format!("Failed to load image {}: {}", filename, e))?;
+
+            if is_raw_file(filename) {
+                apply_cpu_default_raw_processing(&mut dynamic_image);
+            }
+
+            let image_f32 = dynamic_image.to_rgb32f();
+
+            Ok(prepare_image_info(i, filename, image_f32, None, &brief_pairs))
+        })
+        .collect();
+
+    let mut image_data = Vec::new();
+    for result in image_data_results {
+        {
+            let info = result?;
+            image_data.push(info)
+        }
+    }
+
+    println!(
+        "Image loading and feature detection completed in {:.2?}\n",
+        start_time.elapsed()
+    );
+
+    let start_time = Instant::now();
+    let _ = app_handle.emit("panorama-progress", "Finding image matches...");
+    println!("Finding all pairwise matches (in parallel)...");
+    let mut pairwise_matches = compute_pairwise_matches(&image_data);
     println!(
         "Pairwise matching completed in {:.2?}\n",
         start_time.elapsed()
@@ -351,6 +444,83 @@ fn stitch_images(image_paths: Vec<String>, app_handle: AppHandle) -> Result<Dyna
             "No suitable matches found between any pair of images. Cannot create a panorama."
                 .to_string(),
         );
+    }
+
+    // ------------------------------------------------------------------
+    // Projection selection. Perspective composition is only well-behaved
+    // for narrow panoramas; for wide ones, estimate the focal length from
+    // the pairwise homographies (rotation-only assumption, OpenCV-style)
+    // and re-warp every frame onto a cylinder before the real stitch.
+    // ------------------------------------------------------------------
+    if projection != Projection::Perspective {
+        let focal = crate::panorama_utils::projection::estimate_focal(
+            pairwise_matches.iter().map(|(&(i, j), m)| {
+                (
+                    m.homography,
+                    image_data[i].image.dimensions(),
+                    image_data[j].image.dimensions(),
+                )
+            }),
+        );
+
+        let use_cylindrical = match (projection, focal) {
+            (Projection::Cylindrical, _) => true,
+            (Projection::Auto, Some(f)) => {
+                let (ordered, globals, _) = build_stitching_order(&image_data, &pairwise_matches);
+                if ordered.len() < 2 {
+                    false
+                } else {
+                    let span = estimate_span_degrees(&image_data, &ordered, &globals, f);
+                    println!(
+                        "Estimated field of view: {:.1} deg (focal {:.0}px)",
+                        span, f
+                    );
+                    span > AUTO_CYLINDRICAL_SPAN_DEG
+                }
+            }
+            _ => false,
+        };
+
+        if use_cylindrical {
+            // Explicit cylindrical without a focal estimate falls back to a
+            // ~70 deg horizontal FOV assumption.
+            let max_w = image_data
+                .iter()
+                .map(|d| d.image.width())
+                .max()
+                .unwrap_or(1) as f64;
+            let f = focal.unwrap_or(0.7 * max_w);
+            let _ = app_handle.emit(
+                "panorama-progress",
+                "Projecting frames onto a cylinder...",
+            );
+            println!("Cylindrical projection selected (focal {:.0}px)", f);
+
+            image_data = image_data
+                .into_par_iter()
+                .map(|info| {
+                    let (warped, mask) =
+                        crate::panorama_utils::projection::cylindrical_warp(&info.image, f);
+                    prepare_image_info(
+                        info.id,
+                        &info.filename,
+                        warped,
+                        Some(mask),
+                        &brief_pairs,
+                    )
+                })
+                .collect();
+
+            let _ = app_handle.emit("panorama-progress", "Re-matching projected frames...");
+            println!("Re-matching cylindrically projected frames...");
+            pairwise_matches = compute_pairwise_matches(&image_data);
+            if pairwise_matches.is_empty() {
+                return Err(
+                    "No suitable matches found after cylindrical projection. Try the Perspective projection instead."
+                        .to_string(),
+                );
+            }
+        }
     }
 
     let start_time = Instant::now();
@@ -661,6 +831,18 @@ fn overlap_luminance_ratio(
             let uy = tp.y / tp.z;
             if ux < 0.0 || ux >= (wu - 1) as f64 || uy < 0.0 || uy >= (hu - 1) as f64 {
                 continue;
+            }
+            if let Some(m) = &info_v.valid_mask {
+                if m.get_pixel(x, y)[0] == 0 {
+                    continue;
+                }
+            }
+            if let Some(m) = &info_u.valid_mask {
+                let mx = (ux.round() as u32).min(m.width() - 1);
+                let my = (uy.round() as u32).min(m.height() - 1);
+                if m.get_pixel(mx, my)[0] == 0 {
+                    continue;
+                }
             }
             let pv = info_v.image.get_pixel(x, y);
             let pu = stitching::sample_bilinear(&info_u.image, ux, uy);

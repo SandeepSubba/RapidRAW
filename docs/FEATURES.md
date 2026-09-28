@@ -189,6 +189,14 @@ and dated.
   brightness steps that auto-exposure drift leaves at seams; and feature
   detection retries at lower corner thresholds on low-texture frames
   (skies, water), so borderline frames no longer drop out of the stitch.
+- **Panorama projections** (Photoshop Photomerge-style) — the Stitch
+  Panorama dialog offers **Auto / Perspective / Cylindrical**. The focal
+  length is estimated from the pairwise homographies (OpenCV-style
+  rotation-only autocalibration); Auto measures the total field of view and
+  switches to cylindrical past ~65°, where planar composition would stretch
+  the edge frames without bound. Cylindrical warps every frame onto a
+  cylinder first (validity-masked, re-matched), keeping distortion bounded
+  at any panorama width.
 
 ## Export
 

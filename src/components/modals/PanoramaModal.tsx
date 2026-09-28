@@ -16,7 +16,7 @@ interface PanoramaModalProps {
   onClose(): void;
   onOpenFile(path: string): void;
   onSave(): Promise<string>;
-  onStitch(): void;
+  onStitch(projection: string): void;
   progressMessage: string | null;
 }
 
@@ -38,6 +38,7 @@ export default function PanoramaModal({
   const [show, setShow] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [savedPath, setSavedPath] = useState<string | null>(null);
+  const [projection, setProjection] = useState<'auto' | 'perspective' | 'cylindrical'>('auto');
 
   const mouseDownTarget = useRef<EventTarget | null>(null);
 
@@ -112,13 +113,14 @@ export default function PanoramaModal({
     if (finalImageBase64 && !isProcessing) {
       return (
         <div className="w-full">
-          <div className="w-full max-h-[500px] bg-[#111] rounded-lg overflow-hidden border border-surface flex items-center justify-center">
+          <div className="w-full max-h-[440px] bg-[#111] rounded-lg overflow-hidden border border-surface flex items-center justify-center">
             <img
               src={finalImageBase64}
               alt="Stitched Panorama"
-              className="w-full h-full object-contain max-h-[500px]"
+              className="w-full h-full object-contain max-h-[440px]"
             />
           </div>
+          {!savedPath && renderProjectionPicker()}
           {savedPath && (
             <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
               <Text
@@ -197,9 +199,41 @@ export default function PanoramaModal({
         <Text className="text-center max-w-md leading-relaxed text-text-secondary">
           {imageCount ? t('modals.panorama.descCount', { count: imageCount }) : t('modals.panorama.descGeneric')}
         </Text>
+        {renderProjectionPicker()}
       </div>
     );
   };
+
+  // Photoshop Photomerge-style layout choice: Auto picks cylindrical for
+  // wide fields of view, perspective for narrow ones.
+  const renderProjectionPicker = () => (
+    <div className="mt-6 flex flex-col items-center gap-2">
+      <Text variant={TextVariants.small} className="opacity-60">
+        {t('modals.panorama.projection', 'Projection')}
+      </Text>
+      <div className="flex rounded-md overflow-hidden border border-surface">
+        {(
+          [
+            ['auto', t('modals.panorama.projectionAuto', 'Auto')],
+            ['perspective', t('modals.panorama.projectionPerspective', 'Perspective')],
+            ['cylindrical', t('modals.panorama.projectionCylindrical', 'Cylindrical')],
+          ] as const
+        ).map(([value, label]) => (
+          <button
+            key={value}
+            onClick={() => setProjection(value)}
+            className={`px-4 py-1.5 text-sm transition-colors ${
+              projection === value
+                ? 'bg-accent text-button-text'
+                : 'bg-bg-primary text-text-secondary hover:text-text-primary'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 
   const renderButtons = () => {
     if (error) {
@@ -235,7 +269,11 @@ export default function PanoramaModal({
           {finalImageBase64 ? t('modals.panorama.close') : t('modals.panorama.cancel')}
         </button>
 
-        <Button onClick={onStitch} disabled={isProcessing} variant={finalImageBase64 ? 'secondary' : 'primary'}>
+        <Button
+          onClick={() => onStitch(projection)}
+          disabled={isProcessing}
+          variant={finalImageBase64 ? 'secondary' : 'primary'}
+        >
           {isProcessing ? (
             <Loader2 className="animate-spin mr-2" size={16} />
           ) : finalImageBase64 ? (

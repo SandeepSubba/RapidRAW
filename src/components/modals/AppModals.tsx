@@ -23,7 +23,7 @@ import { CopyPasteSettings } from '../../utils/adjustments';
 export interface AppModalsProps {
   handleImageSelect: (path: string) => void;
   handleSavePanorama: () => Promise<string>;
-  handleStartPanorama: (paths: string[]) => void;
+  handleStartPanorama: (paths: string[], projection?: string) => void;
   handleSaveHdr: () => Promise<string>;
   handleStartHdr: (paths: string[]) => void;
   handleStartFocusStack: (paths: string[]) => void;
@@ -173,7 +173,7 @@ export default function AppModals(props: AppModalsProps) {
         }
         onOpenFile={(path: string) => props.handleImageSelect(path)}
         onSave={props.handleSavePanorama}
-        onStitch={() => props.handleStartPanorama(panoramaModalState.stitchingSourcePaths)}
+        onStitch={(projection: string) => props.handleStartPanorama(panoramaModalState.stitchingSourcePaths, projection)}
         progressMessage={panoramaModalState.progressMessage}
       />
       <HdrModal

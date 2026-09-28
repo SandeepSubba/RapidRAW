@@ -7,7 +7,7 @@ export function useProductivityActions(refreshImageList: () => Promise<void>) {
   const setUI = useUIStore((state) => state.setUI);
 
   const handleStartPanorama = useCallback(
-    (paths: string[]) => {
+    (paths: string[], projection?: string) => {
       setUI((state) => ({
         panoramaModalState: {
           ...state.panoramaModalState,
@@ -17,7 +17,7 @@ export function useProductivityActions(refreshImageList: () => Promise<void>) {
           progressMessage: 'Starting panorama process...',
         },
       }));
-      invoke(Invokes.StitchPanorama, { paths }).catch((err) => {
+      invoke(Invokes.StitchPanorama, { paths, projection: projection || 'auto' }).catch((err) => {
         setUI((state) => ({
           panoramaModalState: { ...state.panoramaModalState, isProcessing: false, error: String(err) },
         }));

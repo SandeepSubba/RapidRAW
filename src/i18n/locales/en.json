@@ -1499,7 +1499,11 @@
       "speedNotice": "This may take a few minutes depending on the number and size of images.",
       "start": "Start",
       "stitchingProgress": "Stitching Panorama",
-      "title": "Stitch Panorama"
+      "title": "Stitch Panorama",
+      "projection": "Projection",
+      "projectionAuto": "Auto",
+      "projectionPerspective": "Perspective",
+      "projectionCylindrical": "Cylindrical"
     },
     "renameAlbum": {
       "placeholder": "Enter new album name..."
