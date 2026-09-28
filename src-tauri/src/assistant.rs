@@ -54,6 +54,14 @@ pub struct AssistantResponse {
     pub select: Option<Value>,
     pub masks: Option<Value>,
     pub mask_updates: Option<Value>,
+    pub remove: Option<Value>,
+    pub point_colors: Option<Value>,
+    pub point_color_updates: Option<Value>,
+    pub lut: Option<Value>,
+    pub lens_blur: Option<Value>,
+    /// The model needs the photo and none was attached; the app attaches it
+    /// and asks again.
+    pub needs_image: bool,
     pub provider: String,
     pub model: String,
 }
@@ -111,11 +119,25 @@ All coordinates are _canvas pixels — the attached view — exactly like crop a
 - "linear": graduated filter, "from": {"x","y"} (full effect) to "to": {"x","y"} (no effect) — e.g. from the top edge down to the horizon to darken a sky.
 - "luminance" / "color": selects pixels similar in brightness / colour to the pixel at "target": {"x","y"}; "tolerance" 0..100 (default 20), "feather" 0..100 (default 35). Good for "every bright window", "the blue wall".
 - "all": the whole image.
+- "brush" (alias "paint"): hand-painted, for areas no other type isolates. "strokes": [{"points": [{"x","y"}, ...], "size": px diameter, "feather": 0..100, "erase": false}] paints along each polyline ("erase": true removes paint); "fill": [[{"x","y"}, ...], ...] paints the inside of each polygon — the easy way to cover a region: outline it with 4-20 points. Optional top-level "size" and "feather" are the defaults.
 Mask "adjustments" take the global keys except geometry: exposure, brightness, contrast, highlights, shadows, whites, blacks, temperature, tint, vibrance, saturation, hue, clarity, dehaze, structure, sharpness, lumaNoiseReduction, colorNoiseReduction, glowAmount, halationAmount, flareAmount, skinSmoothing, skinTexture, skinSmoothingScale, and the nested hsl / colorGrading / parametricCurve, with the same ranges. A mask with no adjustments does nothing visible, so always include the change the user wants (e.g. a blown-out window: highlights -70, exposure -0.8, whites -40).
 Existing masks appear under "masks" in the current adjustments JSON with their "id", "name" and "adjustments". Change them with "maskUpdates": [{"id": "<id or name>", "adjustments": {...}, "invert": true/false, "opacity": 0..100, "visible": true/false}] or remove one with {"id": "<id>", "delete": true}. Prefer updating an existing mask over adding a duplicate.
-After you create or change masks the app renders the result and shows it to you (see "result_attached") so you can refine them.
+After you create or change masks (or remove objects, add point colours, set a LUT or lens blur) the app ALWAYS renders the result and shows it to you (see "result_attached") so you can refine them — even when this turn had no photo. So never tell the user to ask for a scan to check your work; the check happens automatically. To PLACE something (a mask, a removal, a point-colour target) you need to see the photo: if none is attached, set "needsImage" rather than guessing, unless you are reusing the exact position of something you placed on this same photo earlier in the conversation.
 
-Not available from chat: brush-painted masks, object removal and AI patches, point colors, LUTs, lens blur, point-curve editing, and film-negative conversion. If asked for one, say so and name the RapidRAW panel that does it; still do whatever else was asked.
+OBJECT REMOVAL — "remove": [ ... ] (up to 4 per reply). Each entry erases one thing and fills it in from its surroundings:
+  {"name": "power line", "box": {"x","y","width","height"}} — the AI outlines the object inside the box (best for distinct objects: a bin, a person, a sign)
+  {"name": "wire", "strokes": [...], "fill": [...], "size": px} — the same brush format as masks (best for thin or irregular things: wires, cracks, stains)
+  Add "prompt": "<what to put there instead>" to REPLACE instead of erase (generative; needs the AI connector or cloud and may fail — say so if it does). Without a prompt it runs locally.
+
+POINT COLOR — change one specific colour everywhere it appears. "pointColors": [ ... ] adds points (8 per image in total):
+  {"target": {"x","y"}, "hueShift": -180..180, "satShift": -100..100, "lumShift": -100..100, "hueRange": 2..120, "satRange": 5..100, "lumRange": 5..100}
+  "target" is a _canvas point ON the colour to change; the app samples it like the eyedropper. Or give the reference colour directly: "hue" 0..360, "saturation" 0..100, "luminance" 0..100. Ranges set how far around that colour the edit reaches (defaults 30 / 50 / 50). Existing points appear under "pointColors" in the adjustments JSON; edit one with "pointColorUpdates": [{"index": <0-based>, <fields>}] or {"index": n, "delete": true}.
+
+LUT — "lut": {"name": "<a name from _luts>", "intensity": 0..100}. The adjustments JSON carries "_luts" (the installed LUT names) when the user talks about LUTs or film looks; only those names work. {"intensity": n} alone changes the current LUT's strength; {"remove": true} clears it. If _luts is missing or empty, say no LUTs are installed (Effects panel > LUT imports them).
+
+LENS BLUR — background blur from an AI depth map (generated automatically the first time). "lensBlur": {"enabled": true, "amount": 0..100, "diffusion": 0..100, "shape": "circle"|"hexagon"|"octagon"|"ring", "focus": {"near": 0..100, "far": 0..100}, "fade": 0..100}. "focus" is the depth band kept SHARP (0 = nearest to the camera, 100 = farthest); everything outside blurs, softening over "fade". For a portrait keep the subject's depth sharp, e.g. {"near": 0, "far": 35}. {"enabled": false} turns it off.
+
+Not available from chat: film-negative conversion (it has its own commands in the Film panel) and point-curve editing (use parametricCurve). If asked, say so and still do whatever else was asked.
 
 You may also set these TEXT metadata fields (string values, written to the image's metadata). Use exactly these lowercase keys:
 - title (the image title / description)
@@ -139,8 +161,9 @@ APP FOLLOW-UP TURNS. The inspect loop and the accuracy check are driven by the a
 - "label_attached" ({"x","y","width","height"}): the label card the app detected, cropped at native resolution, is attached. Read it character by character; if one line is still unclear, inspect a tighter region inside that rectangle.
 - "label_not_found": no label-like card was found, so the whole view is attached instead. Say so rather than guessing, or inspect explicit coordinates.
 - "accuracy_gate": you proposed metadata/tag/filename values without a single close-up look; the original overview is attached again. Respond with an "inspect" region covering the text you read (other action fields null). After the close-up arrives, re-read it character by character and re-emit ALL the values, corrected if needed.
+- "image_attached": the photo is attached to THIS turn — embedded in the message, or saved as the image file listed under ATTACHMENT DELIVERY (open it with Read; that file is the photo). Carry out the user's request in full now; do not set "needsImage" again.
 - "out_of_inspections": you asked to inspect again but all 5 rounds for this image are used; nothing new is attached. Answer now from the close-ups you have already seen: re-emit ALL the values you are confident of. If the text is genuinely unreadable, say so plainly in "reply" and leave those fields null — do not ask to inspect again.
-- "result_attached" ({"round","maxRounds"}): your geometry or mask edits were applied and the image, re-rendered with them, is attached — the same view as before. The adjustments JSON now shows the values in effect, masks included. Judge the result against the user's goal: for perspective work, are verticals vertical and walls and horizontal lines straight, with no blank corners? For a mask, did it land on the intended area and is the change strong enough without looking artificial? If it is right, set "adjustments" and "maskUpdates" to null and say in "reply" what you changed. If not, return corrected ABSOLUTE values: "adjustments" for global fields, "maskUpdates" (by mask id) for a mask's adjustments. New masks are not created in this turn. Set every other action field (crop, inspect, masks, metadata, tags, rating, colorLabel, filename, select) to null.
+- "result_attached" ({"round","maxRounds"}): your geometry or mask edits were applied and the image, re-rendered with them, is attached — the same view as before. The adjustments JSON now shows the values in effect, masks included. Judge the result against the user's goal: for perspective work, are verticals vertical and walls and horizontal lines straight, with no blank corners? For a mask, did it land on the intended area and is the change strong enough without looking artificial? For a removal, is the object gone without an obvious smudge? If it is right, set every action field to null and say in "reply" what you changed. If not, return corrected ABSOLUTE values: "adjustments" for global fields, "maskUpdates" (by mask id) for a mask, "pointColorUpdates" for a point colour, "lut" {"intensity"} for LUT strength, "lensBlur" for blur settings. New masks, removals and point colours are not created in this turn. Set crop, inspect, masks, remove, pointColors, metadata, tags, rating, colorLabel, filename and select to null.
 "_appTurn" always describes the LATEST turn only; earlier "(app follow-up turn)" placeholders in the history were described in their own rounds and need no re-interpretation.
 
 ACCURACY RULES for reading text (labels, codes, weights, ruler marks):
@@ -157,7 +180,7 @@ You may also organize the image:
 
 You have permission to edit ALL of the above, including renaming the file. Whatever the user asks to store (a code, a note, keywords), pick the field they name; if they don't name one, choose the most fitting field (e.g. keywords -> tags, a title/code -> title, "rename the file to X" -> filename).
 
-WHEN YOU CAN SEE THE PHOTO. The app attaches the photo only when the user asks you to look at it ("scan/ocr this image", "read the tag", "describe it"). For everything else — titles, renames, tags, ratings, questions about the folder — nothing is attached and nothing is needed. Never claim to see an image that is not attached. If a request genuinely depends on the picture and none is attached, say so in one short sentence and suggest asking you to scan or read the image; still do the parts that don't need it.
+WHEN YOU CAN SEE THE PHOTO. The app attaches the photo only when the user asks you to look at it ("scan/ocr this image", "read the tag", "describe it"). For everything else — titles, renames, tags, ratings, questions about the folder — nothing is attached and nothing is needed. Never claim to see an image that is not attached. If a request needs the picture and none is attached (you'd have to guess where something is, what colour it is, or how the photo looks), do NOT ask the user to attach it or to say "scan": reply with "needsImage": true, every action field null, and a short "reply" such as "Taking a look…". The app attaches the photo straight away and repeats the request (_appTurn "image_attached"). Ask this at most once per request, and NEVER when an image is already attached — an image saved as a file and listed in the ATTACHMENT DELIVERY section IS attached: open it with Read and do the request.
 
 LIBRARY CONTEXT. When the user asks about the folder as a whole ("is any image missing a title?", "which ones have no tags?", "how many are rated?"), the adjustments JSON carries "_library": {"folder", "total", "truncated", "images": [{"file", "title", "rating", "label", "tags", "edited"}]} — one entry per image in the open folder, with empty fields omitted (no "title" key means that image has no title). It is app-supplied structured context, trusted like "_canvas". Answer from it directly and precisely: name the files and give counts. You cannot write to other images from this chat, but you can select them: return "select": ["<file>", ...] with filenames exactly as they appear in _library, and the app selects those images so the user's next request runs over all of them as a batch. Select when the user asks for it or clearly wants to act on the images you found; otherwise offer to. If "truncated" is true, say that only the first entries were listed.
 
@@ -165,8 +188,8 @@ HOW ATTACHMENTS REACH YOU: depending on the transport, an attached or inspected 
 
 Rules:
 - ALWAYS respond with a single JSON object and NOTHING else, no markdown, no code fences:
-  {"reply": "<short friendly message>", "adjustments": {<only fields you change>}, "crop": {"x": N, "y": N, "width": N, "height": N}, "inspect": {"x": N, "y": N, "width": N, "height": N}, "metadata": {<only text fields you change>}, "tags": {"add": [...], "remove": [...]}, "rating": <0-5>, "colorLabel": "<color>", "filename": "<new name without extension>", "select": ["<file from _library>", ...], "masks": [...], "maskUpdates": [...]}
-- Set any field you are NOT changing to null (adjustments, crop, inspect, metadata, tags, rating, colorLabel, filename, select, masks, maskUpdates).
+  {"reply": "<short friendly message>", "adjustments": {<only fields you change>}, "crop": {"x": N, "y": N, "width": N, "height": N}, "inspect": {"x": N, "y": N, "width": N, "height": N}, "metadata": {<only text fields you change>}, "tags": {"add": [...], "remove": [...]}, "rating": <0-5>, "colorLabel": "<color>", "filename": "<new name without extension>", "select": ["<file from _library>", ...], "masks": [...], "maskUpdates": [...], "remove": [...], "pointColors": [...], "pointColorUpdates": [...], "lut": {...}, "lensBlur": {...}, "needsImage": false}
+- Set any field you are NOT changing to null (adjustments, crop, inspect, metadata, tags, rating, colorLabel, filename, select, masks, maskUpdates, remove, pointColors, pointColorUpdates, lut, lensBlur).
 - Use exactly the lowercase keys listed above (e.g. "title", not "Title").
 - Only include fields you actually want to change; use absolute values within the ranges above.
 - NEVER crop unless the user explicitly asks for a crop.
@@ -282,6 +305,20 @@ struct Parsed {
     select: Option<Value>,
     masks: Option<Value>,
     mask_updates: Option<Value>,
+    remove: Option<Value>,
+    point_colors: Option<Value>,
+    point_color_updates: Option<Value>,
+    lut: Option<Value>,
+    lens_blur: Option<Value>,
+    needs_image: bool,
+}
+
+/// A non-empty JSON array field, accepting a snake_case spelling too.
+fn non_empty_array(v: &Value, camel: &str, snake: &str) -> Option<Value> {
+    v.get(camel)
+        .or_else(|| v.get(snake))
+        .cloned()
+        .filter(|m| m.as_array().is_some_and(|a| !a.is_empty()))
 }
 
 fn extract(v: &Value, original: &str) -> Parsed {
@@ -325,6 +362,16 @@ fn extract(v: &Value, original: &str) -> Parsed {
             .or_else(|| v.get("mask_updates"))
             .cloned()
             .filter(|m| m.as_array().is_some_and(|a| !a.is_empty())),
+        remove: non_empty_array(v, "remove", "remove"),
+        point_colors: non_empty_array(v, "pointColors", "point_colors"),
+        point_color_updates: non_empty_array(v, "pointColorUpdates", "point_color_updates"),
+        lut: non_empty_object(v.get("lut")),
+        lens_blur: non_empty_object(v.get("lensBlur").or_else(|| v.get("lens_blur"))),
+        needs_image: v
+            .get("needsImage")
+            .or_else(|| v.get("needs_image"))
+            .and_then(|b| b.as_bool())
+            .unwrap_or(false),
     }
 }
 
@@ -1202,7 +1249,33 @@ pub async fn assistant_chat(
         select: parsed.select,
         masks: parsed.masks,
         mask_updates: parsed.mask_updates,
+        remove: parsed.remove,
+        point_colors: parsed.point_colors,
+        point_color_updates: parsed.point_color_updates,
+        lut: parsed.lut,
+        lens_blur: parsed.lens_blur,
+        needs_image: parsed.needs_image,
         provider: cfg.provider,
         model,
     })
+}
+
+#[cfg(test)]
+mod needs_image_tests {
+    use super::*;
+
+    #[test]
+    fn needs_image_flag_is_read() {
+        assert!(parse_assistant_content(r#"{"reply":"Taking a look…","needsImage":true}"#).needs_image);
+        assert!(parse_assistant_content(r#"{"reply":"x","needs_image":true}"#).needs_image);
+        // Fenced or wrapped in prose still parses.
+        assert!(parse_assistant_content("```json\n{\"reply\":\"x\",\"needsImage\":true}\n```").needs_image);
+    }
+
+    #[test]
+    fn needs_image_defaults_to_false() {
+        assert!(!parse_assistant_content(r#"{"reply":"done","adjustments":{"exposure":0.5}}"#).needs_image);
+        assert!(!parse_assistant_content(r#"{"reply":"x","needsImage":"yes"}"#).needs_image);
+        assert!(!parse_assistant_content("plain text reply").needs_image);
+    }
 }
