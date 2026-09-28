@@ -42,23 +42,135 @@ import { useLibraryActions } from '../../../hooks/useLibraryActions';
 // The develop-slider fields the assistant is allowed to set, with their valid
 // ranges. Values coming back from the model are clamped to these before we
 // apply them, so a hallucinated 999 can't push a slider out of bounds.
+// Everything the assistant may set, each clamped to the range its UI slider
+// allows, so a model value can never go further than a user could drag.
+// Not here, and ignored if proposed: masks, AI patches, point colours, LUTs,
+// lens blur (needs a depth map), guided-perspective lines, point curves, and
+// film-negative conversion (sidecar-owned; it has its own commands).
 const ADJUSTMENT_RANGES: Record<string, [number, number]> = {
+  // Basic
   exposure: [-5, 5],
+  brightness: [-5, 5],
   contrast: [-100, 100],
   highlights: [-100, 100],
   shadows: [-100, 100],
   whites: [-100, 100],
   blacks: [-100, 100],
+  // Color
   temperature: [-100, 100],
   tint: [-100, 100],
   vibrance: [-100, 100],
   saturation: [-100, 100],
   hue: [-180, 180],
+  // Details
+  sharpness: [-100, 100],
+  sharpnessThreshold: [0, 80],
   clarity: [-100, 100],
   dehaze: [-100, 100],
   structure: [-100, 100],
-  sharpness: [-100, 100],
+  centré: [-100, 100],
+  lumaNoiseReduction: [0, 100],
+  colorNoiseReduction: [0, 100],
+  chromaticAberrationRedCyan: [-100, 100],
+  chromaticAberrationBlueYellow: [-100, 100],
+  skinSmoothing: [0, 100],
+  skinTexture: [0, 100],
+  skinSmoothingScale: [0, 100],
+  // Effects
+  glowAmount: [0, 100],
+  halationAmount: [0, 100],
+  flareAmount: [0, 100],
+  vignetteAmount: [-100, 100],
+  vignetteMidpoint: [0, 100],
+  vignetteRoundness: [-100, 100],
+  vignetteFeather: [0, 100],
+  grainAmount: [0, 100],
+  grainSize: [0, 100],
+  grainRoughness: [0, 100],
+  // Geometry
+  rotation: [-45, 45],
+  transformDistortion: [-100, 100],
+  transformVertical: [-100, 100],
+  transformHorizontal: [-100, 100],
+  transformRotate: [-45, 45],
+  transformAspect: [-100, 100],
+  transformScale: [50, 150],
+  transformXOffset: [-100, 100],
+  transformYOffset: [-100, 100],
+  // Lens profile correction strengths (only act when a profile is found)
+  lensDistortionAmount: [0, 200],
+  lensTcaAmount: [0, 200],
+  lensVignetteAmount: [0, 200],
 };
+const INTEGER_ADJUSTMENTS: Record<string, [number, number]> = { orientationSteps: [0, 3] };
+const BOOLEAN_ADJUSTMENTS = new Set([
+  'flipHorizontal',
+  'flipVertical',
+  'lensDistortionEnabled',
+  'lensTcaEnabled',
+  'lensVignetteEnabled',
+]);
+const ENUM_ADJUSTMENTS: Record<string, string[]> = { toneMapper: ['basic', 'agx'] };
+
+// Nested groups, as a spec of field -> range (or sub-spec). Merged into the
+// current value, because the apply step is a shallow spread: sending just
+// {hsl: {blues: {saturation: -20}}} must not wipe the other seven colours.
+type AdjustmentSpec = { [key: string]: [number, number] | AdjustmentSpec };
+const HSL_FIELDS: AdjustmentSpec = { hue: [-100, 100], saturation: [-100, 100], luminance: [-100, 100] };
+const GRADING_WHEEL: AdjustmentSpec = { hue: [0, 360], saturation: [0, 100], luminance: [-100, 100] };
+const CURVE_FIELDS: AdjustmentSpec = {
+  darks: [-100, 100],
+  shadows: [-100, 100],
+  highlights: [-100, 100],
+  lights: [-100, 100],
+  whiteLevel: [-100, 0],
+  blackLevel: [0, 100],
+};
+const NESTED_ADJUSTMENTS: Record<string, AdjustmentSpec> = {
+  hsl: Object.fromEntries(
+    ['reds', 'oranges', 'yellows', 'greens', 'aquas', 'blues', 'purples', 'magentas'].map((c) => [c, HSL_FIELDS]),
+  ),
+  colorGrading: {
+    shadows: GRADING_WHEEL,
+    midtones: GRADING_WHEEL,
+    highlights: GRADING_WHEEL,
+    global: GRADING_WHEEL,
+    blending: [0, 100],
+    balance: [-100, 100],
+  },
+  colorCalibration: {
+    shadowsTint: [-100, 100],
+    redHue: [-100, 100],
+    redSaturation: [-100, 100],
+    greenHue: [-100, 100],
+    greenSaturation: [-100, 100],
+    blueHue: [-100, 100],
+    blueSaturation: [-100, 100],
+  },
+  parametricCurve: { luma: CURVE_FIELDS, red: CURVE_FIELDS, green: CURVE_FIELDS, blue: CURVE_FIELDS },
+};
+
+// Geometry is where a single guess is rarely right (how far a distortion value
+// bends depends on the lens), so these trigger a rendered-result check.
+const GEOMETRY_KEYS = new Set([
+  'rotation',
+  'transformDistortion',
+  'transformVertical',
+  'transformHorizontal',
+  'transformRotate',
+  'transformAspect',
+  'transformScale',
+  'transformXOffset',
+  'transformYOffset',
+  'lensDistortionAmount',
+  'lensDistortionEnabled',
+  'flipHorizontal',
+  'flipVertical',
+  'orientationSteps',
+]);
+const MAX_REVIEW_ROUNDS = 2;
+
+type AdjustmentValue = number | string | boolean;
 
 interface Attachment {
   id: string;
@@ -161,16 +273,68 @@ function formatMetadata(patch: Record<string, string>): string {
     .join(', ');
 }
 
-function sanitizePatch(raw: any): Record<string, number> {
-  const out: Record<string, number> = {};
-  if (!raw || typeof raw !== 'object') return out;
-  for (const [key, value] of Object.entries(raw)) {
-    const range = ADJUSTMENT_RANGES[key];
-    const num = typeof value === 'number' ? value : parseFloat(value as any);
-    if (!range || !Number.isFinite(num)) continue;
-    out[key] = Math.max(range[0], Math.min(range[1], num));
+const toNumber = (v: any) => (typeof v === 'number' ? v : parseFloat(v));
+const clampTo = (v: number, [lo, hi]: [number, number]) => Math.max(lo, Math.min(hi, v));
+
+function mergeNested(
+  raw: any,
+  current: any,
+  spec: AdjustmentSpec,
+  path: string,
+  changes: Record<string, AdjustmentValue>,
+): any | null {
+  if (!raw || typeof raw !== 'object') return null;
+  let out: any = null;
+  for (const [key, sub] of Object.entries(spec)) {
+    if (!(key in raw)) continue;
+    let next: any;
+    if (Array.isArray(sub)) {
+      const n = toNumber(raw[key]);
+      if (!Number.isFinite(n)) continue;
+      next = clampTo(n, sub);
+      changes[`${path}.${key}`] = next;
+    } else {
+      next = mergeNested(raw[key], current?.[key], sub, `${path}.${key}`, changes);
+      if (next === null) continue;
+    }
+    out = out ?? { ...(current ?? {}) };
+    out[key] = next;
   }
   return out;
+}
+
+// Validate a model's proposal against the current adjustments. `patch` is
+// ready to spread over them; `changes` is the flat list shown in the chat.
+function sanitizeAdjustments(
+  raw: any,
+  current: any,
+): { patch: Record<string, any>; changes: Record<string, AdjustmentValue> } {
+  const patch: Record<string, any> = {};
+  const changes: Record<string, AdjustmentValue> = {};
+  if (!raw || typeof raw !== 'object') return { patch, changes };
+  for (const [key, value] of Object.entries(raw)) {
+    if (ADJUSTMENT_RANGES[key]) {
+      const n = toNumber(value);
+      if (Number.isFinite(n)) patch[key] = changes[key] = clampTo(n, ADJUSTMENT_RANGES[key]);
+    } else if (INTEGER_ADJUSTMENTS[key]) {
+      const n = Math.round(toNumber(value));
+      if (Number.isFinite(n)) patch[key] = changes[key] = clampTo(n, INTEGER_ADJUSTMENTS[key]);
+    } else if (BOOLEAN_ADJUSTMENTS.has(key)) {
+      if (typeof value === 'boolean') patch[key] = changes[key] = value;
+    } else if (ENUM_ADJUSTMENTS[key]) {
+      const v = String(value).toLowerCase();
+      if (ENUM_ADJUSTMENTS[key].includes(v)) patch[key] = changes[key] = v;
+    }
+  }
+  for (const [key, spec] of Object.entries(NESTED_ADJUSTMENTS)) {
+    const merged = mergeNested(raw[key], current?.[key], spec, key, changes);
+    if (merged) patch[key] = merged;
+  }
+  // A parametric curve only renders in parametric mode.
+  if (patch.parametricCurve && current?.curveMode !== 'parametric') {
+    patch.curveMode = changes.curveMode = 'parametric';
+  }
+  return { patch, changes };
 }
 
 // Validate + clamp a model-proposed crop rectangle (pixels, oriented image
@@ -208,9 +372,16 @@ function scanStance(text: string): 'forbid' | 'ask' | null {
 // ("do the same", "again") inherits the last stance so a scan workflow repeats.
 const REPEAT_FOLLOW_UP = /\b(?:same|again|repeat|redo|continue|next one)\b/;
 
+// Edits that can only be done by looking (straightening, perspective, "make
+// it look better") need the photo even without "scan" or "look at". An
+// explicit "don't scan" still wins, since scanStance runs first.
+const VISUAL_EDIT =
+  /\b(?:perspective|straight(?:en)?|keystone|distort(?:ion)?|barrel|tilt(?:ed)?|horizon|crooked|lean(?:ing)?|converg\w*|verticals?|enhance|improve|retouch|auto[- ]?edit|look (?:better|nicer|good)|white balance|colou?r (?:cast|correct\w*))\b/;
+
 function wantsImage(text: string, priorUserText: string[]): boolean {
   const own = scanStance(text);
   if (own !== null) return own === 'ask';
+  if (VISUAL_EDIT.test((text || '').toLowerCase())) return true;
   if (!REPEAT_FOLLOW_UP.test((text || '').toLowerCase())) return false;
   return [...priorUserText].reverse().map(scanStance).find((s) => s !== null) === 'ask';
 }
@@ -348,9 +519,11 @@ function dataUrlToImage(url: string): { mediaType: string; data: string } | null
   return m ? { mediaType: m[1], data: m[2] } : null;
 }
 
-function formatPatch(patch: Record<string, number>): string {
+function formatPatch(patch: Record<string, AdjustmentValue>): string {
   return Object.entries(patch)
-    .map(([k, v]) => `${k} ${v > 0 ? '+' : ''}${v}`)
+    .map(([k, v]) =>
+      typeof v === 'number' ? `${k} ${v > 0 ? '+' : ''}${Math.round(v * 100) / 100}` : `${k} ${v}`,
+    )
     .join(', ');
 }
 
@@ -415,6 +588,22 @@ async function blobUrlToImage(
     const resp = await fetch(url);
     const blob = await resp.blob();
     return await downscaleBlob(blob, maxDim);
+  } catch {
+    return null;
+  }
+}
+
+// Render the image with the given adjustments. The editor's own preview can't
+// be used for the result check: with the GPU renderer it isn't refreshed after
+// an edit, so the model would be shown its own starting point.
+async function renderForReview(
+  path: string,
+  adjustments: any,
+  maxDim: number,
+): Promise<{ mediaType: string; data: string } | null> {
+  try {
+    const bytes = await invoke<Uint8Array>(Invokes.GeneratePreviewForPath, { path, jsAdjustments: adjustments });
+    return await downscaleBlob(new Blob([new Uint8Array(bytes)], { type: 'image/jpeg' }), maxDim);
   } catch {
     return null;
   }
@@ -1279,7 +1468,12 @@ export default function AssistantPanel() {
         return;
       }
 
-      const patch = currentImage ? sanitizePatch(response?.adjustments) : {};
+      const baseAdjustments: any = useEditorStore.getState().adjustments;
+      const sanitized = currentImage
+        ? sanitizeAdjustments(response?.adjustments, baseAdjustments)
+        : { patch: {} as Record<string, any>, changes: {} as Record<string, AdjustmentValue> };
+      const patch = sanitized.patch;
+      const changes = sanitized.changes;
       const viewCropPatch =
         currentImage && viewCanvas ? sanitizeCropPatch(response?.crop, viewCanvas.width, viewCanvas.height) : null;
       // A rect proposed inside the current view refines the existing crop, so
@@ -1307,6 +1501,51 @@ export default function AssistantPanel() {
             height: cropPatch.crop.height,
           }),
         );
+      }
+
+      // Result check for geometry: the model sees the rendered edit and may
+      // correct it (absolute values), until it's satisfied or the rounds run
+      // out. Needs the photo, so only when this turn is allowed to look.
+      let finalReply: string = response?.reply || t('editor.assistant.emptyReply', 'Done.');
+      if (
+        currentImage &&
+        !imagesOff &&
+        Object.keys(changes).some((k) => GEOMETRY_KEYS.has(k)) &&
+        !cancelRef.current
+      ) {
+        addMessage({ id: nextMessageId(), role: 'assistant', content: finalReply, appliedAdjustments: { ...changes } });
+        let current: any = { ...baseAdjustments, ...patch, ...(cropPatch ?? {}) };
+        let reviewHistory = [...loopHistory, { role: 'assistant', content: finalReply }];
+        for (let round = 1; round <= MAX_REVIEW_ROUNDS && !cancelRef.current; round++) {
+          addMessage({
+            id: nextMessageId(),
+            role: 'assistant',
+            content: t('editor.assistant.checkingResult', 'Checking the result…'),
+          });
+          const rendered = await renderForReview(currentImage.path, current, imageMaxDim);
+          if (!rendered || cancelRef.current) break;
+          reviewHistory = [...reviewHistory, { role: 'user', content: '(app follow-up turn)' }];
+          const review: any = await invoke(Invokes.AssistantChat, {
+            messages: reviewHistory,
+            adjustments: {
+              ...current,
+              _canvas: viewCanvas,
+              _appTurn: { kind: 'result_attached', round, maxRounds: MAX_REVIEW_ROUNDS },
+            },
+            currentMetadata: readCurrentMetadata(currentImage.exif),
+            images: [rendered],
+            model: selectedModel || null,
+          });
+          if (cancelRef.current) break;
+          finalReply = review?.reply || finalReply;
+          reviewHistory = [...reviewHistory, { role: 'assistant', content: review?.reply || '(reviewed)' }];
+          const next = sanitizeAdjustments(review?.adjustments, current);
+          if (Object.keys(next.patch).length === 0) break;
+          setAdjustments((prev: any) => ({ ...prev, ...next.patch }));
+          current = { ...current, ...next.patch };
+          Object.assign(patch, next.patch);
+          Object.assign(changes, next.changes);
+        }
       }
 
       let metaPatch: Record<string, string> | null = null;
@@ -1342,8 +1581,8 @@ export default function AssistantPanel() {
       addMessage({
         id: nextMessageId(),
         role: 'assistant',
-        content: response?.reply || t('editor.assistant.emptyReply', 'Done.'),
-        appliedAdjustments: hasPatch ? patch : null,
+        content: finalReply,
+        appliedAdjustments: Object.keys(changes).length > 0 ? changes : null,
         appliedMetadata: metaPatch,
         appliedOrganization,
       });

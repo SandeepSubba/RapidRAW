@@ -6,7 +6,7 @@ export interface AssistantMessage {
   role: 'user' | 'assistant';
   content: string;
   // Adjustments that were actually applied to the image for this message (if any).
-  appliedAdjustments?: Record<string, number> | null;
+  appliedAdjustments?: Record<string, number | string | boolean> | null;
   // Text metadata fields (EXIF keys) that were written for this message (if any).
   appliedMetadata?: Record<string, string> | null;
   // Human-readable summary of tag/rating/color-label changes applied (if any).
