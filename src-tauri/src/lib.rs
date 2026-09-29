@@ -1848,9 +1848,17 @@ pub fn run() {
                     match gphoto2::Context::new() {
                         Ok(context) => {
                             log::info!("gphoto2 context initialized successfully.");
-                            match gphoto2::Camera::autodetect(&context) {
+                            // gphoto2-rs 3.x: camera discovery lives on the
+                            // context and returns a Task (same API the
+                            // tethering module uses) — upstream's
+                            // Camera::autodetect doesn't exist in this crate
+                            // version.
+                            match context.list_cameras().wait() {
                                 Ok(cameras) => {
-                                    log::info!("Found {} attached camera(s)", cameras.len());
+                                    log::info!(
+                                        "Found {} attached camera(s)",
+                                        cameras.count()
+                                    );
                                 }
                                 Err(e) => log::warn!("Failed to autodetect cameras: {}", e),
                             }
