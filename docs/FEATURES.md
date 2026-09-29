@@ -97,7 +97,10 @@ and dated.
   thinking: budget via `MAX_THINKING_TOKENS` for the Claude Code CLI, the
   `thinking` budget for the Anthropic API, and `reasoning_effort` for
   OpenAI-compatible providers.
-- **Developer mode** (wrench toggle, Claude Code provider only) — chat messages
+- **Developer mode** (wrench toggle, Claude Code provider only, dev-server
+  builds only — the toggle, its settings and the backend command are disabled
+  in packaged builds, where source edits could never reach the running app) —
+  chat messages
   become change requests for the app itself: the CLI runs inside the configured
   RapidRAW checkout with edit/git tools allowed, makes the change, verifies it
   (`cargo check` / `tsc`), commits and pushes; tool activity streams under the

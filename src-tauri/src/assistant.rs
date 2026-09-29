@@ -940,6 +940,15 @@ pub async fn assistant_dev_chat(
     prompt: String,
     app_handle: tauri::AppHandle,
 ) -> Result<String, String> {
+    // Dev builds only: in a packaged app the edited source never reaches the
+    // running binary, so the whole loop (edit → hot reload → verify) is
+    // meaningless there. The UI hides the toggle too; this guards the command.
+    if !cfg!(debug_assertions) {
+        return Err(
+            "Developer mode is only available when running from the dev server (npm start)."
+                .to_string(),
+        );
+    }
     let settings = app_settings::load_settings(app_handle.clone()).unwrap_or_default();
     if settings.assistant_provider.as_deref() != Some("claudecode") {
         return Err("Developer mode drives the Claude Code CLI — set the assistant provider to Claude Code in Settings → AI Assistant.".to_string());

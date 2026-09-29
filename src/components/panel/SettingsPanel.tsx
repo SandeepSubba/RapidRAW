@@ -1941,7 +1941,7 @@ export default function SettingsPanel({
                       </Text>
                     )}
 
-                    {appSettings?.assistantProvider === 'claudecode' && (
+                    {import.meta.env.DEV && appSettings?.assistantProvider === 'claudecode' && (
                       <SettingItem
                         label={t('settings.assistant.devRepoPath', 'Developer mode: repository path')}
                         description={t(

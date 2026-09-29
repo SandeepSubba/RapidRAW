@@ -2655,22 +2655,27 @@ export default function AssistantPanel() {
         >
           <RefreshCw size={14} />
         </button>
-        <button
-          type="button"
-          onClick={() => setDevMode((v) => !v)}
-          title={t(
-            'editor.assistant.devModeTip',
-            'Developer mode — change the app itself: edits the RapidRAW source, verifies, commits, and pushes',
-          )}
-          className={clsx(
-            'p-1 rounded-md transition-colors shrink-0',
-            devMode
-              ? 'bg-accent text-button-text'
-              : 'hover:bg-surface text-text-secondary hover:text-text-primary',
-          )}
-        >
-          <Wrench size={14} />
-        </button>
+        {/* Developer mode only makes sense against the dev server, where the
+            source edits hot-reload into the running app — a packaged build
+            would edit the checkout without ever showing the result. */}
+        {import.meta.env.DEV && (
+          <button
+            type="button"
+            onClick={() => setDevMode((v) => !v)}
+            title={t(
+              'editor.assistant.devModeTip',
+              'Developer mode — change the app itself: edits the RapidRAW source, verifies, commits, and pushes',
+            )}
+            className={clsx(
+              'p-1 rounded-md transition-colors shrink-0',
+              devMode
+                ? 'bg-accent text-button-text'
+                : 'hover:bg-surface text-text-secondary hover:text-text-primary',
+            )}
+          >
+            <Wrench size={14} />
+          </button>
+        )}
       </div>
       {modelsError && (
         <div className="px-3 pt-2 shrink-0">
