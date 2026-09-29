@@ -1137,31 +1137,10 @@ fn resolve_config(app_handle: &AppHandle) -> Result<ResolvedConfig, String> {
     })
 }
 
-/// The Claude Code CLI's OAuth access token, if one is available and not
-/// expired. Sources, in order: the CLAUDE_CODE_OAUTH_TOKEN environment
-/// variable (headless setups), then the CLI's credentials file
-/// ($CLAUDE_CONFIG_DIR or ~/.claude, .credentials.json -> claudeAiOauth).
-/// Read-only; the token is only ever sent to the Anthropic API.
-fn claude_cli_oauth_token() -> Option<String> {
-    if let Ok(t) = std::env::var("CLAUDE_CODE_OAUTH_TOKEN") {
-        let t = t.trim().to_string();
-        if !t.is_empty() {
-            return Some(t);
-        }
-    }
-
-    let config_dir = std::env::var("CLAUDE_CONFIG_DIR")
-        .ok()
-        .filter(|s| !s.trim().is_empty())
-        .map(std::path::PathBuf::from)
-        .or_else(|| {
-            std::env::var("HOME")
-                .ok()
-                .or_else(|| std::env::var("USERPROFILE").ok())
-                .map(|h| std::path::PathBuf::from(h).join(".claude"))
-        })?;
-    let text = std::fs::read_to_string(config_dir.join(".credentials.json")).ok()?;
-    let v: Value = serde_json::from_str(&text).ok()?;
+/// Extract an unexpired access token from Claude Code's credentials JSON
+/// (the payload of .credentials.json, and of the macOS Keychain entry).
+fn token_from_credentials_json(text: &str) -> Option<String> {
+    let v: Value = serde_json::from_str(text).ok()?;
     let oauth = v.get("claudeAiOauth")?;
     let token = oauth.get("accessToken")?.as_str()?.trim().to_string();
     if token.is_empty() {
@@ -1181,10 +1160,75 @@ fn claude_cli_oauth_token() -> Option<String> {
     Some(token)
 }
 
+/// macOS: newer Claude Code versions keep the credentials in the login
+/// Keychain (service "Claude Code-credentials") instead of a file. Reading it
+/// triggers a one-time macOS permission prompt for RapidRAW; "Always Allow"
+/// silences it for good. Only called after the env var and file both miss.
+#[cfg(target_os = "macos")]
+fn keychain_credentials_json() -> Option<String> {
+    let out = std::process::Command::new("security")
+        .args(["find-generic-password", "-s", "Claude Code-credentials", "-w"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let text = String::from_utf8(out.stdout).ok()?;
+    let text = text.trim().to_string();
+    if text.is_empty() { None } else { Some(text) }
+}
+
+/// The Claude Code CLI's OAuth access token, if one is available and not
+/// expired. Sources, in order: the CLAUDE_CODE_OAUTH_TOKEN environment
+/// variable (headless setups), the CLI's credentials file
+/// ($CLAUDE_CONFIG_DIR or ~/.claude, .credentials.json -> claudeAiOauth),
+/// and on macOS the login Keychain the newer CLI versions use.
+/// Read-only; the token is only ever sent to the Anthropic API.
+fn claude_cli_oauth_token() -> Option<String> {
+    if let Ok(t) = std::env::var("CLAUDE_CODE_OAUTH_TOKEN") {
+        let t = t.trim().to_string();
+        if !t.is_empty() {
+            return Some(t);
+        }
+    }
+
+    let config_dir = std::env::var("CLAUDE_CONFIG_DIR")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            std::env::var("HOME")
+                .ok()
+                .or_else(|| std::env::var("USERPROFILE").ok())
+                .map(|h| std::path::PathBuf::from(h).join(".claude"))
+        });
+    if let Some(dir) = config_dir {
+        if let Ok(text) = std::fs::read_to_string(dir.join(".credentials.json")) {
+            if let Some(token) = token_from_credentials_json(&text) {
+                return Some(token);
+            }
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    if let Some(text) = keychain_credentials_json() {
+        if let Some(token) = token_from_credentials_json(&text) {
+            log::info!("[assistant] Claude Code OAuth token read from the macOS Keychain");
+            return Some(token);
+        }
+    }
+
+    None
+}
+
 /// Live model list through the Claude Code OAuth token. None on any failure —
 /// the caller falls back to a curated list.
 async fn fetch_models_via_cli_oauth() -> Option<Vec<String>> {
-    let token = claude_cli_oauth_token()?;
+    // The macOS Keychain read can block on a permission prompt, and the file
+    // read is sync I/O either way — keep both off the async runtime's workers.
+    let token = tauri::async_runtime::spawn_blocking(claude_cli_oauth_token)
+        .await
+        .ok()??;
     let base = std::env::var("ANTHROPIC_BASE_URL")
         .ok()
         .filter(|s| !s.trim().is_empty())
@@ -1464,5 +1508,39 @@ mod needs_image_tests {
         assert!(!parse_assistant_content(r#"{"reply":"done","adjustments":{"exposure":0.5}}"#).needs_image);
         assert!(!parse_assistant_content(r#"{"reply":"x","needsImage":"yes"}"#).needs_image);
         assert!(!parse_assistant_content("plain text reply").needs_image);
+    }
+
+    #[test]
+    fn credentials_json_token_extraction() {
+        let future_ms = (std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64)
+            + 3_600_000;
+        // Valid, unexpired token (the file and Keychain payloads share this shape).
+        let good = format!(
+            r#"{{"claudeAiOauth":{{"accessToken":"sk-ant-oat01-abc","expiresAt":{},"scopes":["user:inference"]}}}}"#,
+            future_ms
+        );
+        assert_eq!(
+            token_from_credentials_json(&good).as_deref(),
+            Some("sk-ant-oat01-abc")
+        );
+
+        // Expired tokens are skipped rather than sent.
+        let expired =
+            r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-old","expiresAt":1000}}"#;
+        assert!(token_from_credentials_json(expired).is_none());
+
+        // No expiry field means the token is trusted as-is.
+        let no_expiry = r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-x"}}"#;
+        assert!(token_from_credentials_json(no_expiry).is_some());
+
+        // Wrong shape (e.g. a credentials file with only mcpOAuth) yields None.
+        assert!(token_from_credentials_json(r#"{"mcpOAuth":{}}"#).is_none());
+        assert!(token_from_credentials_json("not json").is_none());
+        assert!(
+            token_from_credentials_json(r#"{"claudeAiOauth":{"accessToken":"  "}}"#).is_none()
+        );
     }
 }

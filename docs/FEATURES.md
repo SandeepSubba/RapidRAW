@@ -89,7 +89,8 @@ and dated.
 - **OCR & metadata extraction** through cloud vision models.
 - **Model picker that keeps up** — the model list refreshes from the provider
   (live `/models` for OpenAI/Anthropic/LM Studio; for Claude Code the CLI's
-  own OAuth login is reused read-only against the Anthropic models API, so
+  own OAuth login is reused read-only against the Anthropic models API —
+  from the CLI's credentials file, or on macOS from the login Keychain — so
   the list stays current by itself, with a maintained fallback list when the
   token isn't available), and a free-text field accepts **any model ID** the
   day it ships. A **Thinking** level (Off/Low/Medium/High) enables extended
