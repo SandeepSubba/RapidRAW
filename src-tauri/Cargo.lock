@@ -79,6 +79,7 @@ dependencies = [
  "webkit2gtk",
  "webp",
  "wgpu",
+ "zune-jpeg",
 ]
 
 [[package]]

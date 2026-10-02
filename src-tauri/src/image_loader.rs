@@ -424,6 +424,161 @@ fn linearize_embedded_preview(preview: DynamicImage) -> DynamicImage {
     DynamicImage::ImageRgb32F(linear_preview)
 }
 
+/// Decodes a CMYK JPEG or TIFF through its embedded press profile. `None`
+/// means "not that kind of file" (not CMYK, no profile, or a LUT shape the
+/// parser doesn't cover) and the caller falls through to the generic decoder,
+/// whose naive ink inversion is the pre-existing behaviour.
+fn try_decode_color_managed_cmyk(bytes: &[u8]) -> Option<DynamicImage> {
+    match image::guess_format(bytes).ok()? {
+        image::ImageFormat::Jpeg => decode_cmyk_jpeg(bytes),
+        image::ImageFormat::Tiff => decode_cmyk_tiff(bytes),
+        _ => None,
+    }
+}
+
+fn cmyk_inks_to_rgb32f(
+    width: u32,
+    height: u32,
+    inks: impl Fn(&[u8]) -> [f32; 4] + Sync,
+    samples: &[u8],
+    transform: &crate::icc::CmykTransform,
+) -> image::Rgb32FImage {
+    use rayon::prelude::*;
+
+    let mut out = image::Rgb32FImage::new(width, height);
+    let pixels: &mut [f32] = out.as_mut();
+    pixels
+        .par_chunks_exact_mut(3)
+        .zip(samples.par_chunks_exact(4))
+        .for_each(|(pixel, stored)| {
+            pixel.copy_from_slice(&transform.to_srgb(inks(stored)));
+        });
+    out
+}
+
+fn decode_cmyk_jpeg(bytes: &[u8]) -> Option<DynamicImage> {
+    use zune_jpeg::JpegDecoder;
+    use zune_jpeg::zune_core::bytestream::ZCursor;
+    use zune_jpeg::zune_core::colorspace::ColorSpace;
+    use zune_jpeg::zune_core::options::DecoderOptions;
+
+    let options = DecoderOptions::default()
+        .set_strict_mode(false)
+        .set_max_width(usize::MAX)
+        .set_max_height(usize::MAX);
+    let mut decoder = JpegDecoder::new_with_options(ZCursor::new(bytes), options);
+    decoder.decode_headers().ok()?;
+    let input_colorspace = decoder.input_colorspace()?;
+    if !matches!(input_colorspace, ColorSpace::CMYK | ColorSpace::YCCK) {
+        return None;
+    }
+    let transform = crate::icc::parse_cmyk_profile(&decoder.icc_profile()?)?;
+
+    // Requesting the input colorspace back gives the raw 4-component samples
+    // instead of the decoder's built-in naive RGB conversion.
+    decoder.set_options(decoder.options().jpeg_set_out_colorspace(input_colorspace));
+    let samples = decoder.decode().ok()?;
+    let (width, height) = decoder.dimensions()?;
+    if samples.len() < width * height * 4 {
+        return None;
+    }
+
+    // Adobe-convention JPEGs store inverted ink (255 = no ink); YCCK addition-
+    // ally runs CMY through the YCbCr transform (BT.601, like the decoder).
+    let image = if input_colorspace == ColorSpace::CMYK {
+        cmyk_inks_to_rgb32f(
+            width as u32,
+            height as u32,
+            |stored| {
+                [
+                    1.0 - stored[0] as f32 / 255.0,
+                    1.0 - stored[1] as f32 / 255.0,
+                    1.0 - stored[2] as f32 / 255.0,
+                    1.0 - stored[3] as f32 / 255.0,
+                ]
+            },
+            &samples,
+            &transform,
+        )
+    } else {
+        cmyk_inks_to_rgb32f(
+            width as u32,
+            height as u32,
+            |stored| {
+                let y = stored[0] as f32;
+                let cb = stored[1] as f32 - 128.0;
+                let cr = stored[2] as f32 - 128.0;
+                let r = (y + 1.402 * cr).clamp(0.0, 255.0);
+                let g = (y - 0.344_136 * cb - 0.714_136 * cr).clamp(0.0, 255.0);
+                let b = (y + 1.772 * cb).clamp(0.0, 255.0);
+                [
+                    1.0 - r / 255.0,
+                    1.0 - g / 255.0,
+                    1.0 - b / 255.0,
+                    1.0 - stored[3] as f32 / 255.0,
+                ]
+            },
+            &samples,
+            &transform,
+        )
+    };
+    Some(DynamicImage::ImageRgb32F(image))
+}
+
+fn decode_cmyk_tiff(bytes: &[u8]) -> Option<DynamicImage> {
+    use rayon::prelude::*;
+    use tiff::decoder::{Decoder, DecodingResult, Limits};
+    use tiff::tags::Tag;
+
+    let mut decoder = Decoder::new(Cursor::new(bytes))
+        .ok()?
+        .with_limits(Limits::unlimited());
+    if !matches!(
+        decoder.colortype().ok()?,
+        tiff::ColorType::CMYK(8) | tiff::ColorType::CMYK(16)
+    ) {
+        return None;
+    }
+    let profile = decoder.get_tag_u8_vec(Tag::IccProfile).ok()?;
+    let transform = crate::icc::parse_cmyk_profile(&profile)?;
+    let (width, height) = decoder.dimensions().ok()?;
+    let pixel_count = width as usize * height as usize;
+
+    // TIFF stores true ink coverage (0 = no ink), no Adobe inversion.
+    let mut out = image::Rgb32FImage::new(width, height);
+    let pixels: &mut [f32] = out.as_mut();
+    match decoder.read_image().ok()? {
+        DecodingResult::U8(samples) if samples.len() >= pixel_count * 4 => {
+            pixels
+                .par_chunks_exact_mut(3)
+                .zip(samples.par_chunks_exact(4))
+                .for_each(|(pixel, ink)| {
+                    pixel.copy_from_slice(&transform.to_srgb([
+                        ink[0] as f32 / 255.0,
+                        ink[1] as f32 / 255.0,
+                        ink[2] as f32 / 255.0,
+                        ink[3] as f32 / 255.0,
+                    ]));
+                });
+        }
+        DecodingResult::U16(samples) if samples.len() >= pixel_count * 4 => {
+            pixels
+                .par_chunks_exact_mut(3)
+                .zip(samples.par_chunks_exact(4))
+                .for_each(|(pixel, ink)| {
+                    pixel.copy_from_slice(&transform.to_srgb([
+                        ink[0] as f32 / 65535.0,
+                        ink[1] as f32 / 65535.0,
+                        ink[2] as f32 / 65535.0,
+                        ink[3] as f32 / 65535.0,
+                    ]));
+                });
+        }
+        _ => return None,
+    }
+    Some(DynamicImage::ImageRgb32F(out))
+}
+
 pub fn load_image_with_orientation(
     bytes: &[u8],
     cancel_token: Option<(Arc<AtomicUsize>, usize)>,
@@ -438,22 +593,30 @@ pub fn load_image_with_orientation(
     };
 
     let cursor = Cursor::new(bytes);
-    let mut reader = ImageReader::new(cursor.clone())
-        .with_guessed_format()
-        .context("Failed to guess image format")?;
-
-    reader.no_limits();
-
     check_cancel()?;
 
     // Decode through the decoder (not `reader.decode()`) so the embedded ICC
     // profile survives; the pipeline assumes sRGB, so wide-gamut inputs
     // (Adobe RGB, ProPhoto, P3) must be converted or they render desaturated.
-    let mut decoder = reader
-        .into_decoder()
-        .context("Failed to create image decoder")?;
-    let icc_profile = decoder.icc_profile().ok().flatten();
-    let image = DynamicImage::from_decoder(decoder).context("Failed to decode image")?;
+    // Profiled CMYK files take their own path, since the generic decoders only
+    // expose a naive, unmanaged RGB conversion of the ink values.
+    let (image, icc_profile) = match try_decode_color_managed_cmyk(bytes) {
+        Some(image) => (image, None),
+        None => {
+            let mut reader = ImageReader::new(cursor.clone())
+                .with_guessed_format()
+                .context("Failed to guess image format")?;
+            reader.no_limits();
+            check_cancel()?;
+            let mut decoder = reader
+                .into_decoder()
+                .context("Failed to create image decoder")?;
+            let icc_profile = decoder.icc_profile().ok().flatten();
+            let image =
+                DynamicImage::from_decoder(decoder).context("Failed to decode image")?;
+            (image, icc_profile)
+        }
+    };
     check_cancel()?;
 
     let oriented_image = {

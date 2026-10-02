@@ -219,7 +219,13 @@ and dated.
   Adobe RGB, ProPhoto, Display P3 or any other matrix/TRC working space are
   converted to sRGB at decode time instead of having their numbers read as sRGB
   (which rendered them desaturated, and tonally wrong for gamma-1.8 spaces).
-  Untagged, sRGB-tagged and LUT-profile files pass through unchanged.
+  Untagged and sRGB-tagged files pass through unchanged.
+- **CMYK JPEG/TIFF rendered through their press profile** — the embedded CMYK
+  profile's A2B LUT (SWOP/FOGRA-class v2 `mft1`/`mft2`, Lab or XYZ PCS) is
+  evaluated per pixel instead of the decoders' naive ink inversion, which
+  rendered neon primaries and wrong grays. Adobe-inverted CMYK and YCCK JPEGs
+  and true-ink TIFFs (8- and 16-bit) are all handled; untagged CMYK files keep
+  the old naive conversion.
 - **sRGB ICC profile embedded in JPEG exports** — files are colour-tagged instead of
   leaving every browser, editor, and phone gallery to guess. The pipeline already
   renders sRGB, so this states what is true of the pixels; nothing is converted.
