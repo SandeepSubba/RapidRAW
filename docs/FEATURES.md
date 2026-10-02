@@ -215,6 +215,11 @@ and dated.
 
 ## Export
 
+- **Embedded ICC profiles honoured on import** — JPEG/PNG/TIFF/WebP files tagged
+  Adobe RGB, ProPhoto, Display P3 or any other matrix/TRC working space are
+  converted to sRGB at decode time instead of having their numbers read as sRGB
+  (which rendered them desaturated, and tonally wrong for gamma-1.8 spaces).
+  Untagged, sRGB-tagged and LUT-profile files pass through unchanged.
 - **sRGB ICC profile embedded in JPEG exports** — files are colour-tagged instead of
   leaving every browser, editor, and phone gallery to guess. The pipeline already
   renders sRGB, so this states what is true of the pixels; nothing is converted.

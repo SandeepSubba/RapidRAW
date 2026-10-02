@@ -12,7 +12,7 @@ use crate::mask_generation::{MaskDefinition, SubMask, generate_mask_bitmap};
 use anyhow::{Context, Result, anyhow};
 use base64::{Engine as _, engine::general_purpose};
 use exif::{Reader as ExifReader, Tag};
-use image::{DynamicImage, GenericImageView, ImageReader, imageops};
+use image::{DynamicImage, GenericImageView, ImageDecoder, ImageReader, imageops};
 use rawler::Orientation;
 use rayon::prelude::*;
 use serde::Deserialize;
@@ -446,7 +446,14 @@ pub fn load_image_with_orientation(
 
     check_cancel()?;
 
-    let image = reader.decode().context("Failed to decode image")?;
+    // Decode through the decoder (not `reader.decode()`) so the embedded ICC
+    // profile survives; the pipeline assumes sRGB, so wide-gamut inputs
+    // (Adobe RGB, ProPhoto, P3) must be converted or they render desaturated.
+    let mut decoder = reader
+        .into_decoder()
+        .context("Failed to create image decoder")?;
+    let icc_profile = decoder.icc_profile().ok().flatten();
+    let image = DynamicImage::from_decoder(decoder).context("Failed to decode image")?;
     check_cancel()?;
 
     let oriented_image = {
@@ -466,7 +473,15 @@ pub fn load_image_with_orientation(
         }
     };
 
-    Ok(DynamicImage::ImageRgb32F(oriented_image.to_rgb32f()))
+    let mut rgb = oriented_image.to_rgb32f();
+    if let Some(profile) = icc_profile
+        && let Some(transform) = crate::icc::parse_input_profile(&profile)
+    {
+        check_cancel()?;
+        crate::icc::transform_to_srgb(&mut rgb, &transform);
+    }
+
+    Ok(DynamicImage::ImageRgb32F(rgb))
 }
 
 pub fn composite_patches_on_image(
