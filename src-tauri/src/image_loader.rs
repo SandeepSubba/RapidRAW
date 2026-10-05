@@ -636,7 +636,14 @@ pub fn load_image_with_orientation(
         }
     };
 
-    let mut rgb = oriented_image.to_rgb32f();
+    // Alpha has nowhere to go in the Rgb32F pipeline: `to_rgb32f` just drops
+    // the channel, so transparent regions showed whatever RGB the file stored
+    // there — usually black. Composite over white instead.
+    let mut rgb = if oriented_image.color().has_alpha() {
+        flatten_alpha_over_white(&oriented_image)
+    } else {
+        oriented_image.to_rgb32f()
+    };
     if let Some(profile) = icc_profile
         && let Some(transform) = crate::icc::parse_input_profile(&profile)
     {
@@ -645,6 +652,26 @@ pub fn load_image_with_orientation(
     }
 
     Ok(DynamicImage::ImageRgb32F(rgb))
+}
+
+/// Straight-alpha composite onto a white background, in the image's own
+/// (encoded) space — white stays white through any later profile conversion.
+fn flatten_alpha_over_white(image: &DynamicImage) -> image::Rgb32FImage {
+    use rayon::prelude::*;
+
+    let rgba = image.to_rgba32f();
+    let mut flattened = image::Rgb32FImage::new(rgba.width(), rgba.height());
+    let pixels: &mut [f32] = flattened.as_mut();
+    pixels
+        .par_chunks_exact_mut(3)
+        .zip(rgba.as_raw().par_chunks_exact(4))
+        .for_each(|(rgb, rgba)| {
+            let alpha = rgba[3].clamp(0.0, 1.0);
+            for channel in 0..3 {
+                rgb[channel] = rgba[channel] * alpha + (1.0 - alpha);
+            }
+        });
+    flattened
 }
 
 pub fn composite_patches_on_image(

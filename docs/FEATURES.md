@@ -220,6 +220,9 @@ and dated.
   converted to sRGB at decode time instead of having their numbers read as sRGB
   (which rendered them desaturated, and tonally wrong for gamma-1.8 spaces).
   Untagged and sRGB-tagged files pass through unchanged.
+- **Transparency composited onto white** — PNG/TIFF/WebP alpha used to be
+  dropped at decode, so transparent regions rendered as whatever the file
+  stored underneath (usually black) in both the editor and the library.
 - **CMYK JPEG/TIFF rendered through their press profile** — the embedded CMYK
   profile's A2B LUT (SWOP/FOGRA-class v2 `mft1`/`mft2`, Lab or XYZ PCS) is
   evaluated per pixel instead of the decoders' naive ink inversion, which
@@ -246,13 +249,16 @@ and dated.
   If two images in a batch actually render the same name, the later ones get
   `_2`, `_3`, … so nothing is overwritten; templates that already produce unique
   names are left exactly as written.
-- **Edit in External Editor** (thumbnail context menu) — Lightroom-style round
-  trip: the current adjustments are rendered to a 16-bit or 8-bit TIFF, PNG or
-  JPEG (Settings → General, with a Browse… picker for the editor executable)
-  as `<name>-Edit.tif` beside the original, the configured editor is launched
-  with it (blank path = OS default app; macOS `.app` bundles via `open -a`),
-  and a save watcher refreshes the library automatically when the editor
-  writes the file — the edited copy appears next to the original.
+- **Edit in External Editor** (thumbnail and editor context menus) —
+  Lightroom-style round trip: the current adjustments are rendered to a 16-bit
+  or 8-bit TIFF, PNG or JPEG (Settings → General, with a Browse… picker for
+  the editor executable) as `<name>-Edit.tif` beside the original, the
+  configured editor is launched with it (blank path = OS default app; macOS
+  `.app` bundles via `open -a`), and a save watcher refreshes the library
+  automatically when the editor writes the file — the edited copy appears next
+  to the original. The original's rating, color label, keywords and
+  user-edited metadata fields carry over to the edited copy's sidecar
+  (adjustments don't — they're baked into the rendered file).
 
 ## Library & metadata
 

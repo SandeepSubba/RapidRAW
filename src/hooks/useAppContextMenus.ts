@@ -228,6 +228,24 @@ export function useAppContextMenus(props: UseAppContextMenusProps) {
     [albumIcons, t],
   );
 
+  const handleStartExternalEdit = useCallback(
+    (path: string) => {
+      toast.info(t('contextMenus.toasts.externalEditRendering', 'Rendering for the external editor…'));
+      invoke<{ outputPath: string; editor: string }>(Invokes.StartExternalEdit, { path })
+        .then((res) => {
+          const name = res.outputPath.split(/[\\/]/).pop();
+          toast.success(
+            t('contextMenus.toasts.externalEditOpened', 'Opened {{name}} in {{editor}} — saves appear in the library automatically.', {
+              name,
+              editor: res.editor,
+            }),
+          );
+        })
+        .catch((err) => toast.error(String(err)));
+    },
+    [t],
+  );
+
   const handleEditorContextMenu = useCallback(
     (event: any) => {
       event.preventDefault();
@@ -249,6 +267,11 @@ export function useAppContextMenus(props: UseAppContextMenusProps) {
           label: t('contextMenus.editor.exportImage'),
           icon: FileInput,
           onClick: () => setPanel(Panel.Export),
+        },
+        {
+          label: t('contextMenus.thumbnail.editExternal', 'Edit in External Editor'),
+          icon: ExternalLink,
+          onClick: () => handleStartExternalEdit(selectedImage.path),
         },
         { type: OPTION_SEPARATOR },
         { label: t('contextMenus.editor.undo'), icon: Undo, onClick: undo, disabled: !canUndo },
@@ -410,6 +433,7 @@ export function useAppContextMenus(props: UseAppContextMenusProps) {
       handleRate,
       handleSetColorLabel,
       handleTagsChanged,
+      handleStartExternalEdit,
       showContextMenu,
       t,
     ],
@@ -890,22 +914,7 @@ export function useAppContextMenus(props: UseAppContextMenusProps) {
           disabled: !isSingleSelection,
           icon: ExternalLink,
           label: t('contextMenus.thumbnail.editExternal', 'Edit in External Editor'),
-          onClick: () => {
-            toast.info(t('contextMenus.toasts.externalEditRendering', 'Rendering for the external editor…'));
-            invoke<{ outputPath: string; editor: string }>(Invokes.StartExternalEdit, {
-              path: finalSelection[0],
-            })
-              .then((res) => {
-                const name = res.outputPath.split(/[\\/]/).pop();
-                toast.success(
-                  t('contextMenus.toasts.externalEditOpened', 'Opened {{name}} in {{editor}} — saves appear in the library automatically.', {
-                    name,
-                    editor: res.editor,
-                  }),
-                );
-              })
-              .catch((err) => toast.error(String(err)));
-          },
+          onClick: () => handleStartExternalEdit(finalSelection[0]),
         },
         {
           label: resetLabel,
@@ -938,6 +947,7 @@ export function useAppContextMenus(props: UseAppContextMenusProps) {
       handleSetColorLabel,
       handleTagsChanged,
       handleResetAdjustments,
+      handleStartExternalEdit,
       showContextMenu,
       props,
       t,

@@ -2250,6 +2250,29 @@ pub async fn start_external_edit(
     }
 
     let output_str = output.to_string_lossy().to_string();
+
+    // The -Edit file is the same photograph, so its library data must survive
+    // the round-trip: copy the rating, tags (keywords and the color label) and
+    // the user-editable metadata fields into a sidecar for the new file.
+    // Adjustments stay empty — they are baked into the rendered pixels.
+    let source_meta = exif_processing::load_sidecar(&parse_virtual_path(&path).1);
+    if source_meta.rating != 0 || source_meta.tags.is_some() || source_meta.exif.is_some() {
+        let edit_meta = crate::image_processing::ImageMetadata {
+            adjustments: Value::Null,
+            ..source_meta
+        };
+        let edit_sidecar = parse_virtual_path(&output_str).1;
+        if let Ok(json) = serde_json::to_string_pretty(&edit_meta) {
+            if let Err(error) = fs::write(&edit_sidecar, json) {
+                log::warn!(
+                    "Couldn't carry metadata over to '{}': {}",
+                    edit_sidecar.display(),
+                    error
+                );
+            }
+        }
+    }
+
     let editor_label = launch_external_editor(&editor, &output_str)?;
     spawn_external_edit_watcher(app_handle, output_str.clone());
 
