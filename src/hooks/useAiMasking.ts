@@ -3,10 +3,11 @@ import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'react-toastify';
 import { useEditorStore } from '../store/useEditorStore';
 import { useEditorActions, debouncedSetHistory } from './useEditorActions';
+import { useProcessStore } from '../store/useProcessStore';
+import { useCloudStore } from '../store/useCloudStore';
 import { Adjustments, AiPatch, MaskContainer, Coord } from '../utils/adjustments';
 import { SubMask } from '../components/panel/right/Masks';
 import { Invokes } from '../components/ui/AppProperties';
-import { useAuth } from '@clerk/react';
 
 export const getTransformAdjustments = (adj: Adjustments) => ({
   transformDistortion: adj.transformDistortion,
@@ -31,7 +32,9 @@ export const getTransformAdjustments = (adj: Adjustments) => ({
 export function useAiMasking() {
   const { setAdjustments } = useEditorActions();
   const setEditor = useEditorStore((state) => state.setEditor);
-  const { getToken } = useAuth();
+  const getToken = useCloudStore((s) => s.getToken);
+  const registerAiTask = useProcessStore((state) => state.registerAiTask);
+  const unregisterAiTask = useProcessStore((state) => state.unregisterAiTask);
 
   // Write the async tail of a generation into the CURRENT history entry instead of
   // pushing a new one, so "create AI mask" (creation + bitmap landing seconds later)
@@ -60,23 +63,43 @@ export function useAiMasking() {
     [amendAdjustments],
   );
 
+  const handleCancelAiTask = useCallback(
+    async (taskId: string) => {
+      try {
+        await invoke(Invokes.CancelAiTask, { taskId });
+      } catch (e) {
+        console.error('Failed to cancel AI task:', e);
+      } finally {
+        unregisterAiTask(taskId);
+        setAdjustments((prev: Adjustments) => ({
+          ...prev,
+          aiPatches: (prev.aiPatches || []).map((p: AiPatch) =>
+            p.id === taskId || p.subMasks.some((sm) => sm.id === taskId) ? { ...p, isLoading: false } : p,
+          ),
+        }));
+      }
+    },
+    [unregisterAiTask, setAdjustments],
+  );
+
   const handleDirectPatch = useCallback(
     async (subMaskId: string, sourceX: number, sourceY: number) => {
       const { selectedImage, adjustments, patchesSentToBackend } = useEditorStore.getState();
       if (!selectedImage?.path) return;
 
-      const patchId = adjustments.aiPatches.find((p: AiPatch) =>
+      const patchId = adjustments.aiPatches?.find((p: AiPatch) =>
         p.subMasks.some((sm: SubMask) => sm.id === subMaskId),
       )?.id;
       if (!patchId) return;
 
+      patchesSentToBackend.add(patchId);
       setAdjustments((prev: Partial<Adjustments>) => ({
         ...prev,
         aiPatches: prev.aiPatches?.map((p: AiPatch) => (p.id === patchId ? { ...p, isLoading: true } : p)),
       }));
 
       try {
-        const patchDefinitionForBackend = adjustments.aiPatches.find((p: AiPatch) => p.id === patchId);
+        const patchDefinitionForBackend = adjustments.aiPatches?.find((p: AiPatch) => p.id === patchId);
         const isLiquify = patchDefinitionForBackend?.subMasks.some((sm: SubMask) => sm.type === 'liquify');
         const isRetouch = patchDefinitionForBackend?.subMasks.some((sm: SubMask) => sm.type === 'retouch');
         const command = isLiquify
@@ -101,7 +124,11 @@ export function useAiMasking() {
           ),
         }));
       } catch (err: any) {
-        toast.error(`Patch Generation Failed: ${err.message || String(err)}`);
+        patchesSentToBackend.delete(patchId);
+
+        if (!String(err).includes('cancelled')) {
+          toast.error(`Patch Generation Failed: ${err.message || String(err)}`);
+        }
         setAdjustments((prev: Partial<Adjustments>) => ({
           ...prev,
           aiPatches: prev.aiPatches?.map((p: AiPatch) => (p.id === patchId ? { ...p, isLoading: false } : p)),
@@ -113,21 +140,20 @@ export function useAiMasking() {
 
   const handleGenerativeReplace = useCallback(
     async (patchId: string, prompt: string, useFastInpaint: boolean) => {
-      const { selectedImage, adjustments, isGeneratingAi, patchesSentToBackend } = useEditorStore.getState();
-      if (!selectedImage?.path || isGeneratingAi) return;
+      const { selectedImage, adjustments, patchesSentToBackend } = useEditorStore.getState();
+      if (!selectedImage?.path) return;
 
-      const patch: AiPatch | undefined = adjustments.aiPatches.find((p: AiPatch) => p.id === patchId);
+      const patch: AiPatch | undefined = adjustments.aiPatches?.find((p: AiPatch) => p.id === patchId);
       if (!patch) return;
 
       const patchDefinition = { ...patch, prompt };
       const token = await getToken();
 
+      registerAiTask(patchId, 'inpaint');
       setAdjustments((prev: Adjustments) => ({
         ...prev,
         aiPatches: prev.aiPatches.map((p: AiPatch) => (p.id === patchId ? { ...p, isLoading: true, prompt } : p)),
       }));
-
-      setEditor({ isGeneratingAi: true });
 
       try {
         const newPatchDataJson: any = await invoke(Invokes.InvokeGenerativeReplaseWithMaskDef, {
@@ -136,6 +162,7 @@ export function useAiMasking() {
           path: selectedImage.path,
           useFastInpaint: useFastInpaint,
           token: token || null,
+          taskId: patchId,
         });
 
         const newPatchData = JSON.parse(newPatchDataJson);
@@ -155,31 +182,36 @@ export function useAiMasking() {
           ),
         }));
         setEditor({ activeAiPatchContainerId: null, activeAiSubMaskId: null });
-      } catch (err) {
-        toast.error(`AI Replace Failed: ${err}`);
+        if (!useFastInpaint) {
+          useCloudStore.getState().fetchUsage();
+        }
+      } catch (err: any) {
+        if (!String(err).includes('cancelled')) {
+          toast.error(`AI Replace Failed: ${err}`);
+        }
         amendAdjustments((prev: Adjustments) => ({
           ...prev,
           aiPatches: prev.aiPatches.map((p: AiPatch) => (p.id === patchId ? { ...p, isLoading: false } : p)),
         }));
       } finally {
-        setEditor({ isGeneratingAi: false });
+        unregisterAiTask(patchId);
       }
     },
-    [setAdjustments, amendAdjustments, setEditor, getToken],
+    [setAdjustments, amendAdjustments, setEditor, getToken, registerAiTask, unregisterAiTask],
   );
 
   const handleQuickErase = useCallback(
     async (subMaskId: string | null, startPoint: Coord, endPoint: Coord) => {
-      const { selectedImage, adjustments, isGeneratingAi, patchesSentToBackend } = useEditorStore.getState();
-      if (!selectedImage?.path || isGeneratingAi) return;
+      const { selectedImage, adjustments, patchesSentToBackend } = useEditorStore.getState();
+      if (!selectedImage?.path) return;
       const token = await getToken();
 
-      const patchId = adjustments.aiPatches.find((p: AiPatch) =>
+      const patchId = adjustments.aiPatches?.find((p: AiPatch) =>
         p.subMasks.some((sm: SubMask) => sm.id === subMaskId),
       )?.id;
       if (!patchId) return;
 
-      setEditor({ isGeneratingAi: true });
+      registerAiTask(patchId, 'inpaint');
       setAdjustments((prev: Partial<Adjustments>) => ({
         ...prev,
         aiPatches: prev.aiPatches?.map((p: AiPatch) => (p.id === patchId ? { ...p, isLoading: true } : p)),
@@ -196,6 +228,8 @@ export function useAiMasking() {
           path: selectedImage.path,
           rotation: adjustments.rotation,
           startPoint: [startPoint.x, startPoint.y],
+          skipRefinement: true,
+          taskId: patchId,
         });
 
         const subMaskToUpdate = adjustments.aiPatches
@@ -223,6 +257,7 @@ export function useAiMasking() {
           path: selectedImage.path,
           useFastInpaint: true,
           token: token || null,
+          taskId: patchId,
         });
 
         const newPatchData = JSON.parse(newPatchDataJson);
@@ -245,16 +280,18 @@ export function useAiMasking() {
         }));
         setEditor({ activeAiPatchContainerId: null, activeAiSubMaskId: null });
       } catch (err: any) {
-        toast.error(`Quick Erase Failed: ${err.message || String(err)}`);
+        if (!String(err).includes('cancelled')) {
+          toast.error(`Quick Erase Failed: ${err.message || String(err)}`);
+        }
         amendAdjustments((prev: Adjustments) => ({
           ...prev,
           aiPatches: prev.aiPatches?.map((p: AiPatch) => (p.id === patchId ? { ...p, isLoading: false } : p)),
         }));
       } finally {
-        setEditor({ isGeneratingAi: false });
+        unregisterAiTask(patchId);
       }
     },
-    [setAdjustments, amendAdjustments, setEditor, getToken],
+    [setAdjustments, amendAdjustments, setEditor, getToken, registerAiTask, unregisterAiTask],
   );
 
   const handleDeleteMaskContainer = useCallback(
@@ -298,10 +335,13 @@ export function useAiMasking() {
   const handleGenerateAiMask = async (subMaskId: string, startPoint: Coord, endPoint: Coord) => {
     const { selectedImage, adjustments, patchesSentToBackend } = useEditorStore.getState();
     if (!selectedImage?.path) return;
-    setEditor({ isGeneratingAiMask: true });
+    registerAiTask(subMaskId, 'subject');
 
     try {
       const transformAdjustments = getTransformAdjustments(adjustments);
+      const isInpaintMask = !!adjustments.aiPatches?.some((p: AiPatch) =>
+        p.subMasks.some((sm: SubMask) => sm.id === subMaskId),
+      );
       const newParameters = await invoke(Invokes.GenerateAiSubjectMask, {
         jsAdjustments: transformAdjustments,
         endPoint: [endPoint.x, endPoint.y],
@@ -311,25 +351,30 @@ export function useAiMasking() {
         path: selectedImage.path,
         rotation: adjustments.rotation,
         startPoint: [startPoint.x, startPoint.y],
+        skipRefinement: isInpaintMask,
+        taskId: subMaskId,
       });
 
-      const subMask = adjustments.aiPatches
-        ?.flatMap((p: AiPatch) => p.subMasks)
-        .find((sm: SubMask) => sm.id === subMaskId);
+      const subMask =
+        adjustments.masks?.flatMap((m: MaskContainer) => m.subMasks).find((sm: SubMask) => sm.id === subMaskId) ||
+        adjustments.aiPatches?.flatMap((p: AiPatch) => p.subMasks).find((sm: SubMask) => sm.id === subMaskId);
+
       const mergedParameters = { ...(subMask?.parameters || {}), ...newParameters };
       patchesSentToBackend.delete(subMaskId);
       updateSubMask(subMaskId, { parameters: mergedParameters });
     } catch (error) {
-      toast.error(`AI Mask Failed: ${error}`);
+      if (!String(error).includes('cancelled')) {
+        toast.error(`AI Mask Failed: ${error}`);
+      }
     } finally {
-      setEditor({ isGeneratingAiMask: false });
+      unregisterAiTask(subMaskId);
     }
   };
 
   const handleGenerateAiDepthMask = async (subMaskId: string, parameters: any) => {
     const { selectedImage, adjustments, patchesSentToBackend } = useEditorStore.getState();
     if (!selectedImage?.path) return;
-    setEditor({ isGeneratingAiMask: true });
+    registerAiTask(subMaskId, 'depth');
 
     try {
       const transformAdjustments = getTransformAdjustments(adjustments);
@@ -345,25 +390,29 @@ export function useAiMasking() {
         flipVertical: adjustments.flipVertical,
         orientationSteps: adjustments.orientationSteps,
         rotation: adjustments.rotation,
+        taskId: subMaskId,
       });
 
-      const subMask = adjustments.aiPatches
-        ?.flatMap((p: AiPatch) => p.subMasks)
-        .find((sm: SubMask) => sm.id === subMaskId);
+      const subMask =
+        adjustments.masks?.flatMap((m: MaskContainer) => m.subMasks).find((sm: SubMask) => sm.id === subMaskId) ||
+        adjustments.aiPatches?.flatMap((p: AiPatch) => p.subMasks).find((sm: SubMask) => sm.id === subMaskId);
+
       const mergedParameters = { ...(subMask?.parameters || {}), ...newParameters };
       patchesSentToBackend.delete(subMaskId);
       updateSubMask(subMaskId, { parameters: mergedParameters });
     } catch (error) {
-      toast.error(`AI Depth Mask Failed: ${error}`);
+      if (!String(error).includes('cancelled')) {
+        toast.error(`AI Depth Mask Failed: ${error}`);
+      }
     } finally {
-      setEditor({ isGeneratingAiMask: false });
+      unregisterAiTask(subMaskId);
     }
   };
 
   const handleGenerateAiForegroundMask = async (subMaskId: string) => {
     const { selectedImage, adjustments, patchesSentToBackend } = useEditorStore.getState();
     if (!selectedImage?.path) return;
-    setEditor({ isGeneratingAiMask: true });
+    registerAiTask(subMaskId, 'foreground');
 
     try {
       const transformAdjustments = getTransformAdjustments(adjustments);
@@ -373,25 +422,29 @@ export function useAiMasking() {
         flipVertical: adjustments.flipVertical,
         orientationSteps: adjustments.orientationSteps,
         rotation: adjustments.rotation,
+        taskId: subMaskId,
       });
 
-      const subMask = adjustments.aiPatches
-        ?.flatMap((p: AiPatch) => p.subMasks)
-        .find((sm: SubMask) => sm.id === subMaskId);
+      const subMask =
+        adjustments.masks?.flatMap((m: MaskContainer) => m.subMasks).find((sm: SubMask) => sm.id === subMaskId) ||
+        adjustments.aiPatches?.flatMap((p: AiPatch) => p.subMasks).find((sm: SubMask) => sm.id === subMaskId);
+
       const mergedParameters = { ...(subMask?.parameters || {}), ...newParameters };
       patchesSentToBackend.delete(subMaskId);
       updateSubMask(subMaskId, { parameters: mergedParameters });
     } catch (error) {
-      toast.error(`AI Mask Failed: ${error}`);
+      if (!String(error).includes('cancelled')) {
+        toast.error(`AI Foreground Mask Failed: ${error}`);
+      }
     } finally {
-      setEditor({ isGeneratingAiMask: false });
+      unregisterAiTask(subMaskId);
     }
   };
 
   const handleGenerateAiSkyMask = async (subMaskId: string) => {
     const { selectedImage, adjustments, patchesSentToBackend } = useEditorStore.getState();
     if (!selectedImage?.path) return;
-    setEditor({ isGeneratingAiMask: true });
+    registerAiTask(subMaskId, 'sky');
 
     try {
       const transformAdjustments = getTransformAdjustments(adjustments);
@@ -401,18 +454,22 @@ export function useAiMasking() {
         flipVertical: adjustments.flipVertical,
         orientationSteps: adjustments.orientationSteps,
         rotation: adjustments.rotation,
+        taskId: subMaskId,
       });
 
-      const subMask = adjustments.aiPatches
-        ?.flatMap((p: AiPatch) => p.subMasks)
-        .find((sm: SubMask) => sm.id === subMaskId);
+      const subMask =
+        adjustments.masks?.flatMap((m: MaskContainer) => m.subMasks).find((sm: SubMask) => sm.id === subMaskId) ||
+        adjustments.aiPatches?.flatMap((p: AiPatch) => p.subMasks).find((sm: SubMask) => sm.id === subMaskId);
+
       const mergedParameters = { ...(subMask?.parameters || {}), ...newParameters };
       patchesSentToBackend.delete(subMaskId);
       updateSubMask(subMaskId, { parameters: mergedParameters });
     } catch (error) {
-      toast.error(`AI Mask Failed: ${error}`);
+      if (!String(error).includes('cancelled')) {
+        toast.error(`AI Sky Mask Failed: ${error}`);
+      }
     } finally {
-      setEditor({ isGeneratingAiMask: false });
+      unregisterAiTask(subMaskId);
     }
   };
 
@@ -477,5 +534,6 @@ export function useAiMasking() {
     handleGenerateAiForegroundMask,
     handleGenerateAiSkyMask,
     handleGenerateAiFaceRegionMask,
+    handleCancelAiTask,
   };
 }

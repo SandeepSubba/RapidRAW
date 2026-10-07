@@ -35,8 +35,8 @@ use crate::gpu_processing;
 use crate::image_loader;
 use crate::image_processing::GpuContext;
 use crate::image_processing::{
-    Crop, ImageMetadata, apply_coarse_rotation, apply_cpu_default_raw_processing, apply_crop,
-    apply_flip, apply_geometry_warp, apply_rotation, auto_results_to_json,
+    Crop, ImageFlag, ImageMetadata, apply_coarse_rotation, apply_cpu_default_raw_processing,
+    apply_crop, apply_flip, apply_geometry_warp, apply_rotation, auto_results_to_json,
     get_all_adjustments_from_json, perform_auto_analysis,
 };
 use crate::mask_generation::MaskDefinition;
@@ -85,12 +85,21 @@ fn compute_thumbnail_cache_hash(path_str: &str, adjustments_bytes: &[u8]) -> Opt
     Some(hasher.finalize().to_hex().to_string())
 }
 
+struct ImageFileMetadata {
+    is_edited: bool,
+    is_negative: bool,
+    tags: Option<Vec<String>>,
+    rating: u8,
+    flag: Option<ImageFlag>,
+    is_raw: bool,
+}
+
 fn resolve_image_metadata(
     image_path: &Path,
     sidecar_path: &Path,
     enable_xmp_sync: bool,
     settings: &AppSettings,
-) -> (bool, bool, Option<Vec<String>>, u8) {
+) -> ImageFileMetadata {
     let mut metadata = crate::exif_processing::load_sidecar(sidecar_path);
 
     if enable_xmp_sync
@@ -105,20 +114,28 @@ fn resolve_image_metadata(
     let edited =
         crate::image_processing::is_image_edited(&metadata.adjustments, is_raw, tm_override);
     let negative = adjustments_is_negative(&metadata.adjustments);
-    (edited, negative, metadata.tags, metadata.rating)
+    ImageFileMetadata {
+        is_edited: edited,
+        is_negative: negative,
+        tags: metadata.tags,
+        rating: metadata.rating,
+        flag: metadata.flag,
+        is_raw,
+    }
 }
 
 fn emit_image_metadata_loaded(
     app_handle: &AppHandle,
     path: &str,
     rating: u8,
+    flag: Option<ImageFlag>,
     is_edited: bool,
     is_negative: bool,
     tags: &Option<Vec<String>>,
 ) {
     let _ = app_handle.emit(
         "image-metadata-loaded",
-        serde_json::json!({ "path": path, "rating": rating, "is_edited": is_edited, "is_negative": is_negative, "tags": tags }),
+        serde_json::json!({ "path": path, "rating": rating, "flag": flag, "is_edited": is_edited, "is_negative": is_negative, "tags": tags }),
     );
 }
 
@@ -171,7 +188,7 @@ pub fn start_metadata_workers(app_handle: tauri::AppHandle) {
                 let settings = load_settings(app_clone.clone()).unwrap_or_default();
                 let enable_xmp_sync = settings.enable_xmp_sync.unwrap_or(false);
 
-                let (is_edited, is_negative, tags, rating) = resolve_image_metadata(
+                let metadata = resolve_image_metadata(
                     &item.image_path,
                     &item.sidecar_path,
                     enable_xmp_sync,
@@ -181,10 +198,11 @@ pub fn start_metadata_workers(app_handle: tauri::AppHandle) {
                 emit_image_metadata_loaded(
                     &app_clone,
                     &item.virtual_path,
-                    rating,
-                    is_edited,
-                    is_negative,
-                    &tags,
+                    metadata.rating,
+                    metadata.flag,
+                    metadata.is_edited,
+                    metadata.is_negative,
+                    &metadata.tags,
                 );
 
                 manager_clone
@@ -280,10 +298,13 @@ pub struct ImageFile {
     is_edited: bool,
     is_negative: bool,
     rating: u8,
+    flag: Option<ImageFlag>,
     tags: Option<Vec<String>>,
     exif: Option<HashMap<String, String>>,
     is_virtual_copy: bool,
     is_cloud_placeholder: bool,
+    is_raw: bool,
+    group_id: Option<String>,
 }
 
 /// True when the sidecar has an enabled in-library negative conversion.
@@ -293,6 +314,89 @@ pub(crate) fn adjustments_is_negative(adjustments: &serde_json::Value) -> bool {
         .and_then(|nc| nc.get("enabled"))
         .and_then(|e| e.as_bool())
         .unwrap_or(false)
+}
+
+fn make_group_key(source_path: &Path) -> String {
+    let parent = source_path.parent().unwrap_or(Path::new(""));
+    let stem = source_path.file_stem().unwrap_or_default();
+    format!("{}/{}", parent.to_string_lossy(), stem.to_string_lossy())
+}
+
+fn assign_group_ids(files: &mut [ImageFile], settings: &crate::app_settings::AppSettings) {
+    let require_matching_exif = settings.require_matching_exif.unwrap_or(false);
+    let group_edited_files = settings.group_edited_files.unwrap_or(true);
+
+    #[derive(Clone)]
+    struct Candidate {
+        index: usize,
+        source_path: PathBuf,
+        key: String,
+    }
+
+    let candidates: Vec<Candidate> = files
+        .iter()
+        .enumerate()
+        .filter(|(_, file)| !file.is_virtual_copy && (group_edited_files || !file.is_edited))
+        .map(|(index, file)| {
+            let (source_path, _) = parse_virtual_path(&file.path);
+            let key = make_group_key(&source_path);
+            Candidate {
+                index,
+                source_path,
+                key,
+            }
+        })
+        .collect();
+
+    let mut stem_groups: HashMap<String, Vec<Candidate>> = HashMap::new();
+    for candidate in candidates {
+        stem_groups
+            .entry(candidate.key.clone())
+            .or_default()
+            .push(candidate);
+    }
+
+    if require_matching_exif {
+        let groupable_paths: Vec<PathBuf> = stem_groups
+            .values()
+            .filter(|candidates| candidates.len() >= 2)
+            .flat_map(|candidates| candidates.iter().map(|c| c.source_path.clone()))
+            .collect();
+        let exif_dates: HashMap<PathBuf, Option<chrono::DateTime<chrono::Utc>>> = groupable_paths
+            .par_iter()
+            .map(|p| {
+                (
+                    p.clone(),
+                    crate::exif_processing::try_get_exif_creation_date(p),
+                )
+            })
+            .collect();
+
+        stem_groups.retain(|_, candidates| {
+            if candidates.len() < 2 {
+                return false;
+            }
+            let first = exif_dates
+                .get(&candidates[0].source_path)
+                .copied()
+                .flatten();
+            if first.is_none() {
+                return false;
+            }
+            candidates
+                .iter()
+                .skip(1)
+                .all(|c| exif_dates.get(&c.source_path).copied().flatten() == first)
+        });
+    } else {
+        stem_groups.retain(|_, candidates| candidates.len() >= 2);
+    }
+
+    for (key, candidates) in stem_groups {
+        for candidate in candidates {
+            files[candidate.index].group_id = Some(key.clone());
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -484,7 +588,7 @@ pub fn list_images_in_dir(path: String, app_handle: AppHandle) -> Result<Vec<Ima
         })
         .collect();
 
-    let result_list: Vec<ImageFile> = tasks
+    let mut result_list: Vec<ImageFile> = tasks
         .into_par_iter()
         .flat_map(|(path_str, file_name, path_buf, sidecars)| {
             let modified = fs::metadata(&path_buf)
@@ -514,30 +618,39 @@ pub fn list_images_in_dir(path: String, app_handle: AppHandle) -> Result<Vec<Ima
                     && resolve_xmp_path(&path_buf)
                         .is_some_and(|p| crate::file_management::is_cloud_placeholder(&p));
 
-                let (is_edited, is_negative, tags, rating) =
-                    if crate::file_management::is_cloud_placeholder(&sidecar_path)
-                        || xmp_is_placeholder
-                    {
-                        enqueue_metadata(
-                            &app_handle,
-                            virtual_path.clone(),
-                            path_buf.clone(),
-                            sidecar_path.clone(),
-                        );
-                        (false, false, None, 0)
-                    } else {
-                        resolve_image_metadata(&path_buf, &sidecar_path, enable_xmp_sync, &settings)
-                    };
+                let metadata = if crate::file_management::is_cloud_placeholder(&sidecar_path)
+                    || xmp_is_placeholder
+                {
+                    enqueue_metadata(
+                        &app_handle,
+                        virtual_path.clone(),
+                        path_buf.clone(),
+                        sidecar_path.clone(),
+                    );
+                    ImageFileMetadata {
+                        is_edited: false,
+                        is_negative: false,
+                        tags: None,
+                        rating: 0,
+                        flag: None,
+                        is_raw: crate::formats::is_raw_file(&path_buf),
+                    }
+                } else {
+                    resolve_image_metadata(&path_buf, &sidecar_path, enable_xmp_sync, &settings)
+                };
 
                 file_results.push(ImageFile {
                     path: virtual_path,
                     modified,
-                    is_edited,
-                    is_negative,
-                    tags,
+                    is_edited: metadata.is_edited,
+                    is_negative: metadata.is_negative,
+                    tags: metadata.tags,
                     exif: None,
                     is_virtual_copy,
-                    rating,
+                    is_raw: metadata.is_raw,
+                    group_id: None,
+                    rating: metadata.rating,
+                    flag: metadata.flag,
                     is_cloud_placeholder,
                 });
             }
@@ -545,6 +658,8 @@ pub fn list_images_in_dir(path: String, app_handle: AppHandle) -> Result<Vec<Ima
             file_results
         })
         .collect();
+
+    assign_group_ids(&mut result_list, &settings);
 
     Ok(result_list)
 }
@@ -609,7 +724,7 @@ pub fn list_images_recursive(
         })
         .collect();
 
-    let result_list: Vec<ImageFile> = tasks
+    let mut result_list: Vec<ImageFile> = tasks
         .into_par_iter()
         .flat_map(|(path_str, file_name, path_buf, sidecars)| {
             let modified = fs::metadata(&path_buf)
@@ -639,30 +754,39 @@ pub fn list_images_recursive(
                     && resolve_xmp_path(&path_buf)
                         .is_some_and(|p| crate::file_management::is_cloud_placeholder(&p));
 
-                let (is_edited, is_negative, tags, rating) =
-                    if crate::file_management::is_cloud_placeholder(&sidecar_path)
-                        || xmp_is_placeholder
-                    {
-                        enqueue_metadata(
-                            &app_handle,
-                            virtual_path.clone(),
-                            path_buf.clone(),
-                            sidecar_path.clone(),
-                        );
-                        (false, false, None, 0)
-                    } else {
-                        resolve_image_metadata(&path_buf, &sidecar_path, enable_xmp_sync, &settings)
-                    };
+                let metadata = if crate::file_management::is_cloud_placeholder(&sidecar_path)
+                    || xmp_is_placeholder
+                {
+                    enqueue_metadata(
+                        &app_handle,
+                        virtual_path.clone(),
+                        path_buf.clone(),
+                        sidecar_path.clone(),
+                    );
+                    ImageFileMetadata {
+                        is_edited: false,
+                        is_negative: false,
+                        tags: None,
+                        rating: 0,
+                        flag: None,
+                        is_raw: crate::formats::is_raw_file(&path_buf),
+                    }
+                } else {
+                    resolve_image_metadata(&path_buf, &sidecar_path, enable_xmp_sync, &settings)
+                };
 
                 file_results.push(ImageFile {
                     path: virtual_path,
                     modified,
-                    is_edited,
-                    is_negative,
-                    tags,
+                    is_edited: metadata.is_edited,
+                    is_negative: metadata.is_negative,
+                    tags: metadata.tags,
                     exif: None,
                     is_virtual_copy,
-                    rating,
+                    is_raw: metadata.is_raw,
+                    group_id: None,
+                    rating: metadata.rating,
+                    flag: metadata.flag,
                     is_cloud_placeholder,
                 });
             }
@@ -670,6 +794,8 @@ pub fn list_images_recursive(
             file_results
         })
         .collect();
+
+    assign_group_ids(&mut result_list, &settings);
 
     Ok(result_list)
 }
@@ -949,6 +1075,7 @@ pub fn generate_thumbnail_data(
             .filter_map(|def| {
                 crate::get_cached_or_generate_mask(
                     &state,
+                    path_str,
                     def,
                     preview_w,
                     preview_h,
@@ -963,7 +1090,12 @@ pub fn generate_thumbnail_data(
             .collect();
 
         let tm_override = crate::image_processing::resolve_tonemapper_override(&settings, is_raw);
-        let gpu_adjustments = get_all_adjustments_from_json(&meta.adjustments, is_raw, tm_override);
+        let gpu_adjustments = get_all_adjustments_from_json(
+            &meta.adjustments,
+            is_raw,
+            crate::white_balance::as_shot_white_balance(&source_path_str),
+            tm_override,
+        );
         let lut_path = meta.adjustments["lutPath"].as_str();
         let lut = lut_path.and_then(|p| {
             let mut cache = state.lut_cache.lock().unwrap();
@@ -2912,22 +3044,40 @@ pub async fn apply_auto_adjustments_to_paths(
     Ok(())
 }
 
+fn update_metadata_for_paths(
+    paths: &[String],
+    app_handle: &AppHandle,
+    update: impl Fn(&mut ImageMetadata) + Sync,
+) {
+    let settings = load_settings(app_handle.clone()).unwrap_or_default();
+    let enable_xmp_sync = settings.enable_xmp_sync.unwrap_or(false);
+    let create_xmp_if_missing = settings.create_xmp_if_missing.unwrap_or(false);
+
+    paths.par_iter().for_each(|path| {
+        let (source_path, sidecar_path) = parse_virtual_path(path);
+
+        let mut metadata = crate::exif_processing::load_sidecar(&sidecar_path);
+
+        update(&mut metadata);
+
+        if let Ok(json_string) = serde_json::to_string_pretty(&metadata) {
+            let _ = std::fs::write(&sidecar_path, json_string);
+        }
+
+        if enable_xmp_sync {
+            sync_metadata_to_xmp(&source_path, &metadata, create_xmp_if_missing);
+        }
+    });
+}
+
 #[tauri::command]
 pub fn set_color_label_for_paths(
     paths: Vec<String>,
     color: Option<String>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
-    let settings = load_settings(app_handle.clone()).unwrap_or_default();
-    let enable_xmp_sync = settings.enable_xmp_sync.unwrap_or(false);
-    let create_xmp_if_missing = settings.create_xmp_if_missing.unwrap_or(false);
-
-    paths.par_iter().for_each(|path| {
-        let (_, sidecar_path) = parse_virtual_path(path);
-
-        let mut metadata = crate::exif_processing::load_sidecar(&sidecar_path);
-
-        let mut tags = metadata.tags.unwrap_or_default();
+    update_metadata_for_paths(&paths, &app_handle, |metadata| {
+        let mut tags = metadata.tags.take().unwrap_or_default();
         tags.retain(|tag| !tag.starts_with(COLOR_TAG_PREFIX));
 
         if let Some(c) = &color
@@ -2936,19 +3086,8 @@ pub fn set_color_label_for_paths(
             tags.push(format!("{}{}", COLOR_TAG_PREFIX, c));
         }
 
-        if tags.is_empty() {
-            metadata.tags = None;
-        } else {
+        if !tags.is_empty() {
             metadata.tags = Some(tags);
-        }
-
-        if let Ok(json_string) = serde_json::to_string_pretty(&metadata) {
-            let _ = std::fs::write(&sidecar_path, json_string);
-        }
-
-        if enable_xmp_sync {
-            let source_path = parse_virtual_path(path).0;
-            sync_metadata_to_xmp(&source_path, &metadata, create_xmp_if_missing);
         }
     });
 
@@ -2961,25 +3100,24 @@ pub fn set_rating_for_paths(
     rating: u8,
     app_handle: AppHandle,
 ) -> Result<(), String> {
-    let settings = load_settings(app_handle.clone()).unwrap_or_default();
-    let enable_xmp_sync = settings.enable_xmp_sync.unwrap_or(false);
-    let create_xmp_if_missing = settings.create_xmp_if_missing.unwrap_or(false);
-
-    paths.par_iter().for_each(|path| {
-        let (_, sidecar_path) = parse_virtual_path(path);
-
-        let mut metadata = crate::exif_processing::load_sidecar(&sidecar_path);
-
+    update_metadata_for_paths(&paths, &app_handle, |metadata| {
         metadata.rating = rating;
-
-        if let Ok(json_string) = serde_json::to_string_pretty(&metadata) {
-            let _ = std::fs::write(&sidecar_path, json_string);
+        if rating > 0 && metadata.flag == Some(ImageFlag::Reject) {
+            metadata.flag = None;
         }
+    });
 
-        if enable_xmp_sync {
-            let source_path = parse_virtual_path(path).0;
-            sync_metadata_to_xmp(&source_path, &metadata, create_xmp_if_missing);
-        }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn set_flag_for_paths(
+    paths: Vec<String>,
+    flag: Option<ImageFlag>,
+    app_handle: AppHandle,
+) -> Result<(), String> {
+    update_metadata_for_paths(&paths, &app_handle, |metadata| {
+        metadata.flag = flag;
     });
 
     Ok(())
@@ -4143,7 +4281,7 @@ pub fn create_virtual_copy(
     Ok(new_virtual_path)
 }
 
-pub fn extract_xmp_rating(content: &str) -> Option<u8> {
+pub fn extract_xmp_rating(content: &str) -> Option<i8> {
     if let Some(idx) = content.find("xmp:Rating=\"") {
         let start = idx + 12;
         let end = content[start..].find('"').map(|i| start + i)?;
@@ -4156,6 +4294,8 @@ pub fn extract_xmp_rating(content: &str) -> Option<u8> {
     }
     None
 }
+
+const XMP_REJECTED_RATING: i8 = -1;
 
 pub fn extract_xmp_label(content: &str) -> Option<String> {
     if let Some(idx) = content.find("xmp:Label=\"") {
@@ -4225,8 +4365,15 @@ pub fn sync_metadata_from_xmp(source_path: &Path, metadata: &mut ImageMetadata) 
     if let Some(xmp_file) = actual_xmp
         && let Ok(content) = fs::read_to_string(&xmp_file)
     {
+        let xmp_rating = extract_xmp_rating(&content);
+
+        if xmp_rating == Some(XMP_REJECTED_RATING) && metadata.flag.is_none() {
+            metadata.flag = Some(ImageFlag::Reject);
+            changed = true;
+        }
+
         if metadata.rating == 0
-            && let Some(rating) = extract_xmp_rating(&content)
+            && let Some(rating) = xmp_rating.and_then(|r| u8::try_from(r).ok())
             && rating != 0
         {
             metadata.rating = rating;
@@ -4302,7 +4449,11 @@ pub fn sync_metadata_to_xmp(source_path: &Path, metadata: &ImageMetadata, create
     if let Some(xmp_file) = actual_xmp
         && let Ok(mut content) = fs::read_to_string(&xmp_file)
     {
-        let rating_str = metadata.rating.to_string();
+        let rating_str = if metadata.flag == Some(ImageFlag::Reject) {
+            XMP_REJECTED_RATING.to_string()
+        } else {
+            metadata.rating.to_string()
+        };
         let re_rating_attr = regex!(r#"xmp:Rating\s*=\s*"[^"]*""#);
         let re_rating_tag = regex!(r#"<xmp:Rating\s*>[^<]*</xmp:Rating>"#);
 

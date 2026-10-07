@@ -10,6 +10,7 @@ import PanoramaModal from './PanoramaModal';
 import HdrModal from './HdrModal';
 import FocusStackModal from './FocusStackModal';
 import DenoiseModal from './DenoiseModal';
+import type { DenoiseMethod } from './DenoiseModal';
 import CreateFolderModal from './CreateFolderModal';
 import RenameFolderModal from './RenameFolderModal';
 import RenameFileModal from './RenameFileModal';
@@ -17,7 +18,7 @@ import ConfirmModal from './ConfirmModal';
 import ImportSettingsModal from './ImportSettingsModal';
 import CullingModal from './CullingModal';
 import CollageModal from './CollageModal';
-import { AppSettings, Invokes, AlbumItem, Album, AlbumGroup } from '../ui/AppProperties';
+import { AppSettings, Invokes, ImageFlag, AlbumItem, Album, AlbumGroup } from '../ui/AppProperties';
 import { CopyPasteSettings } from '../../utils/adjustments';
 
 export interface AppModalsProps {
@@ -29,14 +30,14 @@ export interface AppModalsProps {
   handleStartFocusStack: (paths: string[]) => void;
   handleSaveFocusStack: () => Promise<string>;
   refreshImageList: () => Promise<void>;
-  handleApplyDenoise: (intensity: number, method: 'ai' | 'bm3d') => Promise<void>;
-  handleBatchDenoise: (intensity: number, method: 'ai' | 'bm3d', paths: string[]) => Promise<string[]>;
+  handleApplyDenoise: (intensity: number, method: DenoiseMethod) => Promise<void>;
+  handleBatchDenoise: (intensity: number, method: DenoiseMethod, paths: string[]) => Promise<string[]>;
   handleSaveDenoisedImage: () => Promise<string>;
   handleCreateFolder: (folderName: string) => Promise<void>;
   handleRenameFolder: (newName: string) => Promise<void>;
   handleSaveRename: (nameTemplate: string) => Promise<void>;
   handleStartImport: (settings: any) => Promise<void>;
-  handleSetColorLabel: (color: string | null, paths?: string[]) => Promise<void>;
+  handleSetFlag: (flag: ImageFlag | null, paths?: string[]) => void;
   handleRate: (rating: number, paths?: string[]) => void;
   executeDelete: (paths: string[], options: any) => Promise<void>;
   handleSaveCollage: (base64Data: string, firstPath: string) => Promise<string>;
@@ -323,7 +324,7 @@ export default function AppModals(props: AppModalsProps) {
         thumbnails={thumbnails}
         onApply={(action, paths) => {
           if (action === 'reject') {
-            props.handleSetColorLabel('red', paths);
+            props.handleSetFlag(ImageFlag.Reject, paths);
           } else if (action === 'rate_zero') {
             props.handleRate(1, paths);
           } else if (action === 'delete') {

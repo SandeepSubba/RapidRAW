@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { toast } from 'react-toastify';
-import { ImageFile, Panel, ExifOverlay } from '../components/ui/AppProperties';
-import { KEYBIND_DEFINITIONS, ADJUSTMENT_NUDGES, normalizeCombo, resolveNudgeStep } from '../utils/keyboardUtils';
+import { ImageFile, ImageFlag, Panel, ExifOverlay } from '../components/ui/AppProperties';
+import {
+  KEYBIND_DEFINITIONS,
+  ADJUSTMENT_NUDGES,
+  getDefaultCombo,
+  normalizeCombo,
+  resolveNudgeStep,
+} from '../utils/keyboardUtils';
 import { useEditorStore } from '../store/useEditorStore';
 import { useLibraryStore } from '../store/useLibraryStore';
 import { useSettingsStore } from '../store/useSettingsStore';
@@ -14,6 +20,7 @@ interface KeyboardShortcutsProps {
   sortedImageList: Array<ImageFile>;
   handleBackToLibrary(): void;
   handleDeleteSelected(): void;
+  handleDeleteRejected(): void;
   handleGoHome(): void;
   handleImageSelect(path: string, openInEditor?: boolean): void;
   handlePasteFiles(str: string): void;
@@ -24,6 +31,7 @@ export const useKeyboardShortcuts = ({
   sortedImageList,
   handleBackToLibrary,
   handleDeleteSelected,
+  handleDeleteRejected,
   handleGoHome,
   handleImageSelect,
   handlePasteFiles,
@@ -31,7 +39,7 @@ export const useKeyboardShortcuts = ({
 }: KeyboardShortcutsProps) => {
   const { setAdjustments, handleRotateWithSelection, handleCopyAdjustments, handlePasteAdjustments, toggleShowOriginal } =
     useEditorActions();
-  const { handleRate, handleSetColorLabel, handleRotateSelected } = useLibraryActions();
+  const { handleRate, handleSetFlag, handleToggleFlag, handleSetColorLabel, handleRotateSelected } = useLibraryActions();
 
   const rotateActiveAndSelection = useCallback(
     (s: any, degrees: number) => {
@@ -81,11 +89,12 @@ export const useKeyboardShortcuts = ({
     // -> action). Empty unless the user records a hold-then-key shortcut.
     const leaderChords = new Map<string, Map<string, string>>();
     const MODS = ['ctrl', 'shift', 'alt'];
-    const keybinds = useSettingsStore.getState().appSettings?.keybinds;
+    const { appSettings, osPlatform } = useSettingsStore.getState();
+    const keybinds = appSettings?.keybinds;
 
     for (const def of KEYBIND_DEFINITIONS) {
       const userCombo = keybinds?.[def.action];
-      const effective = userCombo && userCombo.length > 0 ? userCombo : def.defaultCombo;
+      const effective = userCombo && userCombo.length > 0 ? userCombo : getDefaultCombo(def, osPlatform);
       if (!effective || effective.length === 0) continue;
       if (effective.length >= 2 && !MODS.includes(effective[0])) {
         const leader = effective[0];
@@ -174,6 +183,13 @@ export const useKeyboardShortcuts = ({
         execute: (e: any) => {
           e.preventDefault();
           handleDeleteSelected();
+        },
+      },
+      delete_rejected: {
+        shouldFire: () => true,
+        execute: (e: KeyboardEvent) => {
+          e.preventDefault();
+          handleDeleteRejected();
         },
       },
       preview_prev: {
@@ -539,6 +555,27 @@ export const useKeyboardShortcuts = ({
         execute: (e: any) => {
           e.preventDefault();
           handleRate(5);
+        },
+      },
+      toggle_pick: {
+        shouldFire: () => true,
+        execute: (e: KeyboardEvent) => {
+          e.preventDefault();
+          handleToggleFlag(ImageFlag.Pick);
+        },
+      },
+      toggle_reject: {
+        shouldFire: () => true,
+        execute: (e: KeyboardEvent) => {
+          e.preventDefault();
+          handleToggleFlag(ImageFlag.Reject);
+        },
+      },
+      unflag: {
+        shouldFire: () => true,
+        execute: (e: KeyboardEvent) => {
+          e.preventDefault();
+          handleSetFlag(null);
         },
       },
       color_label_none: {
@@ -951,6 +988,7 @@ export const useKeyboardShortcuts = ({
   }, [
     handleBackToLibrary,
     handleDeleteSelected,
+    handleDeleteRejected,
     handleGoHome,
     handleImageSelect,
     handlePasteFiles,
@@ -961,6 +999,8 @@ export const useKeyboardShortcuts = ({
     handleCopyImagePaths,
     handlePasteAdjustments,
     handleRate,
+    handleSetFlag,
+    handleToggleFlag,
     handleSetColorLabel,
     toggleShowOriginal,
   ]);

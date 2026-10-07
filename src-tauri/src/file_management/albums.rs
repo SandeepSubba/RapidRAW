@@ -230,29 +230,39 @@ pub fn get_album_images(
                 && resolve_xmp_path(&source_path)
                     .is_some_and(|p| crate::file_management::is_cloud_placeholder(&p));
 
-            let (is_edited, is_negative, tags, rating) =
-                if crate::file_management::is_cloud_placeholder(&sidecar_path) || xmp_is_placeholder
-                {
-                    enqueue_metadata(
-                        &app_handle,
-                        virtual_path.clone(),
-                        source_path.clone(),
-                        sidecar_path.clone(),
-                    );
-                    (false, false, None, 0)
-                } else {
-                    resolve_image_metadata(&source_path, &sidecar_path, enable_xmp_sync, &settings)
-                };
+            let metadata = if crate::file_management::is_cloud_placeholder(&sidecar_path)
+                || xmp_is_placeholder
+            {
+                enqueue_metadata(
+                    &app_handle,
+                    virtual_path.clone(),
+                    source_path.clone(),
+                    sidecar_path.clone(),
+                );
+                ImageFileMetadata {
+                    is_edited: false,
+                    is_negative: false,
+                    tags: None,
+                    rating: 0,
+                    flag: None,
+                    is_raw: crate::formats::is_raw_file(&source_path),
+                }
+            } else {
+                resolve_image_metadata(&source_path, &sidecar_path, enable_xmp_sync, &settings)
+            };
 
             Some(ImageFile {
                 path: virtual_path,
                 modified,
-                is_edited,
-                is_negative,
-                tags,
+                is_edited: metadata.is_edited,
+                is_negative: metadata.is_negative,
+                tags: metadata.tags,
                 exif: None,
                 is_virtual_copy,
-                rating,
+                is_raw: metadata.is_raw,
+                group_id: None,
+                rating: metadata.rating,
+                flag: metadata.flag,
                 is_cloud_placeholder,
             })
         })

@@ -181,3 +181,40 @@ npm run typecheck  # note: upstream has pre-existing strict-tsc errors; the
                    # Vite/esbuild build does not gate on them
 npm start          # tauri dev — builds the Rust backend and launches the app
 ```
+
+### v1.6.5 sync notes
+
+Upstream v1.6.5 (guided-filter local contrast, whites rewrite, LMS white
+balance, pick/reject flags + rating operators, RAW+JPEG grouping, Apple RAW 9
+engine on macOS, cloud/Clerk auth, custom aspect ratios, keybind rework,
+AI-free mode, Czech/Dutch locales). Duplicates retired in upstream's favor:
+
+- **Blur-pass gating.** The fork's `compute_blur_needs` (skip gaussian blurs
+  with no consumer) was superseded by upstream's equivalent inline gating for
+  the new guided-filter shader; the fork extends it with a `need_skin` term so
+  skin smoothing keeps its tonal/clarity/structure blurs alive.
+- **Saved crop ratios.** The fork's named crop presets
+  (`AppSettings.cropPresets`, name + WxH) gave way to upstream's
+  `customAspectRatios` (unnamed WxH chips with a Save button beside the custom
+  fields). Old `cropPresets` entries drop from settings on next save.
+- **Auto-adjustment duplicates.** Upstream's unchanged copies of
+  histogram/waveform/auto-analysis were dropped in favor of the fork's
+  `image_processing/analysis.rs` (which carries the auto-profile and
+  scan-clip extensions); upstream's new white-balance area sampler was kept.
+- **Albums/folder-tree.** Upstream's copies were dropped (the fork had moved
+  them into `file_management/{albums,folder_tree}.rs`); upstream's `flag`
+  field was ported into the fork modules.
+- **Export ICC.** JPEG keeps the fork's hand-built profile + mozjpeg-class
+  encoder (guard-tested); PNG adopts upstream's new tagging with their
+  736-byte CC0 profile.
+- **Adjustment visibility.** Upstream's `adjustmentLayout`
+  (hidden/reordered/collapsed tools + section focus mode) replaces the fork's
+  visibility menu in the UI; Point Color registered as a `pointColor` tool in
+  that system. The fork's Rust-side `adjustment_visibility` parse gating
+  remains but now stays at its all-visible default.
+- **Kept fork-side:** per-mask sharpness loop and skin smoothing in the
+  shader (rebuilt around upstream's guided-filter main), point colors,
+  negative-conversion stack, panorama projections, assistant stack,
+  external-editor round trip, boot error boundary, preview-fallback flag,
+  tether/scanning modules, reqwest native-TLS split, thin-LTO release
+  profile, fork thumbnail fast path (`fast_raw_preview_scaled`).

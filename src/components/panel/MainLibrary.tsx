@@ -33,6 +33,7 @@ import {
   RawStatus,
   EditedStatus,
   NegativeStatus,
+  FlagStatus,
   LibraryDisplayMode,
 } from '../ui/AppProperties';
 import { GroupBadgeInfo, GroupId } from '../../utils/imageGrouping';
@@ -223,6 +224,16 @@ export default function MainLibrary(props: MainLibraryProps) {
       { key: NegativeStatus.All, label: t('library.filters.negative.all') },
       { key: NegativeStatus.NegativesOnly, label: t('library.filters.negative.negativesOnly') },
       { key: NegativeStatus.NonNegatives, label: t('library.filters.negative.nonNegatives') },
+    ],
+    [t],
+  );
+
+  const translatedFlagStatusOptions = useMemo(
+    () => [
+      { key: FlagStatus.All, label: t('library.filters.flag.all') },
+      { key: FlagStatus.Picked, label: t('library.filters.flag.picked') },
+      { key: FlagStatus.ExcludeRejected, label: t('library.filters.flag.excludeRejected') },
+      { key: FlagStatus.Rejected, label: t('library.filters.flag.rejected') },
     ],
     [t],
   );
@@ -514,7 +525,7 @@ export default function MainLibrary(props: MainLibraryProps) {
   }
 
   return (
-    <div className="relative z-20 flex-1 flex flex-col h-full min-w-0 bg-bg-secondary rounded-lg overflow-visible">
+    <div className="relative z-20 flex-1 flex flex-col min-w-0 min-h-0 bg-bg-secondary rounded-lg overflow-visible">
       <header
         className="p-3 shrink-0 flex justify-between items-center border-b border-surface gap-4"
         onMouseEnter={() => setIsProgressHovered(true)}
@@ -597,6 +608,7 @@ export default function MainLibrary(props: MainLibraryProps) {
               rawStatusOptions={translatedRawStatusOptions}
               editedStatusOptions={translatedEditedStatusOptions}
               negativeStatusOptions={translatedNegativeStatusOptions}
+              flagStatusOptions={translatedFlagStatusOptions}
               sortOptions={translatedSortOptions}
             />
             {!props.isAndroid && (

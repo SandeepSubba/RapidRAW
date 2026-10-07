@@ -31,7 +31,13 @@ import Slider from '../ui/Slider';
 import { ThemeProps, THEMES, DEFAULT_THEME_ID, EDITOR_CANVAS_COLORS } from '../../utils/themes';
 import { useTranslation } from 'react-i18next';
 import { Invokes } from '../ui/AppProperties';
-import { ADJUSTMENT_NUDGES, KEYBIND_DEFINITIONS, KEYBIND_SECTIONS, resolveNudgeStep } from '../../utils/keyboardUtils';
+import {
+  ADJUSTMENT_NUDGES,
+  getDefaultCombo,
+  KEYBIND_DEFINITIONS,
+  KEYBIND_SECTIONS,
+  resolveNudgeStep,
+} from '../../utils/keyboardUtils';
 import Text from '../ui/Text';
 import { TextColors, TextVariants, TextWeights } from '../../types/typography';
 import { useOsPlatform } from '../../hooks/useOsPlatform';
@@ -713,7 +719,8 @@ export default function SettingsPanel({
     const userKb = appSettings?.keybinds || {};
     for (const def of KEYBIND_DEFINITIONS) {
       const userCombo = userKb[def.action];
-      const effective = userCombo?.length ? userCombo : userCombo === undefined ? def.defaultCombo : null;
+      const effective =
+        userCombo?.length ? userCombo : userCombo === undefined ? getDefaultCombo(def, osPlatform) : null;
       if (!effective || !effective.length) continue;
       const key = effective.join('+');
       if (!map.has(key)) map.set(key, new Set());
@@ -982,6 +989,18 @@ export default function SettingsPanel({
                         id="focus-mode-toggle"
                         label={t('settings.general.enableFocusMode')}
                         onChange={(checked) => onSettingsChange({ ...appSettings, enableFocusMode: checked })}
+                      />
+                    </SettingItem>
+
+                    <SettingItem
+                      label={t('settings.general.toolFocusMode')}
+                      description={t('settings.general.toolFocusModeDesc')}
+                    >
+                      <Switch
+                        checked={appSettings?.enableToolFocusMode ?? false}
+                        id="tool-focus-mode-toggle"
+                        label={t('settings.general.enableToolFocusMode')}
+                        onChange={(checked) => onSettingsChange({ ...appSettings, enableToolFocusMode: checked })}
                       />
                     </SettingItem>
 
@@ -1831,6 +1850,20 @@ export default function SettingsPanel({
                         onChange={(checked) => handleProcessingSettingChange('applyPreprocessingToNonRaws', checked)}
                       />
                     </SettingItem>
+
+                    {osPlatform === 'macos' && (
+                      <SettingItem
+                        label={t('settings.processing.preprocessing.appleRaw9')}
+                        description={t('settings.processing.preprocessing.appleRaw9Desc')}
+                      >
+                        <Switch
+                          checked={appSettings?.useAppleRaw9 ?? false}
+                          id="apple-raw9-toggle"
+                          label={t('settings.processing.preprocessing.enableAppleRaw9')}
+                          onChange={(checked) => onSettingsChange({ ...appSettings, useAppleRaw9: checked })}
+                        />
+                      </SettingItem>
+                    )}
 
                     <SettingItem
                       label={t('settings.processing.preprocessing.linearRaw')}

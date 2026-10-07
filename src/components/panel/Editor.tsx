@@ -14,6 +14,7 @@ import {
   isCropWithinBounds,
   calculateStraightenAngle,
   calculateAutoCropForRotation,
+  fitCropTowards,
   moveCropInsideBounds,
   zoomCrop,
 } from '../../utils/cropUtils';
@@ -167,6 +168,7 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
   // it); without this guard that seed gets saved, marking an untouched image as
   // cropped/edited. Reset whenever the image or crop-tool visibility changes.
   const cropUserInteractedRef = useRef(false);
+  const cropResizeStartRef = useRef<PercentCrop | null>(null);
 
   const [isMaskHovered, setIsMaskHovered] = useState(false);
   const [isMaskTouchInteracting, setIsMaskTouchInteracting] = useState(false);
@@ -295,6 +297,19 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('blur', handleBlur);
+    };
+  }, []);
+
+  useEffect(() => {
+    const clearCropResizeStart = () => {
+      cropResizeStartRef.current = null;
+    };
+
+    window.addEventListener('pointerup', clearCropResizeStart);
+    window.addEventListener('pointercancel', clearCropResizeStart);
+    return () => {
+      window.removeEventListener('pointerup', clearCropResizeStart);
+      window.removeEventListener('pointercancel', clearCropResizeStart);
     };
   }, []);
 
@@ -913,6 +928,9 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
     (e: React.PointerEvent<HTMLDivElement>) => {
       wasPanningDisabledOnDown.current = isPanningDisabled;
 
+      const isCropHandle = isCropping && e.button === 0 && !!(e.target as HTMLElement).closest('[data-ord]');
+      cropResizeStartRef.current = isCropHandle ? lastValidCropRef.current : null;
+
       if (e.pointerType === 'mouse' && e.button === 0 && e.shiftKey && !isBrushActive && !isCropping) {
         if (animationFrameId.current) cancelAnimationFrame(animationFrameId.current);
         if (physicsFrameId.current) cancelAnimationFrame(physicsFrameId.current);
@@ -946,10 +964,13 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
           }));
 
           setEditor({ liveRotation: null, isSliderDragging: false });
+          cropResizeStartRef.current = null;
           return;
         }
 
         lastCtrlClickTimeRef.current = now;
+
+        if (isCropping) return;
 
         isCropPanningRef.current = true;
         cropPanStartRef.current = { x: e.clientX, y: e.clientY };
@@ -2047,6 +2068,31 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
         height: (pc.height / 100) * H,
       });
 
+      const resizeStart = cropResizeStartRef.current;
+      if (resizeStart && isCtrlPressedRef.current) {
+        const width = 2 * percentCrop.width - resizeStart.width;
+        const height = 2 * percentCrop.height - resizeStart.height;
+        if (width < minPctW || height < minPctH) {
+          return;
+        }
+
+        const centered: PercentCrop = {
+          unit: '%',
+          x: resizeStart.x + resizeStart.width / 2 - width / 2,
+          y: resizeStart.y + resizeStart.height / 2 - height / 2,
+          width,
+          height,
+        };
+
+        const nextCrop = fitCropTowards(resizeStart, centered, (candidate) =>
+          checkCropValid(toPixel(candidate), W, H, rotation),
+        );
+
+        setCrop(nextCrop);
+        lastValidCropRef.current = nextCrop;
+        return;
+      }
+
       if (checkCropValid(toPixel(percentCrop), W, H, rotation)) {
         setCrop(percentCrop);
         lastValidCropRef.current = percentCrop;
@@ -2338,7 +2384,7 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
   let cursorStyle = 'default';
   if ((isShiftPressed && !isCropping) || straightenDragLine) {
     cursorStyle = 'crosshair';
-  } else if (isCtrlPressed && !isBrushActive) {
+  } else if (isCtrlPressed && !isBrushActive && !isCropping) {
     cursorStyle = isCropPanningRef.current ? 'grabbing' : 'move';
   } else if (isPanningState && isMiddleMousePanning.current) {
     cursorStyle = 'grabbing';

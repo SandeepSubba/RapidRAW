@@ -7,7 +7,7 @@ import { useLibraryStore } from '../store/useLibraryStore';
 import { useEditorStore } from '../store/useEditorStore';
 import { useProcessStore } from '../store/useProcessStore';
 import { THEMES, DEFAULT_THEME_ID, ThemeProps } from '../utils/themes';
-import { COPYABLE_ADJUSTMENT_KEYS } from '../utils/adjustments';
+import { COPYABLE_ADJUSTMENT_KEYS, withAdjustmentLayout } from '../utils/adjustments';
 import {
   FilterCriteria,
   Invokes,
@@ -17,6 +17,7 @@ import {
   RawStatus,
   EditedStatus,
   NegativeStatus,
+  FlagStatus,
   Theme,
   ThumbnailSize,
   ThumbnailAspectRatio,
@@ -83,9 +84,10 @@ export const useAppInitialization = ({
     })),
   );
 
-  const { uiVisibility, setUI } = useUIStore(
+  const { uiVisibility, collapsibleSectionsState, setUI } = useUIStore(
     useShallow((state) => ({
       uiVisibility: state.uiVisibility,
+      collapsibleSectionsState: state.collapsibleSectionsState,
       setUI: state.setUI,
     })),
   );
@@ -186,6 +188,7 @@ export const useAppInitialization = ({
             rawStatus: settings.filterCriteria.rawStatus || RawStatus.All,
             editedStatus: settings.filterCriteria.editedStatus || EditedStatus.All,
             negativeStatus: settings.filterCriteria.negativeStatus || NegativeStatus.All,
+            flagStatus: settings.filterCriteria.flagStatus || FlagStatus.All,
             colors: settings.filterCriteria.colors || [],
           }));
         }
@@ -236,6 +239,21 @@ export const useAppInitialization = ({
             panelSwitcherPlacement: settings.workspace.panelSwitcherPlacement,
           });
         }
+        if (settings?.adjustmentLayout?.openSections) {
+          setUI((state) => ({
+            collapsibleSectionsState: { ...state.collapsibleSectionsState, ...settings.adjustmentLayout.openSections },
+          }));
+        }
+
+        setUI({
+          leftPanelWidth: reconciledWorkspace.leftPanelWidth,
+          rightPanelWidth: reconciledWorkspace.rightPanelWidth,
+          leftTopHeight: reconciledWorkspace.leftTopHeight,
+          rightTopHeight: reconciledWorkspace.rightTopHeight,
+          panelLayout: reconciledWorkspace.panelLayout,
+          activePanels: reconciledWorkspace.activePanels,
+          panelSwitcherPlacement: reconciledWorkspace.panelSwitcherPlacement,
+        });
 
         if (settings?.isWaveformVisible !== undefined) setEditor({ isWaveformVisible: settings.isWaveformVisible });
         if (settings?.activeWaveformChannel) setEditor({ activeWaveformChannel: settings.activeWaveformChannel });
@@ -351,6 +369,13 @@ export const useAppInitialization = ({
       handleSettingsChange({ ...appSettings, uiVisibility });
     }
   }, [uiVisibility, appSettings, handleSettingsChange]);
+
+  useEffect(() => {
+    if (isInitialMount.current || !appSettings) return;
+    if (JSON.stringify(appSettings.adjustmentLayout?.openSections) !== JSON.stringify(collapsibleSectionsState)) {
+      handleSettingsChange(withAdjustmentLayout(appSettings, { openSections: collapsibleSectionsState }));
+    }
+  }, [collapsibleSectionsState, appSettings, handleSettingsChange]);
 
   useEffect(() => {
     if (isInitialMount.current || !appSettings) return;

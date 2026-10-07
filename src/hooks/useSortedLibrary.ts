@@ -1,7 +1,16 @@
 import { useMemo } from 'react';
 import { useLibraryStore } from '../store/useLibraryStore';
 import { useSettingsStore } from '../store/useSettingsStore';
-import { RawStatus, EditedStatus, NegativeStatus, SortDirection, ImageFile, GroupingMode } from '../components/ui/AppProperties';
+import {
+  RawStatus,
+  EditedStatus,
+  FlagStatus,
+  ImageFlag,
+  NegativeStatus,
+  SortDirection,
+  ImageFile,
+  GroupingMode,
+} from '../components/ui/AppProperties';
 import { buildImageGroups, GroupBadgeInfo, GroupId } from '../utils/imageGrouping';
 
 export const ADVANCED_QUERY_REGEX =
@@ -51,8 +60,12 @@ function computeGroupedLibrary(libraryState: any, settingsState: any): GroupedLi
     if (filterCriteria.rating !== 0) {
       const rating = imageRatings[image.path] || 0;
       if (filterCriteria.rating === -1 && rating !== 0) return false;
-      if (filterCriteria.rating === 5 && rating !== 5) return false;
-      if (filterCriteria.rating > 0 && filterCriteria.rating < 5 && rating < filterCriteria.rating) return false;
+      if (filterCriteria.rating > 0) {
+        const op = filterCriteria.ratingOperator ?? 'gte';
+        if (op === 'eq' && rating !== filterCriteria.rating) return false;
+        if (op === 'gte' && rating < filterCriteria.rating) return false;
+        if (op === 'lte' && rating > filterCriteria.rating) return false;
+      }
     }
 
     if (filterCriteria.rawStatus && filterCriteria.rawStatus !== RawStatus.All) {
@@ -67,6 +80,12 @@ function computeGroupedLibrary(libraryState: any, settingsState: any): GroupedLi
     if (filterCriteria.negativeStatus && filterCriteria.negativeStatus !== NegativeStatus.All) {
       if (filterCriteria.negativeStatus === NegativeStatus.NegativesOnly && !image.is_negative) return false;
       if (filterCriteria.negativeStatus === NegativeStatus.NonNegatives && image.is_negative) return false;
+    }
+
+    if (filterCriteria.flagStatus && filterCriteria.flagStatus !== FlagStatus.All) {
+      if (filterCriteria.flagStatus === FlagStatus.Picked && image.flag !== ImageFlag.Pick) return false;
+      if (filterCriteria.flagStatus === FlagStatus.ExcludeRejected && image.flag === ImageFlag.Reject) return false;
+      if (filterCriteria.flagStatus === FlagStatus.Rejected && image.flag !== ImageFlag.Reject) return false;
     }
 
     if (filterCriteria.colors && filterCriteria.colors.length > 0) {
@@ -173,12 +192,12 @@ function computeGroupedLibrary(libraryState: any, settingsState: any): GroupedLi
     return tagsMatch && textMatch;
   };
 
-  let processedList = imageList;
+  let processedList = imageList.filter((image: ImageFile) => matchesFilter(image));
   let searchMatchingGroupIds: Set<string> | null = null;
 
   if (isGroupingActive) {
     const groupEditedFiles = appSettings?.groupEditedFiles ?? true;
-    const groupingResult = buildImageGroups(imageList, groupingMode, groupEditedFiles);
+    const groupingResult = buildImageGroups(processedList, groupingMode, groupEditedFiles);
     processedList = groupingResult.displayList;
 
     if (isSearchActive) {
@@ -192,17 +211,17 @@ function computeGroupedLibrary(libraryState: any, settingsState: any): GroupedLi
     }
   }
 
-  const filteredList = processedList.filter((image: ImageFile) => matchesFilter(image));
-
   const filteredBySearch = !isSearchActive
-    ? filteredList
-    : filteredList.filter((image: ImageFile) => {
+    ? processedList
+    : processedList.filter((image: ImageFile) => {
         if (searchMatchingGroupIds && image.group_id && searchMatchingGroupIds.has(image.group_id)) return true;
         return matchesSearch(image);
       });
 
   const list = [...filteredBySearch];
 
+  const getRatingSortValue = (image: ImageFile) =>
+    image.flag === ImageFlag.Reject ? -1 : imageRatings[image.path] || 0;
   // Manual order is a lookup, not a comparison: rank by position in the saved
   // list. Handled before the switch because the name tiebreak below would
   // otherwise undo it whenever two files rank equal, and because a manual order
@@ -260,7 +279,7 @@ function computeGroupedLibrary(libraryState: any, settingsState: any): GroupedLi
         comparison = a.modified - b.modified;
         break;
       case 'rating':
-        comparison = (imageRatings[a.path] || 0) - (imageRatings[b.path] || 0);
+        comparison = getRatingSortValue(a) - getRatingSortValue(b);
         break;
       case 'edited':
         comparison = a.is_edited === b.is_edited ? 0 : a.is_edited ? 1 : -1;
