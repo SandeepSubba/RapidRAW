@@ -93,6 +93,7 @@ const ALL_PANELS: Panel[] = [
   Panel.FolderTree,
   Panel.Export,
   Panel.Tethering,
+  Panel.Agent,
   Panel.Adjustments,
   Panel.Crop,
   Panel.Masks,
@@ -105,6 +106,9 @@ const DEFAULT_PANEL_DEFAULT_REGIONS: Record<Panel, PanelRegion> = {
   [Panel.FolderTree]: 'leftTop',
   [Panel.Export]: 'leftTop',
   [Panel.Tethering]: 'leftTop',
+  // The assistant lives in its own bottom-left region so it can edit metadata
+  // while the Metadata panel stays visible above it and updates live.
+  [Panel.Agent]: 'leftBottom',
   [Panel.Adjustments]: 'rightTop',
   [Panel.Crop]: 'rightTop',
   [Panel.Masks]: 'rightTop',
@@ -129,13 +133,13 @@ export function reconcileWorkspace(
     rightTopHeight: DEFAULT_PANEL_SECTION_HEIGHT,
     panelLayout: {
       leftTop: [Panel.Metadata, Panel.FolderTree, Panel.Export, ...(isTetheringSupported ? [Panel.Tethering] : [])],
-      leftBottom: [],
+      leftBottom: [Panel.Agent],
       rightTop: [Panel.Adjustments, Panel.Crop, Panel.Masks, Panel.Ai, Panel.Presets],
       rightBottom: [],
     },
     activePanels: {
       leftTop: Panel.FolderTree,
-      leftBottom: null,
+      leftBottom: Panel.Agent,
       rightTop: Panel.Adjustments,
       rightBottom: null,
     },

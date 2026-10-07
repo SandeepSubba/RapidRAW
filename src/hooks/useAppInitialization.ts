@@ -199,46 +199,9 @@ export const useAppInitialization = ({
           setUI((state) => ({ uiVisibility: { ...state.uiVisibility, ...settings.uiVisibility } }));
         }
 
-        if (settings?.workspace) {
-          const regions: Array<PanelRegion> = ['leftTop', 'leftBottom', 'rightTop', 'rightBottom'];
-          const loadedLayout: any = { ...(settings.workspace.panelLayout || {}) };
-          for (const r of regions) if (!Array.isArray(loadedLayout[r])) loadedLayout[r] = [];
-
-          // One-time relocation: dock the Assistant panel in its OWN bottom-left
-          // region (leftBottom), so the Metadata panel stays visible above it and
-          // reflects assistant edits live instead of being hidden behind a tab.
-          // Guarded by a flag so a later manual move by the user isn't overridden.
-          const RELOCATED_KEY = 'assistant-panel-leftbottom-v1';
-          const alreadyRelocated = localStorage.getItem(RELOCATED_KEY) === '1';
-          const existsSomewhere = regions.some((r) => loadedLayout[r].includes(Panel.Agent));
-
-          if (!alreadyRelocated) {
-            for (const r of regions) loadedLayout[r] = loadedLayout[r].filter((p: any) => p !== Panel.Agent);
-            loadedLayout.leftBottom = [...loadedLayout.leftBottom, Panel.Agent];
-            localStorage.setItem(RELOCATED_KEY, '1');
-          } else if (!existsSomewhere) {
-            loadedLayout.leftBottom = [...loadedLayout.leftBottom, Panel.Agent];
-          }
-
-          // Keep each region's active tab valid after moving panels around, and
-          // give a newly-populated region (e.g. leftBottom now holding the
-          // assistant) an active tab so it actually renders.
-          const activePanels: any = { ...(settings.workspace.activePanels || {}) };
-          for (const r of regions) {
-            const validActive = activePanels[r] && loadedLayout[r].includes(activePanels[r]);
-            if (!validActive) activePanels[r] = loadedLayout[r][0] ?? null;
-          }
-
-          setUI({
-            leftPanelWidth: settings.workspace.leftPanelWidth,
-            rightPanelWidth: settings.workspace.rightPanelWidth,
-            leftTopHeight: settings.workspace.leftTopHeight,
-            rightTopHeight: settings.workspace.rightTopHeight,
-            panelLayout: loadedLayout,
-            activePanels,
-            panelSwitcherPlacement: settings.workspace.panelSwitcherPlacement,
-          });
-        }
+        // Panel placement (including the fork's Assistant panel in its own
+        // bottom-left region) is guaranteed by reconcileWorkspace above, which
+        // knows every panel and re-adds missing ones to their default region.
         if (settings?.adjustmentLayout?.openSections) {
           setUI((state) => ({
             collapsibleSectionsState: { ...state.collapsibleSectionsState, ...settings.adjustmentLayout.openSections },
