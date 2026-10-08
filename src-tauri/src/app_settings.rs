@@ -394,10 +394,11 @@ impl Default for WorkspaceState {
                 "metadata".to_string(),
                 "folderTree".to_string(),
                 "export".to_string(),
-                "agent".to_string(),
             ],
         );
-        panel_layout.insert("leftBottom".to_string(), vec![]);
+        // The assistant gets its own bottom-left region (matches the frontend's
+        // reconcileWorkspace default), so Metadata stays visible above it.
+        panel_layout.insert("leftBottom".to_string(), vec!["agent".to_string()]);
 
         panel_layout.insert(
             "rightTop".to_string(),
@@ -413,7 +414,7 @@ impl Default for WorkspaceState {
 
         let mut active_panels = HashMap::new();
         active_panels.insert("leftTop".to_string(), Some("folderTree".to_string()));
-        active_panels.insert("leftBottom".to_string(), None);
+        active_panels.insert("leftBottom".to_string(), Some("agent".to_string()));
         active_panels.insert("rightTop".to_string(), Some("adjustments".to_string()));
         active_panels.insert("rightBottom".to_string(), None);
 
