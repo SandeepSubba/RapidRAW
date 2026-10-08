@@ -595,12 +595,22 @@
     "guided": {
       "cancel": "Cancel",
       "drawingActive": "Drawing Active",
-      "hint": "Draw along edges in your photo that should be vertical or horizontal.",
-      "linesStatus": "Active Guide Lines",
+      "hint": "Drag along edges that should be straight — building sides, door frames, a horizon. Lines snap to vertical or horizontal by their angle.",
+      "linesStatus": "Guide lines",
       "toast": {
         "angleRejected": "Line angle is too far from horizontal or vertical",
         "maxLines": "Maximum 2 vertical and 2 horizontal lines allowed"
-      }
+      },
+      "done": "Done",
+      "canvasHint": "Drag along an edge that should be vertical or horizontal",
+      "needMore": "Draw {{count}} more line to apply",
+      "applied": "Correction applied",
+      "clearAll": "Clear all",
+      "vertical": "Vertical",
+      "horizontal": "Horizontal",
+      "linesCount": "{{count}} of 4 lines",
+      "autoCrop": "Auto-crop edges",
+      "autoCropTooltip": "Trim the empty corners the correction leaves"
     },
     "layout": {
       "split": "Split"

@@ -141,10 +141,26 @@ export interface GuideLine {
   p2: Coord;
 }
 
+export const GUIDE_COLORS: Record<GuideOrientation, string> = {
+  vertical: '#3b82f6',
+  horizontal: '#f59e0b',
+};
+export const GUIDE_REJECTED_COLOR = '#ef4444';
+export const MAX_GUIDES_PER_TYPE = 2;
+
+/** "V1", "H2", … numbered within the guide's own orientation. */
+export const guideLabel = (lines: GuideLine[], line: GuideLine): string => {
+  const index = lines.filter((l) => l.type === line.type).findIndex((l) => l.id === line.id);
+  return `${line.type === 'vertical' ? 'V' : 'H'}${index + 1}`;
+};
+
 export interface GuidedPerspective {
   enabled: boolean;
   lines: GuideLine[];
   autoCrop: boolean;
+  // The crop auto-crop last wrote, so it can be withdrawn when the guides go
+  // away — but only while the user hasn't since changed the crop themselves.
+  appliedCrop?: Crop | null;
 }
 
 export interface ColorCalibration {
@@ -766,6 +782,7 @@ export const normalizeLoadedAdjustments = (loadedAdjustments: Adjustments): any 
         return [...verts, ...hors];
       })(),
       autoCrop: loadedAdjustments.guidedPerspective?.autoCrop ?? true,
+      appliedCrop: loadedAdjustments.guidedPerspective?.appliedCrop ?? null,
     },
     lutIsSceneReferred: loadedAdjustments.lutIsSceneReferred ?? false,
     flareAmount: loadedAdjustments.flareAmount ?? INITIAL_ADJUSTMENTS.flareAmount,

@@ -129,12 +129,26 @@ and dated.
   zoom (`fitScaleForParams`) that hides the black wedges — no manual scale needed.
 - **Guided perspective** — draw reference lines on the image to correct
   perspective (upstream v1.6.3 Rust homography solver, replacing the fork's TS
-  guided keystone). Guides persist in the sidecar and stay editable; the solver
-  auto-crops to the corrected frame.
+  guided keystone). Click *Guided Perspective* in Geometry, then drag along
+  edges that should be straight; a stroke snaps to vertical or horizontal by its
+  angle (up to 2 of each) and the correction applies from the second line.
+  - Works with the crop tool off: drawing (and Straighten) show the uncropped
+    layer themselves — previously both were invisible unless the crop tool was on.
+  - On-canvas instruction pill with a live count; the line being dragged
+    previews its snap (blue vertical, amber horizontal, red when it will be
+    rejected and why). Saved guides are labelled V1/V2/H1/H2, with draggable
+    endpoints; hovering a row in the panel highlights its line.
+  - *Done* / Esc leaves drawing mode and keeps the guides; *Clear all* and
+    per-row delete remove them. Straighten and guided drawing are exclusive.
+  - **Auto-crop edges** (on by default) trims the empty corners using the
+    solver's largest inscribed rectangle, respecting orientation, flips and a
+    locked aspect ratio. The crop it wrote is remembered, so removing the guides
+    or switching auto-crop off restores the full frame — a crop adjusted by hand
+    is never overwritten.
 - **Batch-rotate** selected images with the `[` and `]` shortcuts.
-- **Saved crop ratios** — save any custom width × height (e.g. `2048 × 2292`) as a
-  named preset; saved ratios appear as buttons in the aspect-ratio grid alongside the
-  built-ins, with hover-to-delete.
+- **Saved crop ratios** — upstream v1.6.5's custom aspect ratios (Save button
+  beside the custom W × H fields; chips in the ratio grid with hover-to-delete)
+  replaced the fork's named presets.
 - **Last-used ratio remembered** — the crop panel reopens on the ratio and orientation
   you last picked instead of resetting to the image's native ratio (classically 3:2
   horizontal) on every image.

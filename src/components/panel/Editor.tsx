@@ -73,7 +73,9 @@ interface WgpuRenderState {
   isReady: boolean;
   hasRenderedFirstFrame: boolean;
   isCropping: boolean;
-  cropToolActive: boolean;
+  // A tool that draws on the uncropped crop layer is on (crop, straighten,
+  // guided perspective); the native render must step aside for it.
+  uncroppedLayerActive: boolean;
   uncroppedAdjustedPreviewUrl: string | null;
   showOriginal: boolean;
   bgPrimary: [number, number, number, number];
@@ -111,6 +113,8 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
   const overlayMode = useEditorStore((s) => s.overlayMode);
   const overlayRotation = useEditorStore((s) => s.overlayRotation);
   const isStraightenActive = useEditorStore((s) => s.isStraightenActive);
+  const isGuidedPerspectiveActive = useEditorStore((s) => s.isGuidedPerspectiveActive);
+  const uncroppedLayerActive = cropToolActive || isStraightenActive || isGuidedPerspectiveActive;
   const isWbPickerActive = useEditorStore((s) => s.isWbPickerActive);
   const isPointPickerActive = useEditorStore((s) => s.isPointPickerActive);
   const liveRotation = useEditorStore((s) => s.liveRotation);
@@ -434,9 +438,16 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
   useEffect(() => {
     setEditor({ cropToolActive: false });
   }, [selectedImage, setEditor]);
+  // Straighten and guided-perspective drawing are modes on the same layer and
+  // end with it, so they never linger into another image or panel. Keyed on the
+  // path: the selectedImage object is replaced mid-session (e.g. when it becomes
+  // ready), which must not cancel a drawing in progress.
+  useEffect(() => {
+    setEditor({ isStraightenActive: false, isGuidedPerspectiveActive: false });
+  }, [selectedImage?.path, setEditor]);
   useEffect(() => {
     if (!isCropping) {
-      setEditor({ cropToolActive: false });
+      setEditor({ cropToolActive: false, isStraightenActive: false, isGuidedPerspectiveActive: false });
     }
   }, [isCropping, setEditor]);
 
@@ -1450,7 +1461,7 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
     isReady: selectedImage?.isReady ?? false,
     hasRenderedFirstFrame,
     isCropping,
-    cropToolActive,
+    uncroppedLayerActive,
     uncroppedAdjustedPreviewUrl,
     showOriginal,
     bgPrimary: [24 / 255, 24 / 255, 24 / 255, 1.0],
@@ -1473,7 +1484,7 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
       isReady: selectedImage?.isReady ?? false,
       hasRenderedFirstFrame,
       isCropping,
-      cropToolActive,
+      uncroppedLayerActive,
       uncroppedAdjustedPreviewUrl,
       showOriginal,
       bgPrimary: parseRgb(bgPrimaryStr),
@@ -1490,7 +1501,7 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
     selectedImage?.isReady,
     hasRenderedFirstFrame,
     isCropping,
-    cropToolActive,
+    uncroppedLayerActive,
     uncroppedAdjustedPreviewUrl,
     showOriginal,
     appSettings?.theme,
@@ -1508,10 +1519,10 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
     selectedImage?.isReady,
     hasRenderedFirstFrame,
     isCropping,
-    // cropToolActive feeds isCropViewVisible inside syncWgpu — omitting it left
-    // the wgpu layer hidden after the crop tool auto-deactivated on commit
+    // uncroppedLayerActive feeds isCropViewVisible inside syncWgpu — omitting it
+    // left the wgpu layer hidden after the crop tool auto-deactivated on commit
     // (both layers hidden → image "disappears" until navigation resyncs).
-    cropToolActive,
+    uncroppedLayerActive,
     uncroppedAdjustedPreviewUrl,
     showOriginal,
     appSettings?.theme,
@@ -1613,10 +1624,10 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
       let screenH = baseH * scale * dpr || 1;
 
       // Only hide the (cropped) native render behind the uncropped crop-editing
-      // layer when the crop tool is actually active. With the tool inactive the
-      // Crop panel shows the cropped result, consistent with every other module.
+      // layer while a tool that draws on it is active (must match ImageCanvas).
+      // Otherwise the Crop panel shows the cropped result like every module.
       const isCropViewVisible =
-        state.isCropping && state.cropToolActive && state.uncroppedAdjustedPreviewUrl;
+        state.isCropping && state.uncroppedLayerActive && state.uncroppedAdjustedPreviewUrl;
 
       if (isCropViewVisible) {
         screenX = -999999;

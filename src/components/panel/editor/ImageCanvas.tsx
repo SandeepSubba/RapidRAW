@@ -1,11 +1,36 @@
 import { useState, useEffect, useRef, useCallback, memo, useMemo } from 'react';
 import ReactCrop from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
-import { Stage, Layer, Ellipse, Line, Transformer, Group, Circle, Rect, Arrow } from 'react-konva';
+import {
+  Stage,
+  Layer,
+  Ellipse,
+  Line,
+  Transformer,
+  Group,
+  Circle,
+  Rect,
+  Arrow,
+  Label,
+  Tag,
+  Text as KonvaText,
+} from 'react-konva';
 import { PercentCrop, Crop } from 'react-image-crop';
 import { Stamp, Bandage, Spline, BrushCleaning } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
-import { MAX_POINT_COLORS, Adjustments, AiPatch, Coord, MaskContainer, GuideLine, GuideOrientation } from '../../../utils/adjustments';
+import {
+  MAX_POINT_COLORS,
+  Adjustments,
+  AiPatch,
+  Coord,
+  MaskContainer,
+  GuideLine,
+  GuideOrientation,
+  GUIDE_COLORS,
+  GUIDE_REJECTED_COLOR,
+  MAX_GUIDES_PER_TYPE,
+  guideLabel,
+} from '../../../utils/adjustments';
 import { Mask, SubMask, SubMaskMode, ToolType } from '../right/Masks';
 import { AppSettings, BrushSettings, Invokes, SelectedImage } from '../../ui/AppProperties';
 import { RenderSize } from '../../../hooks/useImageRenderSize';
@@ -14,7 +39,8 @@ import { useTranslation } from 'react-i18next';
 import { useEditorStore } from '../../../store/useEditorStore';
 import type { OverlayMode } from '../right/CropPanel';
 import CompositionOverlays from './overlays/CompositionOverlays';
-import { calculateStraightenAngle } from '../../../utils/cropUtils';
+import { calculateStraightenAngle, orientPoint, unorientPoint } from '../../../utils/cropUtils';
+import { commitGuideLines } from '../../../utils/guidedPerspective';
 import { toast } from 'react-toastify';
 import {
   getWhiteBalanceMode,
@@ -217,20 +243,6 @@ function project3x3(h: number[], x: number, y: number): { x: number; y: number }
     x: (h[0] * x + h[1] * y + h[2]) / W,
     y: (h[3] * x + h[4] * y + h[5]) / W,
   };
-}
-
-function orientPoint(x: number, y: number, w: number, h: number, steps: number) {
-  const s = ((steps % 4) + 4) % 4;
-  if (s === 0) return { x, y };
-  if (s === 1) return { x: h - y, y: x };
-  if (s === 2) return { x: w - x, y: h - y };
-  return { x: y, y: w - x };
-}
-
-function unorientPoint(x: number, y: number, w: number, h: number, steps: number) {
-  const s = ((steps % 4) + 4) % 4;
-  const inv = (4 - s) % 4;
-  return orientPoint(x, y, w, h, inv);
 }
 
 const getEdgeFadeStyle = (fadeDistancePx: number = 128): React.CSSProperties => ({
@@ -1417,6 +1429,16 @@ const MaskOverlay = memo(
   },
 );
 
+const GUIDE_SNAP_TAN = Math.tan((35 * Math.PI) / 180);
+const MIN_GUIDE_LENGTH_PX = 15;
+
+/** Snap a screen-space stroke to a guide orientation, or null if it is too diagonal. */
+const classifyGuide = (dx: number, dy: number): GuideOrientation | null => {
+  if (Math.abs(dx) <= Math.abs(dy) * GUIDE_SNAP_TAN) return 'vertical';
+  if (Math.abs(dy) <= Math.abs(dx) * GUIDE_SNAP_TAN) return 'horizontal';
+  return null;
+};
+
 const ImageCanvas = memo(
   ({
     appSettings,
@@ -1474,6 +1496,7 @@ const ImageCanvas = memo(
     // (via the crop icon in the panel), not merely by opening the Crop panel.
     const cropToolActive = useEditorStore((s) => s.cropToolActive);
     const isGuidedPerspectiveActive = useEditorStore((state) => state.isGuidedPerspectiveActive);
+    const hoveredGuideId = useEditorStore((state) => state.hoveredGuideId);
     const [draftGuideLine, setDraftGuideLine] = useState<{ p1: Coord; p2: Coord } | null>(null);
     const [localDragLines, setLocalDragLines] = useState<any[] | null>(null);
 
@@ -1487,6 +1510,21 @@ const ImageCanvas = memo(
     const [isMaskInteractionActive, setIsMaskInteractionActive] = useState(false);
     const [hoveredMarkerId, setHoveredMarkerId] = useState<string | null>(null);
     const isDrawing = useRef(false);
+
+    // Esc finishes drawing guides; the lines themselves are kept.
+    useEffect(() => {
+      if (!isGuidedPerspectiveActive) return;
+      const onKeyDown = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') {
+          setDraftGuideLine(null);
+          isDrawing.current = false;
+          useEditorStore.getState().setEditor({ isGuidedPerspectiveActive: false });
+        }
+      };
+      window.addEventListener('keydown', onKeyDown);
+      return () => window.removeEventListener('keydown', onKeyDown);
+    }, [isGuidedPerspectiveActive]);
+
     const drawingStageRef = useRef<any>(null);
     const dragStartPointer = useRef<Coord | null>(null);
     const lastBrushPoint = useRef<Coord | null>(null);
@@ -2005,16 +2043,18 @@ const ImageCanvas = memo(
     }, [adjustments, isAiEditing, isMasking]);
 
     useEffect(() => {
-      // Show the uncropped crop-editing layer only while the crop tool is active.
-      // When the Crop panel is open but the tool is off (opt-in fork behaviour),
-      // keep showing the normal cropped preview like every other module.
-      if (isCropping && cropToolActive && uncroppedAdjustedPreviewUrl) {
+      // Show the uncropped crop-editing layer while a tool that draws on it is
+      // active: the crop tool, Straighten, or Guided Perspective. The latter two
+      // render their lines on this layer, so gating it on the opt-in crop tool
+      // alone hid them entirely. Otherwise keep the normal cropped preview.
+      const needsUncroppedLayer = cropToolActive || isStraightenActive || isGuidedPerspectiveActive;
+      if (isCropping && needsUncroppedLayer && uncroppedAdjustedPreviewUrl) {
         const timer = setTimeout(() => setIsCropViewVisible(true), 10);
         return () => clearTimeout(timer);
       } else {
         setIsCropViewVisible(false);
       }
-    }, [isCropping, cropToolActive, uncroppedAdjustedPreviewUrl]);
+    }, [isCropping, cropToolActive, isStraightenActive, isGuidedPerspectiveActive, uncroppedAdjustedPreviewUrl]);
 
     const uncroppedImageRenderSize = useMemo<Partial<RenderSize> | null>(() => {
       if (!selectedImage?.width || !selectedImage?.height || !imageRenderSize?.width || !imageRenderSize?.height) {
@@ -2994,46 +3034,25 @@ const ImageCanvas = memo(
         const dx = sc2.x - sc1.x;
         const dy = sc2.y - sc1.y;
 
-        if (Math.hypot(dx, dy) >= 15) {
-          const tan35 = Math.tan((35 * Math.PI) / 180);
-          const isVert = Math.abs(dx) <= Math.abs(dy) * tan35;
-          const isHoriz = Math.abs(dy) <= Math.abs(dx) * tan35;
-
-          if (!isVert && !isHoriz) {
+        if (Math.hypot(dx, dy) >= MIN_GUIDE_LENGTH_PX) {
+          const type = classifyGuide(dx, dy);
+          if (!type) {
             toast.error(t('editor.guided.toast.angleRejected'));
             return;
           }
 
-          const type: GuideOrientation = isVert ? 'vertical' : 'horizontal';
-
-          setAdjustments((prev) => {
-            const existingLines = prev.guidedPerspective?.lines || [];
-
-            const existingOfSameType = existingLines.filter((l: GuideLine) => l.type === type);
-            if (existingOfSameType.length >= 2) {
-              toast.error(t('editor.guided.toast.maxLines'));
-              return prev;
-            }
-
-            const newGuide: GuideLine = {
-              id: crypto.randomUUID(),
-              type,
-              p1,
-              p2,
-            };
-
-            const newLines = [...existingLines, newGuide];
-
-            return {
-              ...prev,
-              guidedPerspective: {
-                ...prev.guidedPerspective,
-                enabled: newLines.length >= 2,
-                lines: newLines,
-                autoCrop: true,
-              },
-            };
-          });
+          const existingLines: GuideLine[] = adjustments.guidedPerspective?.lines || [];
+          if (existingLines.filter((l) => l.type === type).length >= MAX_GUIDES_PER_TYPE) {
+            toast.error(t('editor.guided.toast.maxLines'));
+            return;
+          }
+          const newGuide: GuideLine = { id: crypto.randomUUID(), type, p1, p2 };
+          commitGuideLines(
+            [...existingLines, newGuide],
+            setAdjustments,
+            selectedImage.width || 1,
+            selectedImage.height || 1,
+          );
         }
         return;
       }
@@ -3178,6 +3197,7 @@ const ImageCanvas = memo(
       isGuidedPerspectiveActive,
       isCropping,
       draftGuideLine,
+      adjustments.guidedPerspective?.lines,
       selectedImage,
       setAdjustments,
       isInitialDrawing,
@@ -4115,115 +4135,173 @@ const ImageCanvas = memo(
                       />
                     )}
 
-                    {(localDragLines || adjustments.guidedPerspective?.lines || []).map((line: any) => {
-                      const sc1 = mapUvToScreen(line.p1);
-                      const sc2 = mapUvToScreen(line.p2);
-                      return (
-                        <Group key={line.id}>
-                          <Line
-                            points={[sc1.x, sc1.y, sc2.x, sc2.y]}
-                            stroke="#3b82f6"
-                            strokeWidth={2}
-                            hitStrokeWidth={12}
-                            dash={[6, 4]}
-                            opacity={isGuidedPerspectiveActive ? 1 : 0.75}
-                          />
-                          {isGuidedPerspectiveActive && (
-                            <>
-                              <Circle
-                                x={sc1.x}
-                                y={sc1.y}
-                                radius={6}
-                                fill="#ffffff"
-                                stroke="#3b82f6"
-                                strokeWidth={2}
-                                draggable
-                                onMouseDown={(e) => {
-                                  e.cancelBubble = true;
-                                }}
-                                onTouchStart={(e) => {
-                                  e.cancelBubble = true;
-                                }}
-                                onDragMove={(e) => {
-                                  const newUv = mapScreenToUv(e.target.x(), e.target.y());
-                                  const baseLines = localDragLines || adjustments.guidedPerspective!.lines;
-                                  setLocalDragLines(
-                                    baseLines.map((l: any) => (l.id === line.id ? { ...l, p1: newUv } : l)),
-                                  );
-                                }}
-                                onDragEnd={() => {
-                                  if (localDragLines) {
-                                    setAdjustments((prev) => ({
-                                      ...prev,
-                                      guidedPerspective: {
-                                        ...prev.guidedPerspective,
-                                        lines: localDragLines,
-                                        enabled: localDragLines.length >= 2,
-                                        autoCrop: true,
-                                      },
-                                    }));
-                                    setLocalDragLines(null);
-                                  }
-                                }}
-                              />
-                              <Circle
-                                x={sc2.x}
-                                y={sc2.y}
-                                radius={6}
-                                fill="#ffffff"
-                                stroke="#3b82f6"
-                                strokeWidth={2}
-                                draggable
-                                onMouseDown={(e) => {
-                                  e.cancelBubble = true;
-                                }}
-                                onTouchStart={(e) => {
-                                  e.cancelBubble = true;
-                                }}
-                                onDragMove={(e) => {
-                                  const newUv = mapScreenToUv(e.target.x(), e.target.y());
-                                  const baseLines = localDragLines || adjustments.guidedPerspective!.lines;
-                                  setLocalDragLines(
-                                    baseLines.map((l: any) => (l.id === line.id ? { ...l, p2: newUv } : l)),
-                                  );
-                                }}
-                                onDragEnd={() => {
-                                  if (localDragLines) {
-                                    setAdjustments((prev) => ({
-                                      ...prev,
-                                      guidedPerspective: {
-                                        ...prev.guidedPerspective,
-                                        lines: localDragLines,
-                                        enabled: localDragLines.length >= 2,
-                                        autoCrop: true,
-                                      },
-                                    }));
-                                    setLocalDragLines(null);
-                                  }
-                                }}
-                              />
-                            </>
-                          )}
-                        </Group>
+                    {(() => {
+                      const shownLines: GuideLine[] = localDragLines || adjustments.guidedPerspective?.lines || [];
+                      const commitDrag = () => {
+                        if (localDragLines) {
+                          commitGuideLines(
+                            localDragLines,
+                            setAdjustments,
+                            selectedImage.width || 1,
+                            selectedImage.height || 1,
+                          );
+                          setLocalDragLines(null);
+                        }
+                      };
+                      const endpointHandle = (line: GuideLine, end: 'p1' | 'p2', at: Coord, color: string) => (
+                        <Circle
+                          x={at.x}
+                          y={at.y}
+                          radius={7}
+                          fill="#ffffff"
+                          stroke={color}
+                          strokeWidth={2.5}
+                          hitStrokeWidth={14}
+                          draggable
+                          onMouseDown={(e) => {
+                            e.cancelBubble = true;
+                          }}
+                          onTouchStart={(e) => {
+                            e.cancelBubble = true;
+                          }}
+                          onDragMove={(e) => {
+                            const newUv = mapScreenToUv(e.target.x(), e.target.y());
+                            const baseLines = localDragLines || adjustments.guidedPerspective!.lines;
+                            setLocalDragLines(
+                              baseLines.map((l: GuideLine) => (l.id === line.id ? { ...l, [end]: newUv } : l)),
+                            );
+                          }}
+                          onDragEnd={commitDrag}
+                        />
                       );
-                    })}
 
-                    {draftGuideLine && (
-                      <Line
-                        points={[
-                          mapUvToScreen(draftGuideLine.p1).x,
-                          mapUvToScreen(draftGuideLine.p1).y,
-                          mapUvToScreen(draftGuideLine.p2).x,
-                          mapUvToScreen(draftGuideLine.p2).y,
-                        ]}
-                        stroke="#3b82f6"
-                        strokeWidth={2}
-                        dash={[4, 4]}
-                      />
-                    )}
+                      return shownLines.map((line: GuideLine) => {
+                        const sc1 = mapUvToScreen(line.p1);
+                        const sc2 = mapUvToScreen(line.p2);
+                        const color = GUIDE_COLORS[line.type];
+                        const isHovered = hoveredGuideId === line.id;
+                        // Label sits just off the line's midpoint, perpendicular to it.
+                        const len = Math.hypot(sc2.x - sc1.x, sc2.y - sc1.y) || 1;
+                        const nx = -(sc2.y - sc1.y) / len;
+                        const ny = (sc2.x - sc1.x) / len;
+                        const labelX = (sc1.x + sc2.x) / 2 + nx * 14;
+                        const labelY = (sc1.y + sc2.y) / 2 + ny * 14;
+                        return (
+                          <Group key={line.id}>
+                            {/* Dark under-stroke keeps the guide legible on any image. */}
+                            <Line
+                              points={[sc1.x, sc1.y, sc2.x, sc2.y]}
+                              stroke="rgba(0,0,0,0.55)"
+                              strokeWidth={isHovered ? 8 : 5}
+                              listening={false}
+                            />
+                            <Line
+                              points={[sc1.x, sc1.y, sc2.x, sc2.y]}
+                              stroke={color}
+                              strokeWidth={isHovered ? 5 : 2.5}
+                              hitStrokeWidth={12}
+                              opacity={isGuidedPerspectiveActive || isHovered ? 1 : 0.8}
+                              shadowColor={color}
+                              shadowBlur={isHovered ? 14 : 0}
+                              shadowOpacity={isHovered ? 0.9 : 0}
+                            />
+                            <Label x={labelX} y={labelY} offsetX={11} offsetY={9} listening={false}>
+                              <Tag fill={color} cornerRadius={4} opacity={0.95} />
+                              <KonvaText
+                                text={guideLabel(shownLines, line)}
+                                fontSize={11}
+                                fontStyle="bold"
+                                fill="#ffffff"
+                                padding={4}
+                              />
+                            </Label>
+                            {isGuidedPerspectiveActive && (
+                              <>
+                                {endpointHandle(line, 'p1', sc1, color)}
+                                {endpointHandle(line, 'p2', sc2, color)}
+                              </>
+                            )}
+                          </Group>
+                        );
+                      });
+                    })()}
+
+                    {draftGuideLine &&
+                      (() => {
+                        const d1 = mapUvToScreen(draftGuideLine.p1);
+                        const d2 = mapUvToScreen(draftGuideLine.p2);
+                        const dx = d2.x - d1.x;
+                        const dy = d2.y - d1.y;
+                        const type = classifyGuide(dx, dy);
+                        const existing = adjustments.guidedPerspective?.lines || [];
+                        const typeFull =
+                          type !== null &&
+                          existing.filter((l: GuideLine) => l.type === type).length >= MAX_GUIDES_PER_TYPE;
+                        const tooShort = Math.hypot(dx, dy) < MIN_GUIDE_LENGTH_PX;
+                        // Live preview of what releasing will do: snapped orientation
+                        // colour, or red when the stroke will be rejected.
+                        const color = type && !typeFull ? GUIDE_COLORS[type] : GUIDE_REJECTED_COLOR;
+                        return (
+                          <Group listening={false}>
+                            <Line
+                              points={[d1.x, d1.y, d2.x, d2.y]}
+                              stroke="rgba(0,0,0,0.55)"
+                              strokeWidth={5}
+                            />
+                            <Line points={[d1.x, d1.y, d2.x, d2.y]} stroke={color} strokeWidth={2.5} dash={[8, 5]} />
+                            {!tooShort && (
+                              <Label x={d2.x + 12} y={d2.y + 12}>
+                                <Tag fill={color} cornerRadius={4} opacity={0.95} />
+                                <KonvaText
+                                  text={
+                                    !type
+                                      ? t('editor.guided.toast.angleRejected')
+                                      : typeFull
+                                        ? t('editor.guided.toast.maxLines')
+                                        : t(`editor.guided.${type}`)
+                                  }
+                                  fontSize={11}
+                                  fill="#ffffff"
+                                  padding={5}
+                                />
+                              </Label>
+                            )}
+                          </Group>
+                        );
+                      })()}
                   </Layer>
                 </Stage>
               )}
+
+              {isGuidedPerspectiveActive &&
+                (() => {
+                  const count = adjustments.guidedPerspective?.lines?.length ?? 0;
+                  const message =
+                    count === 0
+                      ? t('editor.guided.canvasHint')
+                      : count === 1
+                        ? t('editor.guided.needMore', { count: 1 })
+                        : t('editor.guided.applied');
+                  return (
+                    <div
+                      style={{
+                        position: 'absolute',
+                        top: 12,
+                        left: '50%',
+                        transform: 'translateX(-50%)',
+                        zIndex: 11,
+                        pointerEvents: 'none',
+                        maxWidth: 'calc(100% - 24px)',
+                      }}
+                      className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-black/70 text-white text-xs shadow-lg backdrop-blur-sm whitespace-nowrap"
+                    >
+                      <span className="inline-block w-2 h-2 rounded-full" style={{ background: GUIDE_COLORS.vertical }} />
+                      <span className="inline-block w-2 h-2 rounded-full -ml-1" style={{ background: GUIDE_COLORS.horizontal }} />
+                      <span className="truncate">{message}</span>
+                      <span className="opacity-60">· {t('editor.guided.linesCount', { count })}</span>
+                    </div>
+                  );
+                })()}
             </div>
           )}
         </div>

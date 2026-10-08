@@ -1,5 +1,76 @@
 import { Crop } from 'react-image-crop';
 
+/** Map a point in the unoriented image (w×h) through `steps` quarter turns, as the pipeline does. */
+export function orientPoint(x: number, y: number, w: number, h: number, steps: number) {
+  const s = ((steps % 4) + 4) % 4;
+  if (s === 0) return { x, y };
+  if (s === 1) return { x: h - y, y: x };
+  if (s === 2) return { x: w - x, y: h - y };
+  return { x: y, y: w - x };
+}
+
+export function unorientPoint(x: number, y: number, w: number, h: number, steps: number) {
+  const s = ((steps % 4) + 4) % 4;
+  const inv = (4 - s) % 4;
+  return orientPoint(x, y, w, h, inv);
+}
+
+/**
+ * Convert the guided-perspective solver's inscribed rectangle — normalized
+ * [x, y, w, h] in the warped, unoriented frame — into a pixel crop in the
+ * oriented/flipped space `adjustments.crop` lives in. With an aspect ratio
+ * locked, the largest centred rectangle of that ratio inside it is used.
+ * Edges round inward so no sliver of the warp's empty border survives.
+ */
+export function guidedRectToCrop(
+  rect: [number, number, number, number],
+  imageWidth: number,
+  imageHeight: number,
+  orientationSteps: number,
+  flipHorizontal: boolean,
+  flipVertical: boolean,
+  aspectRatio: number | null,
+): Crop {
+  const [rx, ry, rw, rh] = rect;
+  const { width: W, height: H } = getOrientedDimensions(imageWidth, imageHeight, orientationSteps);
+  const corners = [
+    [rx, ry],
+    [rx + rw, ry],
+    [rx + rw, ry + rh],
+    [rx, ry + rh],
+  ].map(([u, v]) => {
+    const p = orientPoint(u * imageWidth, v * imageHeight, imageWidth, imageHeight, orientationSteps);
+    return { x: flipHorizontal ? W - p.x : p.x, y: flipVertical ? H - p.y : p.y };
+  });
+  let x0 = Math.min(...corners.map((p) => p.x));
+  let x1 = Math.max(...corners.map((p) => p.x));
+  let y0 = Math.min(...corners.map((p) => p.y));
+  let y1 = Math.max(...corners.map((p) => p.y));
+
+  if (aspectRatio && aspectRatio > 0) {
+    const w = x1 - x0;
+    const h = y1 - y0;
+    const cx = (x0 + x1) / 2;
+    const cy = (y0 + y1) / 2;
+    const fitW = Math.min(w, h * aspectRatio);
+    const fitH = fitW / aspectRatio;
+    x0 = cx - fitW / 2;
+    x1 = cx + fitW / 2;
+    y0 = cy - fitH / 2;
+    y1 = cy + fitH / 2;
+  }
+
+  const x = Math.max(0, Math.ceil(x0));
+  const y = Math.max(0, Math.ceil(y0));
+  return {
+    unit: 'px',
+    x,
+    y,
+    width: Math.max(1, Math.min(W, Math.floor(x1)) - x),
+    height: Math.max(1, Math.min(H, Math.floor(y1)) - y),
+  };
+}
+
 export function getOrientedDimensions(
   imageWidth: number,
   imageHeight: number,

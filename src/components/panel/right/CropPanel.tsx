@@ -21,15 +21,15 @@ import {
   SquareDashed,
   Activity,
   CircleDashed,
-  Minus,
   Trash2,
+  Eraser,
   Info,
-  Ban,
   Save,
 } from 'lucide-react';
 import { useTranslation, Trans } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
-import { Adjustments, INITIAL_ADJUSTMENTS } from '../../../utils/adjustments';
+import { Adjustments, GUIDE_COLORS, GuideLine, guideLabel, INITIAL_ADJUSTMENTS } from '../../../utils/adjustments';
+import { commitGuideLines, setGuidedAutoCrop, withdrawAutoCrop } from '../../../utils/guidedPerspective';
 import clsx from 'clsx';
 import { CustomAspectRatio, Orientation } from '../../ui/AppProperties';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -101,6 +101,9 @@ export default function CropPanel() {
   const adjustments = useEditorStore((s) => s.adjustments);
   const isStraightenActive = useEditorStore((s) => s.isStraightenActive);
   const isGuidedPerspectiveActive = useEditorStore((s) => s.isGuidedPerspectiveActive);
+  const guideLines: GuideLine[] = adjustments.guidedPerspective?.lines ?? [];
+  const imageW = selectedImage?.width || 1;
+  const imageH = selectedImage?.height || 1;
   const activeOverlay = useEditorStore((s) => s.overlayMode);
   const cropToolActive = useEditorStore((s) => s.cropToolActive);
   const setEditor = useEditorStore((s) => s.setEditor);
@@ -843,6 +846,7 @@ export default function CropPanel() {
         transformScale: INITIAL_ADJUSTMENTS.transformScale ?? 100,
         transformXOffset: INITIAL_ADJUSTMENTS.transformXOffset ?? 0,
         transformYOffset: INITIAL_ADJUSTMENTS.transformYOffset ?? 0,
+        crop: withdrawAutoCrop(prev).crop,
         guidedPerspective: INITIAL_ADJUSTMENTS.guidedPerspective,
       }));
     };
@@ -1062,6 +1066,8 @@ export default function CropPanel() {
                         onClick={() => {
                           setEditor((state) => ({
                             isStraightenActive: !state.isStraightenActive,
+                            // Both draw on the same canvas layer; only one can own it.
+                            isGuidedPerspectiveActive: false,
                           }));
                         }}
                         className={clsx(
@@ -1196,13 +1202,18 @@ export default function CropPanel() {
                           <div className="space-y-3">
                             <motion.button
                               type="button"
-                              onClick={() => setEditor({ isGuidedPerspectiveActive: !isGuidedPerspectiveActive })}
+                              onClick={() =>
+                                setEditor({
+                                  isGuidedPerspectiveActive: !isGuidedPerspectiveActive,
+                                  isStraightenActive: false,
+                                })
+                              }
                               whileTap={{ scale: 0.98 }}
                               transition={{ type: 'spring', stiffness: 400, damping: 17 }}
                               className={clsx(
                                 'w-full flex items-center justify-center p-2.5 rounded-lg text-sm font-medium cursor-pointer transition-colors',
                                 isGuidedPerspectiveActive
-                                  ? 'bg-accent text-button-text group hover:bg-red-600 hover:text-white'
+                                  ? 'bg-accent text-button-text group'
                                   : 'bg-bg-secondary text-text-secondary hover:bg-card-active hover:text-text-primary',
                               )}
                             >
@@ -1212,9 +1223,10 @@ export default function CropPanel() {
                                     <Cuboid size={16} />
                                     {t('editor.guided.drawingActive')}
                                   </span>
+                                  {/* Leaving drawing mode keeps the lines, so this is "Done", not "Cancel". */}
                                   <span className="hidden items-center gap-2 group-hover:flex">
-                                    <Ban size={16} />
-                                    {t('editor.guided.cancel')}
+                                    <Check size={16} />
+                                    {t('editor.guided.done')}
                                   </span>
                                 </>
                               ) : (
@@ -1225,56 +1237,89 @@ export default function CropPanel() {
                               )}
                             </motion.button>
 
-                            {adjustments.guidedPerspective?.lines && adjustments.guidedPerspective.lines.length > 0 && (
+                            {(isGuidedPerspectiveActive || guideLines.length === 0) && (
+                              <Text variant={TextVariants.small} color={TextColors.secondary} className="px-1 leading-snug">
+                                {t('editor.guided.hint')}
+                              </Text>
+                            )}
+
+                            {guideLines.length > 0 && (
                               <div className="p-3 bg-bg-primary rounded-md border border-surface flex flex-col gap-2">
-                                <div className="flex justify-between items-center text-xs font-medium">
-                                  <span>{t('editor.guided.linesStatus')}</span>
-                                  <span
-                                    className={clsx(
-                                      adjustments.guidedPerspective.lines.length >= 2
-                                        ? 'text-accent'
-                                        : 'text-text-secondary',
-                                    )}
-                                  >
-                                    {adjustments.guidedPerspective.lines.length} / 4
-                                  </span>
+                                <div className="flex justify-between items-center gap-2 text-xs font-medium">
+                                  <span className="truncate">{t('editor.guided.linesStatus')}</span>
+                                  <div className="flex items-center gap-1 shrink-0">
+                                    <span
+                                      className={clsx(
+                                        'whitespace-nowrap',
+                                        guideLines.length >= 2 ? 'text-accent' : 'text-text-secondary',
+                                      )}
+                                    >
+                                      {guideLines.length} / 4
+                                    </span>
+                                    <button
+                                      className="p-1 rounded text-text-secondary hover:text-red-500 hover:bg-surface transition-colors"
+                                      data-tooltip={t('editor.guided.clearAll')}
+                                      onClick={() => {
+                                        setEditor({ hoveredGuideId: null });
+                                        commitGuideLines([], setAdjustments, imageW, imageH);
+                                      }}
+                                    >
+                                      <Eraser size={14} />
+                                    </button>
+                                  </div>
+                                </div>
+                                <Text
+                                  variant={TextVariants.small}
+                                  color={guideLines.length >= 2 ? TextColors.accent : TextColors.secondary}
+                                >
+                                  {guideLines.length >= 2
+                                    ? t('editor.guided.applied')
+                                    : t('editor.guided.needMore', { count: 2 - guideLines.length })}
+                                </Text>
+                                <div data-tooltip={t('editor.guided.autoCropTooltip')}>
+                                  <Switch
+                                    label={t('editor.guided.autoCrop')}
+                                    checked={adjustments.guidedPerspective?.autoCrop ?? true}
+                                    onChange={(v) => setGuidedAutoCrop(v, setAdjustments, imageW, imageH)}
+                                  />
                                 </div>
                                 <div className="flex flex-col gap-1 mt-1">
-                                  {adjustments.guidedPerspective.lines.map((line: any, idx: number) => (
+                                  {guideLines.map((line: GuideLine) => (
                                     <div
                                       key={line.id}
-                                      className="flex items-center gap-2 p-2 rounded-md bg-surface transition-colors group"
+                                      onMouseEnter={() => setEditor({ hoveredGuideId: line.id })}
+                                      onMouseLeave={() => setEditor({ hoveredGuideId: null })}
+                                      onClick={() =>
+                                        setEditor({ isGuidedPerspectiveActive: true, isStraightenActive: false })
+                                      }
+                                      className="flex items-center gap-2 p-2 rounded-md bg-surface hover:bg-card-active transition-colors group cursor-pointer"
                                     >
-                                      <Text
-                                        as="div"
-                                        color={TextColors.secondary}
-                                        className="p-0.5 rounded transition-colors shrink-0 flex items-center justify-center"
+                                      <span
+                                        className="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-bold text-white"
+                                        style={{ background: GUIDE_COLORS[line.type] }}
                                       >
-                                        <Minus size={16} />
-                                      </Text>
+                                        {guideLabel(guideLines, line)}
+                                      </span>
                                       <div className="flex-1 min-w-0">
                                         <Text
                                           color={TextColors.primary}
                                           weight={TextWeights.medium}
-                                          className="truncate select-none text-xs capitalize"
+                                          className="truncate select-none text-xs"
                                         >
-                                          {line.type} Guide #{idx + 1}
+                                          {t(`editor.guided.${line.type}`)}
                                         </Text>
                                       </div>
                                       <button
                                         className="p-1 hover:text-red-500 text-text-secondary transition-colors"
-                                        onClick={() => {
-                                          const newLines = adjustments.guidedPerspective!.lines.filter(
-                                            (l: any) => l.id !== line.id,
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setEditor({ hoveredGuideId: null });
+                                          commitGuideLines(
+                                            guideLines.filter((l: GuideLine) => l.id !== line.id),
+                                            setAdjustments,
+                                            imageW,
+                                            imageH,
                                           );
-                                          setAdjustments((prev) => ({
-                                            ...prev,
-                                            guidedPerspective: {
-                                              ...prev.guidedPerspective,
-                                              lines: newLines,
-                                              enabled: newLines.length >= 2,
-                                            },
-                                          }));
                                         }}
                                       >
                                         <Trash2 size={16} />

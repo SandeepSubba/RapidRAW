@@ -64,6 +64,9 @@ interface EditorState {
   isWbPickerActive: boolean;
   isPointPickerActive: boolean;
   isGuidedPerspectiveActive: boolean;
+  // Guide line under the pointer in the Crop panel's list, so the canvas can
+  // highlight which line a row refers to.
+  hoveredGuideId: string | null;
   liveRotation: number | null;
   brushSettings: BrushSettings | null;
 
@@ -133,6 +136,7 @@ export const useEditorStore = create<EditorState>((set) => ({
   isWbPickerActive: false,
   isPointPickerActive: false,
   isGuidedPerspectiveActive: false,
+  hoveredGuideId: null,
   liveRotation: null,
 
   copiedSectionAdjustments: null,
