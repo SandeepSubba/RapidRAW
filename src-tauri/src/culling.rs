@@ -804,6 +804,74 @@ pub fn group_by_time(
     suggestions
 }
 
+/// One photo as the assistant's culling pass sees it: the technical hints sent
+/// alongside the image so the model can weigh them against what it sees.
+#[derive(Serialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ShotInfo {
+    pub path: String,
+    pub quality: f64,
+    pub sharpness: f64,
+}
+
+#[derive(Serialize, Debug, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ShotGroups {
+    /// Bursts / near-duplicates, best-scoring first within each group.
+    pub groups: Vec<Vec<ShotInfo>>,
+    pub singles: Vec<ShotInfo>,
+    pub failed: Vec<String>,
+}
+
+fn shot_info(r: &ImageAnalysisResult) -> ShotInfo {
+    ShotInfo {
+        path: r.path.clone(),
+        quality: r.quality_score,
+        sharpness: r.sharpness_metric,
+    }
+}
+
+/// Split photos into groups of similar shots for the assistant's comparative
+/// cull. Same analysis as the Cull dialog, on its own event channel
+/// (`assistant-cull-*`) so the dialog's listeners never fire.
+#[tauri::command]
+pub async fn assistant_group_images(
+    paths: Vec<String>,
+    similarity_threshold: Option<u32>,
+    app_handle: AppHandle,
+) -> Result<ShotGroups, String> {
+    let (analyses, failed) = analyze_paths(paths, app_handle, "assistant-cull", true).await?;
+    let settings = CullingSettings {
+        similarity_threshold: similarity_threshold.unwrap_or(28),
+        blur_threshold: 0.0,
+        group_similar: true,
+        filter_blurry: false,
+    };
+    let suggestions = group_analyses(&analyses, failed, &settings);
+
+    let mut grouped = std::collections::HashSet::new();
+    let groups: Vec<Vec<ShotInfo>> = suggestions
+        .similar_groups
+        .iter()
+        .map(|g| {
+            std::iter::once(&g.representative)
+                .chain(g.duplicates.iter())
+                .map(|r| {
+                    grouped.insert(r.path.clone());
+                    shot_info(r)
+                })
+                .collect()
+        })
+        .collect();
+    let singles = analyses
+        .iter()
+        .map(|a| &a.result)
+        .filter(|r| !grouped.contains(&r.path))
+        .map(shot_info)
+        .collect();
+    Ok(ShotGroups { groups, singles, failed: suggestions.failed_paths })
+}
+
 pub async fn run_culling(
     paths: Vec<String>,
     settings: CullingSettings,

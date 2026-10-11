@@ -34,6 +34,8 @@ export enum Invokes {
   AddTagForPaths = 'add_tag_for_paths',
   ApplyAdjustments = 'apply_adjustments',
   AssistantChat = 'assistant_chat',
+  AssistantCull = 'assistant_cull',
+  AssistantGroupImages = 'assistant_group_images',
   AssistantDevChat = 'assistant_dev_chat',
   AssistantDevCancel = 'assistant_dev_cancel',
   StartExternalEdit = 'start_external_edit',

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import {
   Bot,
@@ -24,7 +24,7 @@ import { listen } from '@tauri-apps/api/event';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'react-toastify';
 import clsx from 'clsx';
-import { Invokes } from '../../ui/AppProperties';
+import { ImageFlag, Invokes } from '../../ui/AppProperties';
 import Text from '../../ui/Text';
 import { TextColors, TextVariants } from '../../../types/typography';
 import { useEditorStore } from '../../../store/useEditorStore';
@@ -38,6 +38,18 @@ import { useSettingsStore } from '../../../store/useSettingsStore';
 import { useAssistantStore, nextMessageId, AssistantMessage } from '../../../store/useAssistantStore';
 import { useEditorActions } from '../../../hooks/useEditorActions';
 import { useLibraryActions } from '../../../hooks/useLibraryActions';
+import { computeSortedLibrary } from '../../../hooks/useSortedLibrary';
+import { CULL_REQUEST, CullTarget, planCullChunks, runAssistantCull, ShotGroups } from '../../../utils/assistantCull';
+import {
+  buildImportContext,
+  importCullScope,
+  importCullTarget,
+  importQGrades,
+  importShotGroups,
+  isImportReviewActive,
+  isImportWindowBusy,
+  selectImportFiles,
+} from '../../../utils/importAssistant';
 import { getTransformAdjustments } from '../../../hooks/useAiMasking';
 import { INITIAL_MASK_ADJUSTMENTS, INITIAL_MASK_CONTAINER, MAX_POINT_COLORS } from '../../../utils/adjustments';
 import { useAuth } from '@clerk/react';
@@ -398,6 +410,10 @@ const LIBRARY_REQUEST =
   /\b(?:folder|library|all (?:the |these |of the )?(?:images|photos|pictures|files)|every (?:image|photo|picture|file)|any (?:image|photo|picture|file)s?|which (?:images|photos|pictures|files|ones)|how many)\b/;
 const LIBRARY_LIMIT = 2000;
 
+// Asking to clear a flag is the only time a model's flag "none" is honoured.
+const CLEAR_FLAG_REQUEST =
+  /\b(?:unflag\w*|unpick\w*|unreject\w*|clear (?:the |all )?(?:flags?|picks?|rejects?)|remove (?:the )?(?:flags?|picks?|rejects?|rejections?))\b/;
+
 const fileNameOf = (p: string) => (p.split(/[\\/]/).pop() || p).split('?vc=')[0];
 
 // One compact entry per image in the open folder, empty fields omitted. Titles
@@ -428,6 +444,7 @@ async function buildLibraryContext(): Promise<Record<string, any> | null> {
       file: fileNameOf(img.path),
       ...(title ? { title } : {}),
       ...(rating ? { rating } : {}),
+      ...(img.flag ? { flag: img.flag } : {}),
       ...(label ? { label } : {}),
       ...(tags.length ? { tags } : {}),
       ...(img.is_edited ? { edited: true } : {}),
@@ -1374,7 +1391,7 @@ export default function AssistantPanel() {
   const { setAdjustments } = useEditorActions();
   // Generative replace (object removal with a prompt) may need the cloud token.
   const { getToken } = useAuth();
-  const { handleUpdateExif, handleRate, handleSetColorLabel, handleTagsChanged, handleRenameToName } =
+  const { handleUpdateExif, handleRate, handleSetFlag, handleSetColorLabel, handleTagsChanged, handleRenameToName } =
     useLibraryActions();
   const selectedImage = useEditorStore((s) => s.selectedImage);
   const scanPreviewReady = useScannerStore((st) => !!st.previewData);
@@ -1383,6 +1400,9 @@ export default function AssistantPanel() {
   const importViewActive = useUIStore((st) => st.isImportViewActive);
   const importStage = useImportStore((st) => st.stage);
   const scannerOpen = importViewActive && importStage === 'scanner';
+  const importScanned = useImportStore((st) => st.scannedPaths.length);
+  const importSelected = useImportStore((st) => st.selectedPaths.length);
+  const importReview = importViewActive && importStage === 'review' && importScanned > 0;
   const multiSelectedPaths = useLibraryStore((s) => s.multiSelectedPaths);
   const selectedCount = multiSelectedPaths.length;
 
@@ -1443,7 +1463,7 @@ export default function AssistantPanel() {
     async (
       response: any,
       path: string,
-      intent?: { rename: boolean; title: boolean },
+      intent?: { rename: boolean; title: boolean; clearFlag?: boolean },
     ): Promise<{ metaPatch: Record<string, string> | null; org: string | null }> => {
       const metaPatch = sanitizeMetadata(response?.metadata);
       const modelFilename =
@@ -1492,9 +1512,22 @@ export default function AssistantPanel() {
       if (typeof response?.rating === 'number') {
         const r = Math.max(0, Math.min(5, Math.round(response.rating)));
         if (r >= 1) {
-          handleRate(r, [path]);
+          // handleRate toggles: re-applying the current rating clears it.
+          const current = useLibraryStore.getState().imageRatings[path] || 0;
+          if (current !== r) handleRate(r, [path]);
           orgParts.push(`rating ${r}★`);
         }
+      }
+
+      // After the rating: a star rating un-rejects, so a reject must land last.
+      // "none" only clears when the user asked to unflag — schema-filled models
+      // emit it as a placeholder, like colorLabel "none".
+      const flag = response?.flag;
+      if (flag === 'pick' || flag === 'reject' || (flag === 'none' && intent?.clearFlag)) {
+        const target = flag === 'none' ? null : flag === 'pick' ? ImageFlag.Pick : ImageFlag.Reject;
+        const current = useLibraryStore.getState().imageList.find((i) => i.path === path)?.flag ?? null;
+        if (current !== target) handleSetFlag(target, [path]);
+        orgParts.push(flag === 'none' ? 'flag cleared' : flag === 'pick' ? 'picked' : 'rejected');
       }
 
       // Only SET a real color; ignore none/null/empty so the assistant never
@@ -1519,7 +1552,157 @@ export default function AssistantPanel() {
 
       return { metaPatch: hasMeta ? metaPatch : null, org: orgParts.length ? orgParts.join(' · ') : null };
     },
-    [handleUpdateExif, handleRate, handleSetColorLabel, handleTagsChanged, handleRenameToName],
+    [handleUpdateExif, handleRate, handleSetFlag, handleSetColorLabel, handleTagsChanged, handleRenameToName],
+  );
+
+  // Where a library cull writes: the same rating / flag / label actions as the
+  // grid, skipped when the value is already set (handleRate toggles).
+  const libraryCullTarget = useMemo<CullTarget>(
+    () => ({
+      mode: 'library',
+      stateOf: (path) => {
+        const st = useLibraryStore.getState();
+        const img = st.imageList.find((i) => i.path === path);
+        return {
+          rating: st.imageRatings[path] ?? img?.rating ?? 0,
+          flag: img?.flag ?? null,
+          label: img?.tags?.find((tg: string) => tg.startsWith('color:'))?.slice(6) ?? null,
+        };
+      },
+      apply: (path, d) => {
+        const changes: string[] = [];
+        const st = useLibraryStore.getState();
+        const img = st.imageList.find((i) => i.path === path);
+        // Rating first: a star rating un-rejects, and a reject is never rated.
+        if (d.rating && d.flag !== 'reject' && (st.imageRatings[path] ?? img?.rating ?? 0) !== d.rating) {
+          handleRate(d.rating, [path]);
+          changes.push('rating');
+        }
+        if (d.flag) {
+          const target = d.flag === 'pick' ? ImageFlag.Pick : ImageFlag.Reject;
+          if ((img?.flag ?? null) !== target) {
+            handleSetFlag(target, [path]);
+            changes.push('flag');
+          }
+        }
+        if (d.colorLabel) {
+          const current = img?.tags?.find((tg: string) => tg.startsWith('color:'))?.slice(6) ?? null;
+          if (current !== d.colorLabel) {
+            handleSetColorLabel(d.colorLabel, [path]);
+            changes.push('label');
+          }
+        }
+        return changes;
+      },
+    }),
+    [handleRate, handleSetFlag, handleSetColorLabel],
+  );
+
+  const addReport = useCallback(
+    (content: string, isError = false) =>
+      addMessage({ id: nextMessageId(), role: 'assistant', content, isError, isReport: !isError }),
+    [addMessage],
+  );
+
+  // Comparative cull: group similar shots, then one request per group so the
+  // model can compare frames. Decisions land as each group finishes.
+  const runCull = useCallback(
+    async (paths: string[], instruction: string, inImport: boolean) => {
+      const target = inImport ? importCullTarget : libraryCullTarget;
+      let shots: ShotGroups | null = inImport ? importShotGroups(paths) : null;
+      if (!shots) {
+        addReport(
+          t('editor.assistant.cullGrouping', 'Grouping {{count}} photos into similar shots…', { count: paths.length }),
+        );
+        shots = await invoke<ShotGroups>(Invokes.AssistantGroupImages, { paths });
+      }
+      if (cancelRef.current) return;
+      const chunks = planCullChunks(shots);
+      addReport(
+        t(
+          'editor.assistant.cullPlan',
+          'Comparing {{groups}} group(s) of similar shots and {{singles}} other photo(s) — {{requests}} request(s) to the model.',
+          { groups: shots.groups.length, singles: shots.singles.length, requests: chunks.length },
+        ),
+      );
+      const { decided, total } = await runAssistantCull({
+        shots,
+        instruction,
+        model: selectedModel || null,
+        target,
+        qGrades: inImport ? importQGrades() : undefined,
+        isCancelled: () => cancelRef.current,
+        onReport: (r) => addReport(r.text, !!r.isError),
+      });
+      if (shots.failed.length > 0) {
+        addReport(
+          t('editor.assistant.cullFailed', '{{count}} photo(s) could not be analysed and were skipped.', {
+            count: shots.failed.length,
+          }),
+        );
+      }
+      if (cancelRef.current) {
+        addReport(
+          t('editor.assistant.cullStopped', 'Stopped — decided {{done}} of {{total}} photos.', {
+            done: decided,
+            total,
+          }),
+        );
+      } else {
+        toast.success(t('editor.assistant.cullDone', 'Culled {{done}} of {{total}} photos', { done: decided, total }));
+      }
+    },
+    [libraryCullTarget, addReport, selectedModel, t],
+  );
+
+  // Chat in the import window: answered from the import grid. The model acts
+  // through "select"; a rating / label / flag in the same answer applies to the
+  // photos it selected (pick = mark for import, reject = unmark).
+  const importChat = useCallback(
+    async (history: Array<{ role: string; content: string }>, text: string) => {
+      const response: any = await invoke(Invokes.AssistantChat, {
+        messages: history,
+        adjustments: { _import: buildImportContext() },
+        currentMetadata: null,
+        images: [],
+        model: selectedModel || null,
+      });
+      const parts: string[] = [];
+      if (Array.isArray(response?.select) && response.select.length > 0) {
+        const picked = selectImportFiles(response.select.map(String));
+        const s = useImportStore.getState();
+        const decision = {
+          file: '',
+          rating:
+            typeof response.rating === 'number' && response.rating >= 1
+              ? Math.min(5, Math.round(response.rating))
+              : null,
+          flag: response.flag === 'pick' || response.flag === 'reject' ? response.flag : null,
+          colorLabel:
+            typeof response.colorLabel === 'string' && VALID_COLORS.has(response.colorLabel)
+              ? response.colorLabel
+              : null,
+          reason: null,
+        };
+        if (decision.rating || decision.flag || decision.colorLabel) {
+          let changed = 0;
+          s.selectedPaths.forEach((p) => {
+            if (importCullTarget.apply(p, { ...decision, file: p }).length > 0) changed++;
+          });
+          parts.push(t('editor.assistant.importApplied', 'Updated {{count}} photo(s).', { count: changed }));
+        } else if (picked > 0) {
+          parts.push(t('editor.assistant.importSelected', 'Selected {{count}} photo(s).', { count: picked }));
+        }
+      }
+      const reply = (response?.reply || '').trim();
+      addMessage({
+        id: nextMessageId(),
+        role: 'assistant',
+        content: reply || '…',
+        appliedOrganization: parts.length ? parts.join(' · ') : null,
+      });
+    },
+    [addMessage, selectedModel, t],
   );
 
   // Summarize the active conversation into a single message so future turns carry
@@ -1534,7 +1717,7 @@ export default function AssistantPanel() {
     }
     setLoading(true);
     try {
-      const history = msgs.filter((m) => !m.isError).map((m) => ({ role: m.role, content: m.content }));
+      const history = msgs.filter((m) => !m.isError && !m.isReport).map((m) => ({ role: m.role, content: m.content }));
       history.push({
         role: 'user',
         content:
@@ -1676,7 +1859,34 @@ export default function AssistantPanel() {
     // A folder question is about the listing, so it never fans out per image
     // even with several images selected.
     const libraryRequest = !scannerMode && LIBRARY_REQUEST.test((text || '').toLowerCase());
-    const doBatch = !scannerMode && !libraryRequest && outgoing.length === 0 && selectedPaths.length > 1;
+    // Import window: questions are answered from the import grid, and culls
+    // write into it — never into whatever image the editor has open behind it.
+    const importMode = !scannerMode && isImportReviewActive(useUIStore.getState().isImportViewActive);
+    // Import window open but its grid isn't ready (source picker, scoring,
+    // importing): nothing to act on, and the library behind it is off limits.
+    const importBusy = !scannerMode && isImportWindowBusy(useUIStore.getState().isImportViewActive);
+    // Cull: photos compared in groups, not one conversation per image. Scope is
+    // the selection, or the whole folder when the user says so.
+    const cullRequest = !scannerMode && outgoing.length === 0 && CULL_REQUEST.test((text || '').toLowerCase());
+    const cullPaths =
+      !cullRequest || importBusy
+        ? []
+        : importMode
+          ? importCullScope()
+          : selectedPaths.length > 1
+            ? [...selectedPaths]
+            : libraryRequest
+              ? computeSortedLibrary(useLibraryStore.getState(), useSettingsStore.getState()).map((img) => img.path)
+              : [];
+    const doCull = cullPaths.length > 1;
+    const doBatch =
+      !scannerMode &&
+      !importMode &&
+      !importBusy &&
+      !doCull &&
+      !libraryRequest &&
+      outgoing.length === 0 &&
+      selectedPaths.length > 1;
 
     const priorUserText = (() => {
       const s = useAssistantStore.getState();
@@ -1692,7 +1902,7 @@ export default function AssistantPanel() {
     const viewerUrl = finalPreviewUrl || uncroppedAdjustedPreviewUrl || currentImage?.thumbnailUrl || null;
     const willAttachViewer = scannerMode
       ? outgoing.length === 0
-      : !doBatch && !imagesOff && outgoing.length === 0 && !!currentImage && !!viewerUrl;
+      : !doBatch && !importBusy && !imagesOff && outgoing.length === 0 && !!currentImage && !!viewerUrl;
 
     const userMessage: AssistantMessage = {
       id: nextMessageId(),
@@ -1701,11 +1911,15 @@ export default function AssistantPanel() {
       // Count what is actually sent: with scanning ruled out nothing is
       // attached, and showing "4 image(s)" made it look like the app had
       // ignored the instruction.
-      imageCount: doBatch
-        ? imagesOff
-          ? 0
-          : selectedPaths.length
-        : outgoing.length + (willAttachViewer ? 1 : 0),
+      imageCount: doCull
+        ? cullPaths.length
+        : doBatch
+          ? imagesOff
+            ? 0
+            : selectedPaths.length
+          : importMode || importBusy
+            ? 0
+            : outgoing.length + (willAttachViewer ? 1 : 0),
     };
     addMessage(userMessage);
     setInput('');
@@ -1719,7 +1933,7 @@ export default function AssistantPanel() {
     // assistant turns they read as an established finding — one refusal then
     // teaches every later run to refuse the same way.
     const history = activeMessages
-      .filter((m) => !m.isError)
+      .filter((m) => !m.isError && !m.isReport)
       .map((m) => ({
         role: m.role,
         content: m.content,
@@ -1737,6 +1951,7 @@ export default function AssistantPanel() {
     const intent = {
       rename: /\b(rename|renamed|file ?name|file'?s name)\b/.test(recentUserText),
       title: /\btitle\b/.test(recentUserText),
+      clearFlag: CLEAR_FLAG_REQUEST.test((text || '').toLowerCase()),
     };
     // Requests that read text off the image get a hard verification gate in
     // batch: values are not accepted from the downscaled overview alone.
@@ -1766,6 +1981,39 @@ export default function AssistantPanel() {
       /\b(read|ocr|label|code|weight|gms|gsm|extract|text|number)\b/.test(recentUserText);
 
     try {
+      if (importBusy) {
+        addMessage({
+          id: nextMessageId(),
+          role: 'assistant',
+          content: t(
+            'editor.assistant.importBusy',
+            'The import window has no photos to work on yet — ask again once its photos are shown.',
+          ),
+          isReport: true,
+        });
+        return;
+      }
+      if (doCull) {
+        await runCull(cullPaths, text || '', importMode);
+        return;
+      }
+      if (cullRequest && !importMode && !currentImage) {
+        // Asked to cull with nothing to compare: say how to scope it.
+        addMessage({
+          id: nextMessageId(),
+          role: 'assistant',
+          content: t(
+            'editor.assistant.cullNeedsSelection',
+            'Select the photos to cull (two or more), or ask to cull all the photos in this folder.',
+          ),
+          isReport: true,
+        });
+        return;
+      }
+      if (importMode) {
+        await importChat(history, text || '');
+        return;
+      }
       if (doBatch) {
         const paths = [...selectedPaths];
         // Nudge the model to act on the attached image only, so it OCRs each
@@ -2456,6 +2704,8 @@ export default function AssistantPanel() {
     imageMaxDim,
     t,
     devMode,
+    runCull,
+    importChat,
   ]);
 
   const stop = useCallback(() => {
@@ -2808,18 +3058,37 @@ export default function AssistantPanel() {
           </div>
         )}
 
-        {!devMode && selectedCount > 1 && attachments.length === 0 && (
+        {!devMode && !importViewActive && selectedCount > 1 && attachments.length === 0 && (
           <div className="flex items-center gap-1.5 mb-2 px-1 text-accent">
             <Layers size={13} className="shrink-0" />
             <Text color={TextColors.secondary} className="text-xs">
-              {t('editor.assistant.applyingToSelected', 'Will apply to all {{count}} selected images', {
-                count: selectedCount,
-              })}
+              {t(
+                'editor.assistant.applyingToSelectedOrCull',
+                'Will apply to all {{count}} selected images — or ask to cull them',
+                { count: selectedCount },
+              )}
             </Text>
           </div>
         )}
 
-        {scannerOpen ? (
+        {importReview ? (
+          <Text color={TextColors.secondary} className="text-xs mb-2">
+            {importSelected > 1
+              ? t(
+                  'editor.assistant.importHintSelected',
+                  'Import — ask to cull, pick the best of each burst, or rate the {{count}} selected photos.',
+                  { count: importSelected },
+                )
+              : t(
+                  'editor.assistant.importHint',
+                  'Import — ask to cull, pick the best of each burst, or rate these photos, or ask about them.',
+                )}
+          </Text>
+        ) : importViewActive && !scannerOpen ? (
+          <Text color={TextColors.secondary} className="text-xs mb-2">
+            {t('editor.assistant.importWaiting', 'Import — the assistant can help once the photos are shown.')}
+          </Text>
+        ) : scannerOpen ? (
           <Text color={TextColors.secondary} className="text-xs mb-2">
             {scanPreviewReady
               ? t('editor.assistant.scanPreview', 'Editing the scan preview — ask for exposure, contrast, or color changes.')

@@ -14,6 +14,9 @@ export interface AssistantMessage {
   // How many images were attached to this (user) message.
   imageCount?: number;
   isError?: boolean;
+  // App-written progress/result lines (e.g. one per cull group): shown, but not
+  // replayed to the model as turns it authored.
+  isReport?: boolean;
 }
 
 export interface Conversation {

@@ -1604,6 +1604,7 @@ fn encode_assistant_jpeg(
     Ok(crate::assistant::ImageAttachment {
         media_type: "image/jpeg".to_string(),
         data: base64::engine::general_purpose::STANDARD.encode(&buf),
+        label: None,
     })
 }
 

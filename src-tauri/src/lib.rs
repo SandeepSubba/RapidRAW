@@ -2474,6 +2474,8 @@ pub fn run() {
             scanning::scan_start,
             scanning::scan_cancel,
             guided_perspective::calculate_guided_perspective,
+            assistant::assistant_cull,
+            culling::assistant_group_images,
             app_settings::is_tethering_supported,
         ])
         .build(tauri::generate_context!())

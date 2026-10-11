@@ -39,6 +39,13 @@ Rules:
 - The AI assistant panel has a scan-preview mode: when the scanner pane is open
   with a preview, it drives scanner-store controls (see AssistantPanel's
   `scannerContext`/`applyScannerPatch`) instead of editor adjustments.
+- Assistant culling (utils/assistantCull.ts + `assistant_cull`) sends each burst
+  as ONE labelled multi-image request with its own system prompt/schema — don't
+  route it through the per-image batch path (the model can't compare frames
+  there). In the import window (utils/importAssistant.ts) the panel works on the
+  import store instead of the editor: pick/reject = keptPaths add/remove,
+  ratings/labels land in the store and are written at import. Rating writes are
+  guarded with "already equal" checks because `handleRate` toggles.
 - The `claudecode` assistant provider shells out to the `claude` CLI (absolute
   path in settings); prompts go via stdin — never argv (E2BIG with mask-laden
   adjustments).

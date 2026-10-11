@@ -117,6 +117,32 @@ and dated.
   panel).
 - **Scan-preview mode** — while the scanner pane is open with a preview, the assistant
   drives the scanner controls (tone, crop, film settings) instead of the editor.
+- **Pick / reject flags from chat** — "reject this", "pick these", "unflag it" set
+  the library flag alongside ratings, labels and tags (a positive rating still
+  clears Reject). Re-asking for a rating a photo already has leaves it alone
+  instead of toggling it off.
+- **Comparative culling** — "cull these", "pick the best of each burst", "rate
+  these" on a multi-selection (or "…the whole folder") no longer sends every photo
+  in its own conversation. The photos are grouped into bursts of similar shots
+  (the import's culling metrics, no ML models), and each group of up to 12 frames
+  goes to the model in **one request**, every image labelled with its filename, so
+  the model can compare frames and return a rating / pick-reject / label and a
+  one-line reason per file. Unrelated photos go in "sets" judged on one scale. The
+  chat shows a per-group report (✓ pick, ✗ reject, stars, reason); results are
+  applied as ordinary flags/ratings, so they're undoable the usual way. Works with
+  all providers (Anthropic tool `cull_photos`, OpenAI-compatible json_schema
+  `rapidraw_cull`, Claude Code with labelled image files).
+- **Import window mode** — while the Import window shows a card/folder, the
+  assistant sees the import grid instead of the editor: groups, the app's Q
+  grades, ratings, labels and what is marked to import. Questions ("how many are
+  marked?", "which group has the most frames?") are answered from that context;
+  "select burst_03", "mark these keepers", "give the selected ones 3 stars" act on
+  the grid. Culling here works on the selection (or everything shown when ≤1 is
+  selected) using the import's own groups: **pick = mark for import, reject =
+  unmark**, ratings and labels are written to the photos on import like manual
+  ones. Nothing touches disk before import. While the import window is open
+  without a grid to work on (source picker, scoring, importing) the assistant
+  says so rather than acting on the library hidden behind it.
 
 ## Crop, rotate & perspective
 
