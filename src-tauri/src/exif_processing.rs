@@ -1077,6 +1077,23 @@ pub fn get_creation_date_from_path(path: &Path) -> DateTime<Utc> {
         .unwrap_or_else(Utc::now)
 }
 
+/// Positions `file` at the embedded JPEG of a Fuji RAF (its EXIF sits at the
+/// front of that JPEG), or back at the start for any other file. Without this
+/// a RAF falls through to rawler, which maps the whole 30+ MB file just to
+/// read a date — minutes of I/O for a card full of them.
+fn seek_to_raf_embedded_jpeg(file: &mut fs::File) {
+    use std::io::{Read, Seek, SeekFrom};
+
+    let mut header = [0u8; 88];
+    let jpeg_offset = match file.read_exact(&mut header) {
+        Ok(()) if header.starts_with(b"FUJIFILMCCD-RAW") => {
+            u32::from_be_bytes([header[84], header[85], header[86], header[87]]) as u64
+        }
+        _ => 0,
+    };
+    let _ = file.seek(SeekFrom::Start(jpeg_offset));
+}
+
 pub fn try_get_exif_creation_date(path: &Path) -> Option<DateTime<Utc>> {
     if let Some(map) = read_rrexif_sidecar(path)
         && let Some(dt_str) = map.get("DateTimeOriginal").or(map.get("CreateDate"))
@@ -1085,7 +1102,8 @@ pub fn try_get_exif_creation_date(path: &Path) -> Option<DateTime<Utc>> {
         return Some(creation_datetime_to_utc(dt));
     }
 
-    if let Ok(file) = std::fs::File::open(path) {
+    if let Ok(mut file) = std::fs::File::open(path) {
+        seek_to_raf_embedded_jpeg(&mut file);
         let mut bufreader = BufReader::new(&file);
         let exifreader = exif::Reader::new();
 
@@ -2440,5 +2458,46 @@ mod xmp_tests {
     #[test]
     fn has_embedded_xmp_is_false_for_a_plain_encode() {
         assert!(!has_embedded_xmp(&encode_tiff(4, 4)));
+    }
+}
+
+#[cfg(test)]
+mod raf_date_tests {
+    use super::*;
+
+    /// A RAF with nothing but the header and its embedded JPEG — no sensor data,
+    /// so rawler cannot decode it. Getting a date back proves the header path.
+    #[test]
+    fn raf_capture_date_comes_from_the_embedded_jpeg_exif() {
+        let field = exif::Field {
+            tag: exif::Tag::DateTimeOriginal,
+            ifd_num: exif::In::PRIMARY,
+            value: exif::Value::Ascii(vec![b"2024:03:05 14:07:09".to_vec()]),
+        };
+        let mut writer = exif::experimental::Writer::new();
+        writer.push_field(&field);
+        let mut tiff = Cursor::new(Vec::new());
+        writer.write(&mut tiff, false).unwrap();
+        let tiff = tiff.into_inner();
+
+        const JPEG_OFFSET: usize = 148;
+        let mut raf = b"FUJIFILMCCD-RAW ".to_vec();
+        raf.resize(84, 0);
+        raf.extend_from_slice(&(JPEG_OFFSET as u32).to_be_bytes());
+        raf.resize(JPEG_OFFSET, 0);
+        raf.extend_from_slice(&[0xFF, 0xD8, 0xFF, 0xE1]);
+        raf.extend_from_slice(&((tiff.len() + 8) as u16).to_be_bytes());
+        raf.extend_from_slice(b"Exif\0\0");
+        raf.extend_from_slice(&tiff);
+        raf.extend_from_slice(&[0xFF, 0xD9]);
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("DSCF0001.RAF");
+        fs::write(&path, raf).unwrap();
+
+        let expected = creation_datetime_to_utc(
+            NaiveDateTime::parse_from_str("2024-03-05 14:07:09", "%Y-%m-%d %H:%M:%S").unwrap(),
+        );
+        assert_eq!(try_get_exif_creation_date(&path), Some(expected));
     }
 }
