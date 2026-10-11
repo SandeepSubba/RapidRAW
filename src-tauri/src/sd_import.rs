@@ -112,7 +112,9 @@ pub fn list_source_drives() -> Result<Vec<DriveInfo>, String> {
 
 /// Recursively collect supported image paths under `path` (SD cards nest images under
 /// `DCIM/100XXXXX/`, so a recursive walk is required).
-#[tauri::command]
+// `command(async)` on the card-reading commands below: a plain sync command
+// runs on the window's main thread, and these read from slow removable media.
+#[tauri::command(async)]
 pub fn scan_source_images(path: String) -> Result<Vec<String>, String> {
     let root = Path::new(&path);
     if !root.exists() {
@@ -146,7 +148,7 @@ pub fn scan_source_images(path: String) -> Result<Vec<String>, String> {
 /// "sort by date" option. Reuses the same date resolution as time-based grouping
 /// (`get_creation_date_from_path`): EXIF DateTimeOriginal first, then RAW metadata, falling
 /// back to the file's creation time. Read in parallel; never fails (missing dates just sort old).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_capture_times(
     paths: Vec<String>,
 ) -> Result<std::collections::HashMap<String, i64>, String> {
@@ -439,7 +441,7 @@ pub fn reset_cull_model(app_handle: AppHandle) -> Result<(), String> {
 }
 
 /// Eject / unmount the removable volume at `mount_point` (e.g. after import).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn eject_drive(mount_point: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
@@ -543,7 +545,7 @@ fn file_content_hash(path: &Path) -> Option<blake3::Hash> {
 /// Given source files and a destination folder, return the subset of source paths
 /// already present anywhere under the destination (recursively), matched by filename
 /// stem or by file content. Used to skip re-importing photos already in the library.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn find_existing_in_destination(
     source_paths: Vec<String>,
     destination_folder: String,
@@ -653,7 +655,7 @@ fn read_fuji_embedded_jpeg(path: &str) -> Option<Vec<u8>> {
 /// Full-resolution preview for the loupe / enlarged view, returned as a data URL the
 /// webview can show directly. For raws this is the embedded camera JPEG (full size);
 /// for ordinary images it's the file itself. On demand — one image at a time.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_import_preview(path: String) -> Result<String, String> {
     if is_raw_file(&path) {
         if let Some(jpeg) = read_fuji_embedded_jpeg(&path) {
