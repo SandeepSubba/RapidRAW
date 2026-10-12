@@ -76,6 +76,8 @@ export default function ImportView() {
     if (importStatus === Status.Success) {
       handledCompletion.current = true;
       toast.success('Import complete.');
+      // The saved culling work has served its purpose; a later scan of this card starts clean.
+      useImportStore.getState().setImport({ savedSelection: null });
       // Eject the card (if requested) before resetting the importer state.
       maybeEjectSource().finally(() => closeImporter());
     } else if (importStatus === Status.Error) {

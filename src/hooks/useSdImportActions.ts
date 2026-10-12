@@ -4,7 +4,7 @@ import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
 import { toast } from 'react-toastify';
 import { CullingSuggestions, Invokes, SortDirection } from '../components/ui/AppProperties';
-import { DriveInfo, ImportSortKey, useImportStore } from '../store/useImportStore';
+import { DriveInfo, ImportSortKey, restoreSelection, useImportStore } from '../store/useImportStore';
 import { useUIStore } from '../store/useUIStore';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { FileTypeFilter, ImportFilterState, computeVisible, computeVisibleSet } from '../components/views/import/importFilters';
@@ -346,11 +346,16 @@ export function useSdImportActions() {
         setImport({ stage: 'source' });
         return;
       }
-      // Show all photos with NOTHING selected by default. Grouping is opt-in (the "Group
-      // similar" toggle); selection is explicit (checkboxes / Select all / Auto-select).
+      // Show all photos with nothing selected, unless this source was being culled before
+      // (importer closed or app restarted mid-way) — then pick up where that left off.
+      // Grouping is opt-in (the "Group similar" toggle); selection is explicit.
+      const restored = restoreSelection(useImportStore.getState().savedSelection, path, scannedPaths);
+      if (restored.keptPaths.size > 0) {
+        toast.info(`Restored your earlier selection: ${restored.keptPaths.size} photos kept.`);
+      }
       setImport({
         scannedPaths,
-        keptPaths: new Set(),
+        ...restored,
         suggestions: null,
         enableGroups: false,
         analysisReady: false,

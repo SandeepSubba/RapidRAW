@@ -63,6 +63,15 @@ A **recursive** walk collects every supported image (cards nest photos under
 and shown immediately as a flat grid — **nothing is selected by default**; selection is
 always explicit.
 
+**Your culling work is saved.** Which photos are kept, plus ratings and colour labels, are
+written to local storage as you go (`savedSelection` in `useImportStore`). If the importer
+is closed or the app restarts before you import, scanning the **same source path** again
+restores them (limited to photos still on the card) and shows a toast. Scanning a different
+source with nothing picked leaves the saved work alone; "Select none" on the same source
+clears it; a successful import discards it. Grouping and scores are not saved and are
+recomputed. Matching is by path only, so a different shoot on a card that reuses the same
+file names would inherit the old picks.
+
 ## 3. Grouping similar shots
 
 "Group" is an opt-in toggle (Capture One's "Group Overview") with two modes:
