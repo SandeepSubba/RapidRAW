@@ -386,7 +386,37 @@ struct CullingProgress {
 #[derive(Clone)]
 pub struct ImageAnalysisData {
     hash: image_hasher::ImageHash,
+    color_hist: ColorHist,
     result: ImageAnalysisResult,
+}
+
+/// Bits in the perceptual hash: DoubleGradient at 16x16 hashes a 9x9 image as
+/// 72 row + 72 column gradients. Must track the `HasherConfig` in `analyze_paths`.
+const HASH_BITS: u32 = 144;
+
+const COLOR_HIST_SIDE: u32 = 16;
+const COLOR_HIST_SAMPLES: u32 = COLOR_HIST_SIDE * COLOR_HIST_SIDE;
+type ColorHist = [u16; 64];
+
+/// Coarse colour signature: a 4x4x4 RGB histogram of the photo shrunk to 16x16.
+/// Unlike the gradient hash it barely moves when the same subjects shift pose
+/// or the framing drifts, which is what separates "another take of this shot"
+/// from "a different shot seconds later".
+fn color_histogram(thumbnail: &DynamicImage) -> ColorHist {
+    let small = thumbnail
+        .resize_exact(COLOR_HIST_SIDE, COLOR_HIST_SIDE, imageops::FilterType::Triangle)
+        .to_rgb8();
+    let mut hist = [0u16; 64];
+    for px in small.pixels() {
+        let [r, g, b] = px.0;
+        hist[(r >> 6) as usize * 16 + (g >> 6) as usize * 4 + (b >> 6) as usize] += 1;
+    }
+    hist
+}
+
+/// Histogram-intersection distance: 0 = same palette, `COLOR_HIST_SAMPLES` = nothing shared.
+fn color_hist_distance(a: &ColorHist, b: &ColorHist) -> u32 {
+    COLOR_HIST_SAMPLES - a.iter().zip(b).map(|(x, y)| u32::from(*x.min(y))).sum::<u32>()
 }
 
 impl ImageAnalysisData {
@@ -504,6 +534,7 @@ fn analyze_image(
     let (width, height) = img.dimensions();
     let thumbnail = img.thumbnail(ANALYSIS_DIM, ANALYSIS_DIM);
     let hash = hasher.hash_image(&thumbnail);
+    let color_hist = color_histogram(&thumbnail);
 
     let (quality_score, sharpness_metric, center_focus_metric, exposure_metric) = if compute_score {
         quality_metrics(&thumbnail)
@@ -513,6 +544,7 @@ fn analyze_image(
 
     Ok(ImageAnalysisData {
         hash,
+        color_hist,
         result: ImageAnalysisResult {
             path: path.to_string(),
             quality_score,
@@ -802,6 +834,148 @@ pub fn group_by_time(
     flush_time_burst(successful_analyses, &mut burst, &mut suggestions);
 
     suggestions
+}
+
+/// How far ahead in capture order a frame looks for a match, so one stray frame
+/// between two takes of the same composition doesn't split them.
+const SCENE_LOOKAHEAD: usize = 3;
+/// Frames shot further apart than this are never linked directly.
+const SCENE_MAX_GAP_SECONDS: i64 = 30;
+
+/// Group photos into **scenes**: runs of frames shot close together that look alike.
+///
+/// Comparing every photo with every other one (`group_analyses`) has to be strict
+/// to keep unrelated shots apart, and so misses most of a burst. Here a frame is
+/// only compared with the next few frames in capture order, which lets the match
+/// be much looser: two frames link when their colour signatures *or* their
+/// perceptual hashes are within the threshold. `settings.similarity_threshold` is
+/// in hash bits; the colour signature gets the same fraction of its own range.
+/// Linked frames chain, so a long sequence in one setup becomes one group.
+pub fn group_by_scene(
+    analyses: &[ImageAnalysisData],
+    failed_paths: Vec<String>,
+    times: &std::collections::HashMap<String, i64>,
+    settings: &CullingSettings,
+) -> CullingSuggestions {
+    let mut suggestions = CullingSuggestions {
+        failed_paths,
+        ..Default::default()
+    };
+    let hash_threshold = settings.similarity_threshold;
+    let hist_threshold = hash_threshold * COLOR_HIST_SAMPLES / HASH_BITS;
+
+    let time_of = |i: usize| times.get(&analyses[i].result.path).copied();
+    let mut order: Vec<usize> = (0..analyses.len()).collect();
+    order.sort_by(|&a, &b| {
+        time_of(a)
+            .cmp(&time_of(b))
+            .then_with(|| analyses[a].result.path.cmp(&analyses[b].result.path))
+    });
+
+    fn root(parent: &mut [usize], mut x: usize) -> usize {
+        while parent[x] != x {
+            parent[x] = parent[parent[x]];
+            x = parent[x];
+        }
+        x
+    }
+    let mut parent: Vec<usize> = (0..analyses.len()).collect();
+    for (k, &a) in order.iter().enumerate() {
+        for &b in order.iter().skip(k + 1).take(SCENE_LOOKAHEAD) {
+            if let (Some(ta), Some(tb)) = (time_of(a), time_of(b))
+                && tb - ta > SCENE_MAX_GAP_SECONDS
+            {
+                break;
+            }
+            if color_hist_distance(&analyses[a].color_hist, &analyses[b].color_hist) <= hist_threshold
+                || analyses[a].hash.dist(&analyses[b].hash) <= hash_threshold
+            {
+                let (ra, rb) = (root(&mut parent, a), root(&mut parent, b));
+                parent[ra] = rb;
+            }
+        }
+    }
+
+    // Emit groups in capture order of their first frame.
+    let mut slot_of_root = std::collections::HashMap::new();
+    let mut scenes: Vec<Vec<usize>> = Vec::new();
+    for &i in &order {
+        let r = root(&mut parent, i);
+        let slot = *slot_of_root.entry(r).or_insert_with(|| {
+            scenes.push(Vec::new());
+            scenes.len() - 1
+        });
+        scenes[slot].push(i);
+    }
+    for mut scene in scenes {
+        flush_time_burst(analyses, &mut scene, &mut suggestions);
+    }
+
+    suggestions
+}
+
+#[cfg(test)]
+mod scene_grouping_tests {
+    use super::*;
+
+    /// A frame whose whole palette sits in one histogram bin, with a constant-byte hash.
+    fn frame(path: &str, bin: usize, hash_byte: u8) -> ImageAnalysisData {
+        let mut color_hist = [0u16; 64];
+        color_hist[bin] = COLOR_HIST_SAMPLES as u16;
+        ImageAnalysisData {
+            hash: image_hasher::ImageHash::from_bytes(&[hash_byte; (HASH_BITS / 8) as usize]).unwrap(),
+            color_hist,
+            result: ImageAnalysisResult {
+                path: path.to_string(),
+                quality_score: 0.0,
+                sharpness_metric: 0.0,
+                center_focus_metric: 0.0,
+                exposure_metric: 0.0,
+                width: 1,
+                height: 1,
+            },
+        }
+    }
+
+    fn groups(frames: &[ImageAnalysisData], times: &[i64]) -> Vec<Vec<String>> {
+        let times = frames.iter().zip(times).map(|(f, &t)| (f.result.path.clone(), t)).collect();
+        let settings = CullingSettings {
+            similarity_threshold: 29,
+            blur_threshold: 100.0,
+            group_similar: true,
+            filter_blurry: false,
+        };
+        group_by_scene(frames, vec![], &times, &settings)
+            .similar_groups
+            .into_iter()
+            .map(|g| {
+                let mut paths: Vec<String> = std::iter::once(g.representative.path)
+                    .chain(g.duplicates.into_iter().map(|d| d.path))
+                    .collect();
+                paths.sort();
+                paths
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_stray_frame_between_two_takes_does_not_split_them() {
+        // 0x00 vs 0xFF hashes differ in every bit, so only the palette can link.
+        let frames = [frame("a1", 0, 0x00), frame("x", 5, 0xFF), frame("a2", 0, 0x0F)];
+        assert_eq!(groups(&frames, &[0, 2, 4]), vec![vec!["a1".to_string(), "a2".to_string()]]);
+    }
+
+    #[test]
+    fn identical_frames_shot_far_apart_stay_separate() {
+        let frames = [frame("a1", 0, 0x00), frame("a2", 0, 0x00)];
+        assert!(groups(&frames, &[0, SCENE_MAX_GAP_SECONDS + 1]).is_empty());
+    }
+
+    #[test]
+    fn a_matching_hash_links_frames_whose_palettes_differ() {
+        let frames = [frame("a1", 0, 0xAA), frame("a2", 9, 0xAA)];
+        assert_eq!(groups(&frames, &[0, 1]).len(), 1);
+    }
 }
 
 /// One photo as the assistant's culling pass sees it: the technical hints sent

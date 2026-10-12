@@ -67,9 +67,20 @@ always explicit.
 
 "Group" is an opt-in toggle (Capture One's "Group Overview") with two modes:
 
-**Similar look** (default) — groups **visually near-duplicate frames** using perceptual
-hashing (DoubleGradient 16×16) + Hamming-distance BFS. A **Similarity %** slider controls
-strictness (higher = stricter; lower = looser, so more shots group).
+**Similar look** (default) — groups photos into **scenes**: frames shot close together
+that look alike (`culling::group_by_scene`). Each frame is compared only with the next 3
+frames in capture order, and never across a gap of more than 30 s. Two frames link when
+either their **colour signature** (a 4×4×4 RGB histogram of a 16×16 thumbnail) or their
+**perceptual hash** (DoubleGradient 16×16, 144 bits) is within the threshold; links chain,
+so a long sequence in one setup becomes one group. A **Similarity %** slider controls
+strictness (higher = stricter; lower = looser, so more shots group). It maps to hash bits
+as `(100 − %) × 144 / 100`, and the colour signature gets the same fraction of its range.
+
+Why not compare every photo with every other one (the library culling dialog still does,
+via `group_analyses`): to keep unrelated shots apart that comparison must be strict, and
+then it misses most of a burst. On a 1232-shot event card at 80% it left 414 photos
+ungrouped; scene grouping leaves 103. Known limit: consecutive poses in one setup share a
+palette and chain into one group — raise Similarity to split them.
 
 **By time** — true **burst detection** by capture time. Photos are sorted by their EXIF
 timestamp and split into bursts whenever the gap between consecutive frames exceeds the

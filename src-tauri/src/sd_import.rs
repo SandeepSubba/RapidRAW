@@ -16,7 +16,7 @@ use tauri::{AppHandle, Emitter, State};
 use walkdir::WalkDir;
 
 use crate::culling::{
-    CullingSettings, CullingSuggestions, ImageAnalysisData, analyze_paths, group_analyses,
+    CullingSettings, CullingSuggestions, ImageAnalysisData, analyze_paths, group_by_scene,
     group_by_time,
 };
 use crate::formats::{is_raw_file, is_supported_image_file};
@@ -34,7 +34,7 @@ static IMPORT_FEATURES: Mutex<
 static IMPORT_TIMES: Mutex<Option<std::collections::HashMap<String, i64>>> = Mutex::new(None);
 
 /// Group the cached analyses by the requested mode: "time" → burst-by-capture-time using the
-/// timestamp cache; anything else → visual perceptual-hash similarity.
+/// timestamp cache; anything else → scenes (frames shot close together that look alike).
 fn group_cached(
     analyses: &[ImageAnalysisData],
     failed: Vec<String>,
@@ -42,13 +42,13 @@ fn group_cached(
     mode: &str,
     time_gap_seconds: i64,
 ) -> CullingSuggestions {
+    let guard = IMPORT_TIMES.lock().unwrap();
+    let empty = std::collections::HashMap::new();
+    let times = guard.as_ref().unwrap_or(&empty);
     if mode == "time" {
-        let guard = IMPORT_TIMES.lock().unwrap();
-        let empty = std::collections::HashMap::new();
-        let times = guard.as_ref().unwrap_or(&empty);
         group_by_time(analyses, failed, times, time_gap_seconds)
     } else {
-        group_analyses(analyses, failed, settings)
+        group_by_scene(analyses, failed, times, settings)
     }
 }
 
