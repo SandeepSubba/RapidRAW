@@ -118,9 +118,12 @@ Both modes:
 Scoring runs as its own step (triggered by **Auto-select best**), in two passes:
 
 **Pass 1 — technical metrics** (all photos, in parallel)
-A weighted quality from a downscaled thumbnail:
-`0.40·sharpness + 0.35·center-focus + 0.25·exposure`
-(sharpness = Laplacian variance; exposure = histogram-clipping penalty).
+A weighted quality from a 720px thumbnail:
+`0.40·sharpness + 0.35·centre-focus + 0.10·highlights + 0.08·shadows + 0.07·balance`
+(sharpness = Laplacian variance. **Lighting** is three cues: *highlights* and *shadows*
+penalize the share of clipped / crushed pixels separately, and *balance* penalizes a frame
+whose median brightness is clearly too dark or too bright even when little is clipped —
+an under-exposed bracket used to score as well as the good one.)
 
 **Pass 2 — face-aware "people quality"** (grouped photos only, serial)
 Because the per-group "best" pick is what matters, the expensive face pass runs only on
@@ -140,22 +143,40 @@ photos that belong to a similar group (singles are auto-kept regardless):
    | Unhappy / frowning                                | 0.3    |
 
    This folds **eyes, gaze, and expression** into a single inference per face.
-3. **Per-frame face score** combines faces as `0.35·mean + 0.65·worst`, so one blinker /
-   looker-away / bad expression **demotes the whole frame** below an attentive sibling.
-4. **Face sharpness** — the Laplacian variance of each face crop (the most relevant focus
-   cue for a people burst, far better than whole-image sharpness).
+3. **Focus where it matters, on the full-size pixels.** Faces are found on the 1920px copy,
+   but focus is measured on the same faces in the **full-size image** (for RAWs, the
+   camera's embedded preview), downscaled to a fixed size so faces compare:
+   - **face sharpness** — the face box;
+   - **eye sharpness** — a patch around each eye from YuNet's landmarks, taking the
+     **sharper eye** (you focus on the near eye). At 1920px a frame focused on the ear or
+     hair still looks sharp; at full size it doesn't.
+4. **Light on the faces** — the exposure of the middle of each face: a face sunk in shadow
+   (backlit, under-exposed) or washed out / blown scores low. The band is deliberately wide
+   so darker and lighter skin both read as well lit; within a burst the faces are the same
+   people, so the comparison is about the light.
 
-**Final score (people shots):**
-`0.25·technical + 0.50·face(eyes/gaze/expression) + 0.25·face-sharpness`
+**Final score (people shots)** — the cue weights (learnable, see §5b), worst-face terms
+make one blinker / looker-away demote the whole frame:
+
+| Cue | Default weight |
+|---|:-:|
+| technical quality (pass 1) | 0.15 |
+| face sharpness | 0.10 |
+| eye sharpness | 0.15 |
+| looking at camera (mean / worst face) | 0.12 / 0.20 |
+| expression (smiling) | 0.08 |
+| eyes open (worst face) | 0.10 |
+| light on the faces | 0.10 |
 
 **Non-people shots** (landscape, product, food, still life — no faces detected) get a
 dedicated score instead of the centre-biased technical metric:
 
-`0.30·overall-sharpness + 0.30·subject-region-sharpness + 0.20·exposure + 0.20·aesthetic`
+`0.25·overall-sharpness + 0.30·subject-region-sharpness + 0.10·highlights + 0.08·shadows + 0.07·balance + 0.20·aesthetic`
 
-- **Subject-region sharpness** = the sharpest cell of a 3×3 grid, so the in-focus subject is
-  rewarded *wherever it sits* in the frame (not just the centre) — the key fix for off-centre
-  subjects and landscapes.
+- **Subject-region sharpness** = the sharpest cell of a 3×3 grid **of the full-size image**,
+  so the in-focus subject is rewarded *wherever it sits* in the frame (not just the centre) —
+  the key fix for off-centre subjects and landscapes — and a slightly missed focus plane
+  isn't hidden by downscaling.
 - **Aesthetic** = a CLIP zero-shot "well-composed, well-lit, appealing" vs "blurry, poorly
   composed, dull" cue (reuses the bundled CLIP model, no extra download).
 
@@ -163,7 +184,7 @@ For near-duplicate bursts the ranking is driven mostly by subject sharpness + ex
 you want for product/food/still life); the aesthetic term mainly breaks ties on composition.
 
 If the face or CLIP model can't be loaded (offline / not downloaded), scoring **degrades
-gracefully** to the plain technical metric.
+gracefully** to the technical metric (which still has the lighting cues).
 
 > **Note on gaze:** distinguishing two near-identical frames purely on *subtle gaze* is at
 > the edge of what whole-face CLIP can do. The weighting and high-res crops help, but it is
@@ -177,34 +198,48 @@ The "Q" prefix distinguishes it from the manual 1–5 star rating.
 
 ## 5b. Learning from your culling (personalized selection)
 
-The auto-selection can **learn your taste** from the picks you actually make:
+The culling **learns your taste** from what you actually import. Two things are learned,
+per similar group, into an on-device model (`import_cull_model.json` in the app data dir):
 
-- Each scored people-photo carries interpretable cues — *looking-at-camera* (mean & worst
-  face), *expression/smiling*, *eyes-open (worst face)*, *face sharpness*, and technical
-  quality.
-- On every import, the app records — per similar group — which frame you **kept** vs the
-  group-mates you **skipped**. That revealed preference is folded into an on-device model
-  (`import_cull_model.json` in the app data dir).
-- It learns the **cue weighting** that best matches your choices (a nearest-centroid /
-  Rocchio update: shift weight toward the cues where your kept frames beat the rejected
-  ones), blended with the defaults so a few picks nudge gently and sustained feedback
-  personalizes more. Next import scores with *your* weights.
+- **Which cues you prefer.** Every scored photo carries its cue vector — the people cues
+  above, the non-people cues, or the technical cues when the AI models are unavailable —
+  and each kind learns separately (before, only photos with detected faces learned
+  anything). Within each burst, the frames you **kept** vs the group-mates you **skipped**
+  shift the weights toward the cues where your keepers win (a nearest-centroid / Rocchio
+  update), blended with the defaults so a few picks nudge gently and sustained feedback
+  personalizes more. Frames of different kinds in one burst aren't compared.
+  Example: keep the well-exposed frame over a slightly sharper dark one a few times and
+  *balance* gains weight.
+- **Your keep policy.** How often you keep the app's best / 2nd / 3rd / later frame of a
+  burst, and how good a burst's best frame must be (its 0–5 grade) before you keep the burst
+  at all. Priors reproduce the old behaviour (one frame, grade ≥ 3) until your imports
+  outweigh them — e.g. keep the top two of three bursts once and auto-select starts keeping
+  two per burst.
+
+The **assistant** learns too. Its cull decisions in the import window are remembered
+until import; the ones you override — unmarking its pick, keeping a frame it rejected,
+changing its stars — are recorded (`assistant_cull_feedback.json`, newest 30), together
+with your keep habits above, and quoted in every later cull request ("You rejected a3.jpg
+(soft focus) — they kept it"), so the model adapts instead of repeating the misjudgement.
+Requests you give in chat ("mark these keepers") are your decisions and aren't recorded.
+
+Learning happens only from imports (scored bursts of ≥ 2 importable frames — hidden file
+types and already-imported photos don't count). It is per machine: the model lives in the
+app data dir, not the repo.
 
 Controls live in the import settings panel:
 - **Personalize selection (learn from my picks)** — on by default; off uses fixed defaults
-  and stops recording.
-- **Reset learning** — wipes what it has learned, back to defaults.
-
-Notes: there's a **cold start** (a handful of imports before it visibly shifts); it learns
-the *weighting of the extracted cues*, not brand-new concepts; and it only learns from real
-bursts (groups of ≥2) where you kept some and skipped others.
+  and stops recording. A line underneath says what has been learned ("Learned from 12
+  bursts over 4 imports · you keep ~2 per burst · auto-select keeps the top 2").
+- **Reset learning** — wipes all of it (cue weights, keep policy, assistant corrections).
 
 ## 6. Auto-select best
 
 One click runs the whole pipeline (group → score) if needed, then selects keepers:
 
-- **Exactly one photo per similar group** — the highest-scoring representative — **only if
-  it grades ≥ 3**. A burst whose best frame still grades 0–2 is dropped entirely.
+- Per similar group, the frames your **keep policy** keeps (§5b) — by default **exactly one**,
+  the highest-scoring, and **only if it grades ≥ 3** (a burst whose best frame grades 0–2 is
+  dropped entirely). Once learned, e.g. the top two, or weaker bursts too.
 - **All ungrouped singles** (unique shots) are kept; blurry shots and already-imported
   photos are excluded.
 

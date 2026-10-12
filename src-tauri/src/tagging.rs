@@ -134,6 +134,8 @@ pub fn clip_aesthetic(
 #[derive(Clone, Copy, Debug)]
 pub struct FaceCues {
     pub face_sharp: f32, // mean per-face sharpness (focus on the subjects)
+    pub eye_sharp: f32,  // mean per-face sharpness at the sharper eye (where focus belongs)
+    pub face_light: f32, // mean per-face exposure: 1 = well lit, 0 = in deep shadow / blown
     pub look_mean: f32,  // mean P(looking at camera)
     pub look_worst: f32, // worst single face's P(looking at camera)
     pub expr_mean: f32,  // mean P(smiling) — expression
@@ -144,8 +146,12 @@ pub struct FaceCues {
 /// interpretable cues (looking-at-camera, expression, eyes-open, face sharpness) aggregated
 /// across faces — `*_worst` keeps the single worst face so one blinker/looker-away demotes
 /// the frame. Returns `None` when no faces are detected (caller falls back to technical).
+///
+/// Faces are found and read by CLIP on `image` (the 1920px working copy); focus and light
+/// are measured on the same faces in `full` (full size), where a missed eye still shows.
 pub fn score_faces(
     image: &DynamicImage,
+    full: &DynamicImage,
     face_session: &Mutex<Session>,
     clip_session: &Mutex<Session>,
     tokenizer: &Tokenizer,
@@ -167,10 +173,13 @@ pub fn score_faces(
     }
 
     let (iw, ih) = (image.width() as f32, image.height() as f32);
+    let k = full.width() as f32 / iw; // working-copy → full-size coordinates
     let mut look: Vec<f32> = Vec::new();
     let mut expr: Vec<f32> = Vec::new();
     let mut eyes_open: Vec<f32> = Vec::new();
     let mut sharp: Vec<f32> = Vec::new();
+    let mut eye_sharp: Vec<f32> = Vec::new();
+    let mut light: Vec<f32> = Vec::new();
     for f in faces.iter().take(MAX_FACES) {
         // Expand the box ~30% so brows/eyes/mouth aren't clipped, then crop from full-res.
         let (bw, bh) = (f.x2 - f.x1, f.y2 - f.y1);
@@ -186,7 +195,28 @@ pub fn score_faces(
         look.push((p[0] + p[1]).clamp(0.0, 1.0)); // smiling-at-camera + neutral-at-camera
         expr.push(p[0].clamp(0.0, 1.0)); // smiling
         eyes_open.push((1.0 - p[2]).clamp(0.0, 1.0)); // not eyes-closed
-        sharp.push(crate::culling::normalized_sharpness_of(&crop));
+
+        // Focus on the full-size face (not the expanded crop: background bokeh or a sharp
+        // collar shouldn't count), normalized to a fixed size so faces compare.
+        let face_full = crate::culling::region_sharpness(full, f.x1 * k, f.y1 * k, bw * k, bh * k, 256);
+        let face_s = face_full.unwrap_or_else(|| crate::culling::normalized_sharpness_of(&crop));
+        sharp.push(face_s);
+        // The sharper eye: photographers focus on the near eye, so one soft eye is fine.
+        // Patch = half the eye distance around each eye landmark.
+        let [eye_r, eye_l, ..] = f.landmarks;
+        let d = (((eye_l.0 - eye_r.0).powi(2) + (eye_l.1 - eye_r.1).powi(2)).sqrt()) * k;
+        let eye = if d >= 12.0 {
+            [eye_r, eye_l]
+                .iter()
+                .filter_map(|&(ex, ey)| {
+                    crate::culling::region_sharpness(full, ex * k - d * 0.25, ey * k - d * 0.25, d * 0.5, d * 0.5, 96)
+                })
+                .fold(None, |a: Option<f32>, v| Some(a.map_or(v, |a| a.max(v))))
+        } else {
+            None // eyes too small to measure — the face's focus stands in
+        };
+        eye_sharp.push(eye.unwrap_or(face_s));
+        light.push(crate::culling::face_exposure(full, f.x1 * k, f.y1 * k, bw * k, bh * k).unwrap_or(0.5) as f32);
     }
     if look.is_empty() {
         return Ok(None);
@@ -196,6 +226,8 @@ pub fn score_faces(
     let min = |v: &[f32]| v.iter().cloned().fold(f32::INFINITY, f32::min);
     Ok(Some(FaceCues {
         face_sharp: mean(&sharp).clamp(0.0, 1.0),
+        eye_sharp: mean(&eye_sharp).clamp(0.0, 1.0),
+        face_light: mean(&light).clamp(0.0, 1.0),
         look_mean: mean(&look),
         look_worst: min(&look),
         expr_mean: mean(&expr),

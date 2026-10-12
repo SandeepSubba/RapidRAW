@@ -46,6 +46,13 @@ Rules:
   import store instead of the editor: pick/reject = keptPaths add/remove,
   ratings/labels land in the store and are written at import. Rating writes are
   guarded with "already equal" checks because `handleRate` toggles.
+- Import culling learns at import time only (utils/importLearning.ts →
+  `record_cull_picks` / `record_assistant_cull_feedback`): cull_model.rs keeps cue
+  preferences per kind (people 8 cues, scene 6, technical 5 — order documented on
+  `CueKind`) plus a keep policy (rank / grade). Changing a kind's cue list resets that
+  kind's learning (vector shapes must match), so add cues deliberately and document them in
+  docs/IMAGE_IMPORTER.md §4. Only the assistant's own culls are stored as `aiDecisions`;
+  chat-directed changes go through `importCullTarget` and must not be recorded.
 - The `claudecode` assistant provider shells out to the `claude` CLI (absolute
   path in settings); prompts go via stdin — never argv (E2BIG with mask-laden
   adjustments).

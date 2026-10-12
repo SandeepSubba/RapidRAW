@@ -1587,7 +1587,7 @@ WHAT YOU GET
   - "chunk" {"index", "total"}: which part of a longer run this request is. Requests are independent, so rate on an absolute scale that stays comparable across chunks.
   - "files": one entry per photo with hints the app computed: "sharpness" (higher is sharper; only comparable within this request), "q" (the app's 0-5 quality grade, when available), and the current state ("rating", "flag", "label", and "kept" in the import window). Hints can mislead — a deliberately soft portrait, a busy background that measures sharp — so trust what you see.
 
-HOW TO JUDGE, in priority order: focus on the subject and motion blur; eyes (closed or half-closed eyes, blinks, gaze); expression and gesture; exposure (blown highlights or crushed shadows on the subject); composition and framing (cut-off limbs, tilted horizon, intrusions at the edges); then the strength of the moment. Within a group the differences are small — look closely before deciding.
+HOW TO JUDGE, in priority order: focus on the subject — for people, are the eyes (at least the nearer eye) critically sharp, or did focus land on the ear, hair or background — and motion blur; eyes (closed or half-closed eyes, blinks, gaze); expression and gesture; light and exposure (blown highlights or crushed shadows on the subject, a backlit or shadowed face, harsh or flat light, a frame that is clearly too dark or too bright); composition and framing (cut-off limbs, tilted horizon, intrusions at the edges); then the strength of the moment. Within a group the differences are small — look closely before deciding.
 
 WHAT TO RETURN — only what the user asked for:
 - "rating": 1-5 stars, only when the user asks for ratings. Use the whole scale: 5 exceptional, 4 strong keeper, 3 usable, 2 weak, 1 poor.
@@ -1706,6 +1706,167 @@ fn parse_cull_content(content: &str) -> (String, Vec<CullDecision>) {
     (reply, results)
 }
 
+// ---- Learning from corrections -------------------------------------------------------
+//
+// When photos culled by the assistant are imported, the import window compares what the
+// assistant decided with what the photographer actually imported (and the stars they left)
+// and records the disagreements here. Every later cull request carries a short summary, so
+// the model adapts to this photographer's taste instead of repeating the same misjudgement.
+
+const CULL_FEEDBACK_FILE: &str = "assistant_cull_feedback.json";
+/// Corrections kept for the prompt (newest win); enough to show a pattern, small in tokens.
+const CULL_FEEDBACK_KEEP: usize = 30;
+/// Corrections quoted in one prompt.
+const CULL_FEEDBACK_QUOTE: usize = 12;
+
+/// One assistant decision the photographer overrode at import.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CullCorrection {
+    pub file: String,
+    #[serde(default)]
+    pub ai_flag: Option<String>,
+    #[serde(default)]
+    pub ai_rating: Option<u8>,
+    #[serde(default)]
+    pub ai_reason: Option<String>,
+    /// Whether the photo was imported.
+    pub kept: bool,
+    /// The rating it was imported with (None / 0 = unrated).
+    #[serde(default)]
+    pub rating: Option<u8>,
+}
+
+#[derive(Serialize, Deserialize, Default, Clone, Debug)]
+#[serde(rename_all = "camelCase", default)]
+pub struct CullFeedback {
+    pub agreed: u64,
+    pub corrected: u64,
+    /// Newest last.
+    pub recent: Vec<CullCorrection>,
+}
+
+impl CullFeedback {
+    fn path(app_handle: &AppHandle) -> Option<std::path::PathBuf> {
+        use tauri::Manager;
+        app_handle.path().app_data_dir().ok().map(|d| d.join(CULL_FEEDBACK_FILE))
+    }
+
+    pub fn load(app_handle: &AppHandle) -> CullFeedback {
+        Self::path(app_handle)
+            .and_then(|p| std::fs::read_to_string(p).ok())
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default()
+    }
+
+    fn save(&self, app_handle: &AppHandle) -> Result<(), String> {
+        let path = Self::path(app_handle).ok_or("No app data dir")?;
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        std::fs::write(path, serde_json::to_string_pretty(self).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
+    }
+
+    fn add(&mut self, corrections: Vec<CullCorrection>, agreed: u64) {
+        self.agreed += agreed;
+        self.corrected += corrections.len() as u64;
+        self.recent.extend(corrections);
+        let excess = self.recent.len().saturating_sub(CULL_FEEDBACK_KEEP);
+        self.recent.drain(..excess);
+    }
+}
+
+pub fn reset_cull_feedback(app_handle: &AppHandle) -> Result<(), String> {
+    CullFeedback::default().save(app_handle)
+}
+
+/// Record how the photographer treated the assistant's decisions in one import.
+#[tauri::command]
+pub fn record_assistant_cull_feedback(
+    corrections: Vec<CullCorrection>,
+    agreed: u64,
+    app_handle: AppHandle,
+) -> Result<(), String> {
+    if corrections.is_empty() && agreed == 0 {
+        return Ok(());
+    }
+    let mut fb = CullFeedback::load(&app_handle);
+    fb.add(corrections, agreed);
+    fb.save(&app_handle)
+}
+
+fn stars(n: u8) -> String {
+    if n == 0 { "no stars".to_string() } else { format!("★{n}") }
+}
+
+/// One correction as a sentence the model can learn from.
+fn describe_correction(c: &CullCorrection) -> Option<String> {
+    let why = c.ai_reason.as_deref().filter(|r| !r.trim().is_empty()).map(|r| format!(" ({})", r.trim())).unwrap_or_default();
+    let final_rating = c.rating.unwrap_or(0);
+    let s = match (c.ai_flag.as_deref(), c.kept) {
+        (Some("pick"), false) => format!("You picked \"{}\"{why} — they did not keep it.", c.file),
+        (Some("reject"), true) => format!(
+            "You rejected \"{}\"{why} — they kept it{}.",
+            c.file,
+            if final_rating > 0 { format!(" and rated it {}", stars(final_rating)) } else { String::new() }
+        ),
+        _ => match c.ai_rating {
+            Some(r) if r != final_rating => format!("You rated \"{}\" {}{why} — they changed it to {}.", c.file, stars(r), stars(final_rating)),
+            _ => return None,
+        },
+    };
+    Some(s)
+}
+
+/// The prompt section that carries what this photographer has taught the culling: the
+/// assistant's own corrections and the import's learned keep habits. None until there is
+/// something worth saying.
+fn cull_learning_section(fb: &CullFeedback, summary: &crate::cull_model::LearningSummary) -> Option<String> {
+    let mut lines: Vec<String> = Vec::new();
+    let total = fb.agreed + fb.corrected;
+    if total > 0 {
+        lines.push(format!(
+            "- On past imports they kept your decision on {} of {} photos and overrode {}.",
+            fb.agreed, total, fb.corrected
+        ));
+    }
+    if summary.groups >= 3 {
+        if let Some(k) = summary.typical_keep {
+            if k >= 1.4 {
+                lines.push(format!(
+                    "- They usually keep about {} frames of a burst — in a group, pick that many unless the user asks for a different number.",
+                    (k.round() as u32).max(2)
+                ));
+            } else {
+                lines.push("- They usually keep one frame of a burst.".to_string());
+            }
+        }
+        if let Some(g) = summary.keep_grade.iter().position(|&p| p >= 0.5) {
+            if g < 3 {
+                lines.push(format!(
+                    "- They keep bursts the app grades as low as {g}/5 — do not reject a whole burst just because it is technically imperfect."
+                ));
+            } else if g > 3 {
+                lines.push(format!(
+                    "- They drop bursts whose best frame grades below {g}/5 — be strict with weak bursts."
+                ));
+            }
+        }
+    }
+    let quoted: Vec<String> = fb.recent.iter().rev().filter_map(describe_correction).take(CULL_FEEDBACK_QUOTE).collect();
+    if !quoted.is_empty() {
+        lines.push("- Their recent corrections, newest first:".to_string());
+        lines.extend(quoted.into_iter().map(|q| format!("  - {q}")));
+    }
+    if lines.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "WHAT THIS PHOTOGRAPHER HAS TAUGHT YOU (recorded by the app from their past imports — not part of the user's request)\n{}\nLearn the pattern behind these: if they keep frames you rejected for slightly soft focus, be less strict about focus; if they drop frames you picked, look for what those frames had in common. The past files are not in front of you — never mention them, and judge every photo you are shown on what you see.",
+        lines.join("\n")
+    ))
+}
+
 #[tauri::command]
 pub async fn assistant_cull(
     instruction: String,
@@ -1721,9 +1882,11 @@ pub async fn assistant_cull(
     if images.is_empty() {
         return Err("No photos to cull.".to_string());
     }
+    let learned = cull_learning_section(&CullFeedback::load(&app_handle), &crate::cull_model::CullModel::load(&app_handle).summary());
     let system = format!(
-        "{}\n\nCurrent _cull JSON:\n{}",
+        "{}{}\n\nCurrent _cull JSON:\n{}",
         CULL_SYSTEM_PROMPT,
+        learned.map(|l| format!("\n\n{l}")).unwrap_or_default(),
         serde_json::to_string(&json!({ "_cull": context })).unwrap_or_default()
     );
     let messages = vec![ChatMessage { role: "user".to_string(), content: instruction }];
@@ -1899,5 +2062,71 @@ mod needs_image_tests {
         assert!(
             token_from_credentials_json(r#"{"claudeAiOauth":{"accessToken":"  "}}"#).is_none()
         );
+    }
+}
+
+#[cfg(test)]
+mod cull_learning_tests {
+    use super::*;
+    use crate::cull_model::LearningSummary;
+
+    fn summary(groups: u64, typical: Option<f64>, keep_grade: [f64; 6]) -> LearningSummary {
+        LearningSummary { imports: 1, groups, cue_samples: 0, keep_grade, keep_rank: [1.0, 0.0, 0.0, 0.0], typical_keep: typical }
+    }
+    const DEFAULT_GRADE: [f64; 6] = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+
+    fn corr(file: &str, flag: Option<&str>, ai_rating: Option<u8>, kept: bool, rating: Option<u8>) -> CullCorrection {
+        CullCorrection {
+            file: file.into(),
+            ai_flag: flag.map(String::from),
+            ai_rating,
+            ai_reason: Some("softer than frame 2".into()),
+            kept,
+            rating,
+        }
+    }
+
+    #[test]
+    fn nothing_learned_means_no_section() {
+        assert!(cull_learning_section(&CullFeedback::default(), &summary(0, None, DEFAULT_GRADE)).is_none());
+    }
+
+    #[test]
+    fn corrections_and_habits_reach_the_prompt() {
+        let mut fb = CullFeedback::default();
+        fb.add(
+            vec![
+                corr("a.jpg", Some("reject"), None, true, Some(3)),
+                corr("b.jpg", Some("pick"), Some(5), false, None),
+                corr("c.jpg", None, Some(4), true, Some(2)),
+            ],
+            7,
+        );
+        let text = cull_learning_section(&fb, &summary(5, Some(2.0), [0.0, 0.0, 0.6, 1.0, 1.0, 1.0])).unwrap();
+        assert!(text.contains("7 of 10 photos and overrode 3"), "{text}");
+        assert!(text.contains("about 2 frames of a burst"), "{text}");
+        assert!(text.contains("as low as 2/5"), "{text}");
+        assert!(text.contains("You rejected \"a.jpg\" (softer than frame 2) — they kept it and rated it ★3."), "{text}");
+        assert!(text.contains("You picked \"b.jpg\" (softer than frame 2) — they did not keep it."), "{text}");
+        assert!(text.contains("You rated \"c.jpg\" ★4 (softer than frame 2) — they changed it to ★2."), "{text}");
+        // Newest first.
+        assert!(text.find("c.jpg").unwrap() < text.find("a.jpg").unwrap());
+    }
+
+    #[test]
+    fn habits_need_enough_bursts() {
+        let text = cull_learning_section(&CullFeedback::default(), &summary(2, Some(2.0), DEFAULT_GRADE));
+        assert!(text.is_none());
+    }
+
+    #[test]
+    fn only_the_newest_corrections_are_kept() {
+        let mut fb = CullFeedback::default();
+        for i in 0..(CULL_FEEDBACK_KEEP + 5) {
+            fb.add(vec![corr(&format!("{i}.jpg"), Some("pick"), None, false, None)], 0);
+        }
+        assert_eq!(fb.recent.len(), CULL_FEEDBACK_KEEP);
+        assert_eq!(fb.recent[0].file, "5.jpg");
+        assert_eq!(fb.corrected, (CULL_FEEDBACK_KEEP + 5) as u64);
     }
 }

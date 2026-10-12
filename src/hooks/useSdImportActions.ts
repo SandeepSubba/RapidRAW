@@ -8,6 +8,7 @@ import { DriveInfo, ImportSortKey, restoreSelection, useImportStore } from '../s
 import { useUIStore } from '../store/useUIStore';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { FileTypeFilter, ImportFilterState, computeVisible, computeVisibleSet } from '../components/views/import/importFilters';
+import { CullLearning, keepersOf, learnFromImport, loadCullLearning, rankedGroups } from '../utils/importLearning';
 
 const rawExts = () => useSettingsStore.getState().supportedTypes?.raw ?? [];
 
@@ -60,36 +61,25 @@ function groupArgs() {
   return { settings: groupSettings(s.similarity), mode: s.groupMode, timeGapSeconds: gapSeconds(s) };
 }
 
-// Minimum 0–5 grade an auto-selected photo must reach to be kept.
-const KEEP_MIN_GRADE = 3;
-
 /**
- * "Auto-select best": pick exactly ONE photo per similar group — the highest-scoring
- * (the representative) — plus every ungrouped single. Duplicates and blurry shots are
- * dropped, and a group whose best shot grades below {@link KEEP_MIN_GRADE} (on the same
- * 0–5 scale shown on the badges) is dropped entirely. The user can still manually keep
- * extras afterward.
+ * "Auto-select best": per similar group, keep the frames the keep policy says you keep —
+ * by default only the highest-scoring frame, and only when that frame grades 3+ on the
+ * badges' 0–5 scale. With "Personalize selection" on, `learning` carries the policy learned
+ * from your past imports (e.g. you keep the top two of a burst, or keep weaker bursts).
+ * Every ungrouped single is kept; blurry shots are dropped. The user can still change the
+ * selection afterward.
  */
-export function computeDefaultKeepers(scannedPaths: string[], suggestions: CullingSuggestions): Set<string> {
+export function computeDefaultKeepers(
+  scannedPaths: string[],
+  suggestions: CullingSuggestions,
+  learning: CullLearning | null = null,
+): Set<string> {
   const grouped = new Set<string>();
   const kept = new Set<string>();
 
-  // 0–5 grade, min–max normalized across grouped scores (matches the cell badges).
-  const allScores: number[] = [];
-  suggestions.similarGroups.forEach((g) => {
-    allScores.push(g.representative.qualityScore, ...g.duplicates.map((d) => d.qualityScore));
-  });
-  const sMin = allScores.length ? Math.min(...allScores) : 0;
-  const sMax = allScores.length ? Math.max(...allScores) : 1;
-  const grade = (s: number) => Math.round(sMax > sMin ? ((s - sMin) / (sMax - sMin)) * 5 : 5);
-
-  suggestions.similarGroups.forEach((group) => {
-    grouped.add(group.representative.path);
-    group.duplicates.forEach((dup) => grouped.add(dup.path)); // dropped (not the best)
-    // Keep the group's best shot only if it's good enough.
-    if (grade(group.representative.qualityScore) >= KEEP_MIN_GRADE) {
-      kept.add(group.representative.path);
-    }
+  rankedGroups(suggestions).forEach((group) => {
+    group.ranked.forEach((p) => grouped.add(p));
+    keepersOf(group, learning).forEach((p) => kept.add(p));
   });
 
   const blurry = new Set(suggestions.blurryImages.map((img) => img.path));
@@ -329,16 +319,28 @@ export function useSdImportActions() {
       useImportStore.getState().setImport({ enableGroups: true }); // reflect that grouping is now active
       await scoreImages(); // analyzes + groups + scores as needed, sets scoresReady + suggestions
     }
-    const { scannedPaths, suggestions, alreadyImported, setImport } = useImportStore.getState();
+    const { scannedPaths, suggestions, alreadyImported, personalizeSelection, setImport } = useImportStore.getState();
     if (!suggestions) return; // analysis failed; leave the current selection untouched
-    const kept = computeDefaultKeepers(scannedPaths, suggestions);
+    const learning = personalizeSelection ? await loadCullLearning() : null;
+    const kept = computeDefaultKeepers(scannedPaths, suggestions, learning);
     alreadyImported.forEach((p) => kept.delete(p));
     setImport({ keptPaths: kept });
   }, [scoreImages]);
 
   const scanSource = useCallback(async (path: string) => {
     const { setImport } = useImportStore.getState();
-    setImport({ sourcePath: path, stage: 'scanning', scannedPaths: [], captureTimes: {}, suggestions: null, activePath: null, selectedPaths: [], selectionAnchor: null, error: null });
+    setImport({
+      sourcePath: path,
+      stage: 'scanning',
+      scannedPaths: [],
+      captureTimes: {},
+      aiDecisions: {},
+      suggestions: null,
+      activePath: null,
+      selectedPaths: [],
+      selectionAnchor: null,
+      error: null,
+    });
     try {
       const scannedPaths = await invoke<string[]>(Invokes.ScanSourceImages, { path });
       if (scannedPaths.length === 0) {
@@ -434,24 +436,13 @@ export function useSdImportActions() {
       } catch (metaErr) {
         console.warn('Could not write culling metadata to source sidecars (continuing import):', metaErr);
       }
-      // Learn from this culling: tell the model which frame you kept vs the group-mates you
-      // skipped, within each similar group. Best-effort — never blocks the import.
-      const { suggestions, keptPaths, personalizeSelection } = useImportStore.getState();
-      if (personalizeSelection && suggestions) {
-        const kept: string[] = [];
-        const skipped: string[] = [];
-        suggestions.similarGroups.forEach((g) => {
-          const members = [g.representative.path, ...g.duplicates.map((d) => d.path)];
-          if (members.length < 2) return; // only learn from real bursts
-          members.forEach((p) => (keptPaths.has(p) ? kept : skipped).push(p));
-        });
-        if (kept.length && skipped.length) {
-          try {
-            await invoke(Invokes.RecordCullPicks, { kept, skipped });
-          } catch (e) {
-            console.warn('Culling-preference learning skipped:', e);
-          }
-        }
+      // Learn from this culling: what you kept of each burst (auto-select's cue weights and
+      // keep policy) and which of the assistant's decisions you overrode. Best-effort —
+      // never blocks the import.
+      try {
+        await learnFromImport();
+      } catch (e) {
+        console.warn('Culling learning skipped:', e);
       }
       await invoke(Invokes.ImportFiles, { destinationFolder, settings: importSettings, sourcePaths });
       // import-complete / import-error are handled by the global listeners (useProcessStore.importState).

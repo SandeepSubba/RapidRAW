@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { FolderInput, Settings2, ArrowRight } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 import { useImportStore } from '../../../store/useImportStore';
 import { useSdImportActions } from '../../../hooks/useSdImportActions';
 import Button from '../../ui/Button';
 import Switch from '../../ui/Switch';
+import { CullLearning, describeLearning, loadCullLearning } from '../../../utils/importLearning';
 
 export default function ImportReviewBar() {
   const { keptCount, destinationFolder, importSettings, excludeImported, excludedCount, ejectAfterImport, personalizeSelection, setImport } =
@@ -22,6 +23,11 @@ export default function ImportReviewBar() {
     );
   const { pickDestination, startImport, setExcludeImported, setPersonalize, resetLearning } = useSdImportActions();
   const [showSettings, setShowSettings] = useState(false);
+  const [learning, setLearning] = useState<CullLearning | null>(null);
+  useEffect(() => {
+    if (showSettings) loadCullLearning().then(setLearning);
+  }, [showSettings]);
+  const learned = describeLearning(learning);
 
   const destLabel = destinationFolder ? destinationFolder.split(/[\\/]/).pop() : 'Choose destination…';
 
@@ -89,8 +95,13 @@ export default function ImportReviewBar() {
             />
             {personalizeSelection && (
               <span className="text-xs text-text-secondary">
-                Learns which frames you keep vs skip in each group and applies it next import.{' '}
-                <button onClick={resetLearning} className="text-accent hover:underline">
+                Learns from what you import — which frames of a burst you keep (focus, eyes, light), how many, and which
+                of the assistant's picks you override — and applies it next time.{' '}
+                {learned ? `${learned}. ` : 'Nothing learned yet. '}
+                <button
+                  onClick={() => resetLearning().then(() => loadCullLearning().then(setLearning))}
+                  className="text-accent hover:underline"
+                >
                   Reset learning
                 </button>
               </span>

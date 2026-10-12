@@ -471,9 +471,10 @@ impl ImageAnalysisData {
     }
 }
 
-const WEIGHT_SHARPNESS: f64 = 0.40;
-const WEIGHT_CENTER_FOCUS: f64 = 0.35;
-const WEIGHT_EXPOSURE: f64 = 0.25;
+/// Default weights of the technical cues — see [`TechMetrics::features`]. Lighting used to
+/// be one clipping penalty (0.25); it is now split so highlights, shadows and an overall
+/// too-dark / too-bright frame each count, and each can be re-weighted by learning.
+pub const TECHNICAL_WEIGHTS: [f64; 5] = [0.40, 0.35, 0.10, 0.08, 0.07];
 
 fn calculate_laplacian_variance(image: &GrayImage) -> f64 {
     let (width, height) = image.dimensions();
@@ -534,31 +535,96 @@ fn calculate_exposure_metric(image: &GrayImage) -> f64 {
     (1.0f64 - penalty).max(0.0)
 }
 
-const ANALYSIS_DIM: u32 = 720; // FIXME: How should we calculate good focus if it's downscaled?!?
+/// How well a mean/median brightness (0–1, display-referred) sits for a photo: 1 across
+/// a generous mid band, falling linearly to 0 at near-black / near-white. Catches frames
+/// that are badly under- or over-exposed without clipping much.
+pub fn tone_balance(level: f64) -> f64 {
+    const LOW: (f64, f64) = (0.05, 0.30);
+    const HIGH: (f64, f64) = (0.65, 0.95);
+    if level < LOW.1 {
+        ((level - LOW.0) / (LOW.1 - LOW.0)).clamp(0.0, 1.0)
+    } else if level > HIGH.0 {
+        ((HIGH.1 - level) / (HIGH.1 - HIGH.0)).clamp(0.0, 1.0)
+    } else {
+        1.0
+    }
+}
 
-/// Quality metrics from an already-downscaled thumbnail: (quality, sharpness, center
-/// focus, exposure). This is the "scoring" work — separable from the grouping hash.
-fn quality_metrics(thumbnail: &image::DynamicImage) -> (f64, f64, f64, f64) {
+/// Lighting cues from a luma histogram, each in [0,1] (1 = good):
+/// [highlights not clipped, shadows not crushed, overall brightness balanced].
+fn light_cues(image: &GrayImage) -> [f64; 3] {
+    let histogram = imageproc::stats::histogram(image);
+    let h = &histogram.channels[0];
+    let total = (image.width() * image.height()) as f64;
+    if total == 0.0 {
+        return [0.0; 3];
+    }
+    let dark = h[0..5].iter().sum::<u32>() as f64 / total;
+    let bright = h[250..256].iter().sum::<u32>() as f64 / total;
+    // Median rather than mean: a small blown sky shouldn't read as a bright frame.
+    let mut acc = 0u64;
+    let mut median = 255usize;
+    for (v, &c) in h.iter().enumerate() {
+        acc += c as u64;
+        if acc as f64 >= total / 2.0 {
+            median = v;
+            break;
+        }
+    }
+    [
+        (1.0 - bright * 5.0).max(0.0),
+        (1.0 - dark * 5.0).max(0.0),
+        tone_balance(median as f64 / 255.0),
+    ]
+}
+
+/// Laplacian variance mapped onto [0,1] — the curve every sharpness cue uses.
+fn normalize_sharpness(variance: f64) -> f64 {
+    ((variance + 1.0).log10() / 3.5).min(1.0)
+}
+
+/// Technical measurements of one photo.
+#[derive(Debug, Clone, Copy)]
+pub struct TechMetrics {
+    pub quality: f64,
+    pub sharpness: f64,
+    pub center_focus: f64,
+    /// The combined clipping metric reported to the UI (unchanged meaning).
+    pub exposure: f64,
+    /// [highlights, shadows, balance] — see [`light_cues`].
+    pub light: [f64; 3],
+}
+
+impl TechMetrics {
+    /// Normalized cues: [sharpness, centre focus, highlights, shadows, balance].
+    pub fn features(&self) -> [f64; 5] {
+        [
+            normalize_sharpness(self.sharpness),
+            normalize_sharpness(self.center_focus),
+            self.light[0],
+            self.light[1],
+            self.light[2],
+        ]
+    }
+}
+
+const ANALYSIS_DIM: u32 = 720; // whole-frame cues; subject focus is measured at full size
+
+/// Quality metrics from an already-downscaled thumbnail. This is the "scoring" work —
+/// separable from the grouping hash.
+fn quality_metrics(thumbnail: &image::DynamicImage) -> TechMetrics {
     let gray = thumbnail.to_luma8();
-    let sharpness_metric = calculate_laplacian_variance(&gray);
-    let exposure_metric = calculate_exposure_metric(&gray);
+    let sharpness = calculate_laplacian_variance(&gray);
+    let exposure = calculate_exposure_metric(&gray);
+    let light = light_cues(&gray);
 
     let (tw, th) = gray.dimensions();
     let center_crop = imageops::crop_imm(&gray, tw / 4, th / 4, tw / 2, th / 2).to_image();
-    let center_focus_metric = calculate_laplacian_variance(&center_crop);
+    let center_focus = calculate_laplacian_variance(&center_crop);
 
-    let normalized_sharpness = ((sharpness_metric + 1.0).log10() / 3.5).min(1.0);
-    let normalized_center_focus = ((center_focus_metric + 1.0).log10() / 3.5).min(1.0);
-    let quality_score = (normalized_sharpness * WEIGHT_SHARPNESS)
-        + (normalized_center_focus * WEIGHT_CENTER_FOCUS)
-        + (exposure_metric * WEIGHT_EXPOSURE);
-
-    (
-        quality_score,
-        sharpness_metric,
-        center_focus_metric,
-        exposure_metric,
-    )
+    let mut m = TechMetrics { quality: 0.0, sharpness, center_focus, exposure, light };
+    m.quality = TECHNICAL_WEIGHTS.iter().zip(m.features()).map(|(w, f)| w * f).sum();
+    m
 }
 
 /// Decode + perceptual hash, optionally computing quality metrics. When `compute_score`
@@ -577,7 +643,8 @@ fn analyze_image(
     let color_hist = color_histogram(&thumbnail);
 
     let (quality_score, sharpness_metric, center_focus_metric, exposure_metric) = if compute_score {
-        quality_metrics(&thumbnail)
+        let m = quality_metrics(&thumbnail);
+        (m.quality, m.sharpness, m.center_focus, m.exposure)
     } else {
         (0.0, 0.0, 0.0, 0.0)
     };
@@ -602,7 +669,7 @@ fn analyze_image(
 pub fn score_image(
     path: &str,
     settings: &crate::app_settings::AppSettings,
-) -> Result<(f64, f64, f64, f64), String> {
+) -> Result<TechMetrics, String> {
     let img = load_for_analysis(path, settings)?;
     let thumbnail = img.thumbnail(ANALYSIS_DIM, ANALYSIS_DIM);
     Ok(quality_metrics(&thumbnail))
@@ -624,8 +691,50 @@ pub fn load_analysis_thumbnail(
 /// how sharp each cropped face is (the most relevant focus cue for people bursts).
 pub fn normalized_sharpness_of(image: &image::DynamicImage) -> f32 {
     let gray = image.to_luma8();
-    let var = calculate_laplacian_variance(&gray);
-    (((var + 1.0).log10() / 3.5).min(1.0)) as f32
+    normalize_sharpness(calculate_laplacian_variance(&gray)) as f32
+}
+
+/// Sharpness of a rectangle of a (full-size) image, normalized to [0,1]. The crop is
+/// downscaled to at most `max_dim` so the measure means the same for a face that fills
+/// the frame and one that doesn't, yet keeps the real pixels' focus detail — cropping a
+/// 1920px preview first loses exactly the fine detail that separates "eye sharp" from
+/// "ear sharp". Out-of-range rectangles are clamped; None when nothing is left.
+pub fn region_sharpness(image: &image::DynamicImage, x: f32, y: f32, w: f32, h: f32, max_dim: u32) -> Option<f32> {
+    let (iw, ih) = (image.width() as f32, image.height() as f32);
+    let (x1, y1) = (x.max(0.0), y.max(0.0));
+    let (x2, y2) = ((x + w).min(iw), (y + h).min(ih));
+    if x2 - x1 < 8.0 || y2 - y1 < 8.0 {
+        return None;
+    }
+    let crop = image.crop_imm(x1 as u32, y1 as u32, (x2 - x1) as u32, (y2 - y1) as u32);
+    let crop = if crop.width().max(crop.height()) > max_dim { crop.thumbnail(max_dim, max_dim) } else { crop };
+    Some(normalized_sharpness_of(&crop))
+}
+
+/// How well a face is exposed, in [0,1], from the middle of its box (skin, not hair or
+/// background). Deliberately tolerant of dark and light skin: only a face sunk in shadow
+/// (backlit, under-exposed) or washed out scores low, plus a penalty for blown skin.
+/// Faces in a burst share skin tone, so the burst comparison is about the light.
+pub fn face_exposure(image: &image::DynamicImage, x: f32, y: f32, w: f32, h: f32) -> Option<f64> {
+    let (iw, ih) = (image.width() as f32, image.height() as f32);
+    let (x1, y1) = ((x + w * 0.2).max(0.0), (y + h * 0.2).max(0.0));
+    let (x2, y2) = ((x + w * 0.8).min(iw), (y + h * 0.8).min(ih));
+    if x2 - x1 < 4.0 || y2 - y1 < 4.0 {
+        return None;
+    }
+    let crop = image.crop_imm(x1 as u32, y1 as u32, (x2 - x1) as u32, (y2 - y1) as u32);
+    let crop = crop.thumbnail(128, 128).to_luma8();
+    let n = (crop.width() * crop.height()) as f64;
+    let mean = crop.pixels().map(|p| p[0] as f64).sum::<f64>() / n / 255.0;
+    let blown = crop.pixels().filter(|p| p[0] >= 250).count() as f64 / n;
+    let level = if mean < 0.12 {
+        ((mean - 0.03) / 0.09).clamp(0.0, 1.0)
+    } else if mean > 0.80 {
+        ((0.95 - mean) / 0.15).clamp(0.0, 1.0)
+    } else {
+        1.0
+    };
+    Some(level * (1.0 - blown * 3.0).max(0.0))
 }
 
 /// Sharpness of the *sharpest region* of the image (max over a 3×3 grid of the Laplacian
@@ -652,14 +761,16 @@ pub fn best_region_sharpness(image: &image::DynamicImage) -> f32 {
 
 const FACE_DIM: u32 = 1920; // large enough that cropped faces keep detail for CLIP gaze/eyes
 
-/// Decode + downscale to a larger thumbnail for the face/eye pass. Faces in a group shot
-/// are small, so we keep more resolution here than the technical-scoring thumbnail.
-pub fn load_face_image(
+/// Decode once for the face/subject pass: (full-size image, 1920px working copy). Faces are
+/// detected and read by CLIP on the working copy; focus is measured on the full-size
+/// pixels (for RAWs, the camera's embedded preview — full size on most bodies).
+pub fn load_face_images(
     path: &str,
     settings: &crate::app_settings::AppSettings,
-) -> Result<image::DynamicImage, String> {
+) -> Result<(image::DynamicImage, image::DynamicImage), String> {
     let img = load_for_analysis(path, settings)?;
-    Ok(img.thumbnail(FACE_DIM, FACE_DIM))
+    let thumb = img.thumbnail(FACE_DIM, FACE_DIM);
+    Ok((img, thumb))
 }
 
 #[tauri::command]

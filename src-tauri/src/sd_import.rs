@@ -25,11 +25,11 @@ use crate::formats::{is_raw_file, is_supported_image_file};
 // (group_for_import) without re-decoding every photo.
 static IMPORT_ANALYSIS: Mutex<Option<Vec<ImageAnalysisData>>> = Mutex::new(None);
 static IMPORT_FAILED: Mutex<Vec<String>> = Mutex::new(Vec::new());
-// Per-photo interpretable cue features from the last scoring run, keyed by path. Used to
-// fold your keep/skip decisions into the "learn from my picks" model (record_cull_picks).
-static IMPORT_FEATURES: Mutex<
-    Option<std::collections::HashMap<String, [f64; crate::cull_model::N_FEATURES]>>,
-> = Mutex::new(None);
+// Per-photo interpretable cue features (and which cue set they are) from the last scoring
+// run, keyed by path. Used to fold your keep/skip decisions into the "learn from my picks"
+// model (record_cull_picks).
+type CueFeatures = std::collections::HashMap<String, (crate::cull_model::CueKind, Vec<f64>)>;
+static IMPORT_FEATURES: Mutex<Option<CueFeatures>> = Mutex::new(None);
 // Capture timestamps (epoch seconds) per scanned path, for time-based (burst) grouping.
 static IMPORT_TIMES: Mutex<Option<std::collections::HashMap<String, i64>>> = Mutex::new(None);
 
@@ -286,7 +286,7 @@ pub async fn score_for_import(
     let _ = app_handle.emit("sd-import-score-start", total);
 
     // Pass 1 — technical metrics, in parallel.
-    let tech: std::collections::HashMap<String, (f64, f64, f64, f64)> = paths
+    let tech: std::collections::HashMap<String, crate::culling::TechMetrics> = paths
         .par_iter()
         .filter_map(|p| {
             let n = done.fetch_add(1, Ordering::Relaxed) + 1;
@@ -328,8 +328,8 @@ pub async fn score_for_import(
             let face_total = face_paths.len();
             for (i, p) in face_paths.iter().enumerate() {
                 let _ = app_handle.emit("sd-import-score-progress", serde_json::json!({ "current": i + 1, "total": face_total, "stage": "Analyzing photos (faces, focus, composition)…" }));
-                if let Ok(img) = crate::culling::load_face_image(p, &settings) {
-                    match crate::tagging::score_faces(&img, &face, &clip.model, &clip.tokenizer) {
+                if let Ok((full, img)) = crate::culling::load_face_images(p, &settings) {
+                    match crate::tagging::score_faces(&img, &full, &face, &clip.model, &clip.tokenizer) {
                         Ok(Some(cues)) => {
                             people.insert((*p).clone(), cues);
                         }
@@ -337,7 +337,9 @@ pub async fn score_for_import(
                             // No faces: rank by subject-region sharpness + composition instead
                             // of the centre-focus assumption.
                             let overall = crate::culling::normalized_sharpness_of(&img);
-                            let best = crate::culling::best_region_sharpness(&img);
+                            // Subject focus on the full-size pixels: at 1920px a slightly
+                            // missed focus plane still looks sharp.
+                            let best = crate::culling::best_region_sharpness(&full);
                             let aesthetic =
                                 crate::tagging::clip_aesthetic(&img, &clip.model, &clip.tokenizer)
                                     .unwrap_or(0.5);
@@ -358,44 +360,49 @@ pub async fn score_for_import(
         }
     };
 
-    // Score people shots via the learned/default cue-weight model and remember each photo's
-    // feature vector so record_cull_picks can learn from the final keep/skip decisions.
+    // Score every photo with the learned/default cue weights for its kind and remember its
+    // cue vector so record_cull_picks can learn from the final keep/skip decisions:
+    //  - people (faces found): technical + face focus + eye focus + gaze + expression +
+    //    eyes open + light on the faces;
+    //  - scene (no faces): overall + subject-region focus, highlights, shadows, tonal
+    //    balance and a CLIP aesthetic/composition cue;
+    //  - technical (not face-checked, or the AI models are unavailable): sharpness, centre
+    //    focus, highlights, shadows, balance.
+    use crate::cull_model::CueKind;
     let model = crate::cull_model::CullModel::load(&app_handle);
-    let mut features_map: std::collections::HashMap<String, [f64; crate::cull_model::N_FEATURES]> =
-        std::collections::HashMap::new();
+    let mut features_map: CueFeatures = std::collections::HashMap::new();
     {
         let mut guard = IMPORT_ANALYSIS.lock().unwrap();
         if let Some(v) = guard.as_mut() {
             for d in v.iter_mut() {
-                if let Some(&(q, sh, cf, ex)) = tech.get(&d.result_path()) {
-                    // For people shots (faces detected) the faces drive the score via the cue
-                    // model: technical + face-sharpness + looking-at-camera + expression +
-                    // eyes-open. Photos with no faces keep the technical score.
-                    let q_adj = if let Some(c) = people.get(&d.result_path()) {
-                        let f = [
-                            q,
-                            c.face_sharp as f64,
-                            c.look_mean as f64,
-                            c.look_worst as f64,
-                            c.expr_mean as f64,
-                            c.eyes_worst as f64,
-                        ];
-                        features_map.insert(d.result_path(), f);
-                        model.score(&f, personalize)
-                    } else if let Some(&[overall, best, aesthetic]) =
-                        nonpeople.get(&d.result_path())
-                    {
-                        // Non-people: subject-region focus + composition, de-emphasising the
-                        // centre-focus assumption that doesn't fit off-centre subjects.
-                        (0.30 * overall as f64
-                            + 0.30 * best as f64
-                            + 0.20 * ex
-                            + 0.20 * aesthetic as f64)
-                            .clamp(0.0, 1.0)
+                let path = d.result_path();
+                if let Some(m) = tech.get(&path) {
+                    let [hi, sh_ok, bal] = m.light;
+                    let (kind, f) = if let Some(c) = people.get(&path) {
+                        (
+                            CueKind::People,
+                            vec![
+                                m.quality,
+                                c.face_sharp as f64,
+                                c.eye_sharp as f64,
+                                c.look_mean as f64,
+                                c.look_worst as f64,
+                                c.expr_mean as f64,
+                                c.eyes_worst as f64,
+                                c.face_light as f64,
+                            ],
+                        )
+                    } else if let Some(&[overall, best, aesthetic]) = nonpeople.get(&path) {
+                        (
+                            CueKind::Scene,
+                            vec![overall as f64, best as f64, hi, sh_ok, bal, aesthetic as f64],
+                        )
                     } else {
-                        q
+                        (CueKind::Technical, m.features().to_vec())
                     };
-                    d.set_scores(q_adj, sh, cf, ex);
+                    let q = model.score(kind, &f, personalize);
+                    features_map.insert(path, (kind, f));
+                    d.set_scores(q, m.sharpness, m.center_focus, m.exposure);
                 }
             }
         }
@@ -406,39 +413,37 @@ pub async fn score_for_import(
     Ok(tech.len())
 }
 
-/// Record the user's keep/skip decisions for the just-finished import into the on-device
-/// "learn from my picks" model. `kept`/`skipped` are paths from multi-image similar groups
-/// (we learn which frame you preferred over the group-mates you rejected). Returns the total
-/// number of samples learned so far. No-op unless both a kept and a skipped grouped photo
-/// (with cached cue features) are supplied.
+/// Learn from the just-finished import: for every scored similar group, its members
+/// best-first by the app's score, which ones you kept, and the best frame's grade. Teaches
+/// the cue weights (kept vs skipped frames of the same kind) and the keep policy (how many
+/// frames, how good a burst must be). Returns what has been learned so far.
 #[tauri::command]
 pub fn record_cull_picks(
     app_handle: AppHandle,
-    kept: Vec<String>,
-    skipped: Vec<String>,
-) -> Result<u64, String> {
+    groups: Vec<crate::cull_model::GroupOutcome>,
+) -> Result<crate::cull_model::LearningSummary, String> {
+    let empty = std::collections::HashMap::new();
     let guard = IMPORT_FEATURES.lock().unwrap();
-    let map = match guard.as_ref() {
-        Some(m) => m,
-        None => return Ok(0),
-    };
-    let chosen: Vec<[f64; crate::cull_model::N_FEATURES]> =
-        kept.iter().filter_map(|p| map.get(p).copied()).collect();
-    let rejected: Vec<[f64; crate::cull_model::N_FEATURES]> =
-        skipped.iter().filter_map(|p| map.get(p).copied()).collect();
-    if chosen.is_empty() || rejected.is_empty() {
-        return Ok(0);
-    }
+    let features = guard.as_ref().unwrap_or(&empty);
     let mut model = crate::cull_model::CullModel::load(&app_handle);
-    model.record(&chosen, &rejected);
-    model.save(&app_handle)?;
-    Ok(model.sample_count())
+    if model.record_import(&groups, features) {
+        model.save(&app_handle)?;
+    }
+    Ok(model.summary())
 }
 
-/// Forget everything the culling model has learned (back to default cue weights).
+/// What the culling has learned so far (for the import window and the assistant).
+#[tauri::command]
+pub fn get_cull_learning(app_handle: AppHandle) -> crate::cull_model::LearningSummary {
+    crate::cull_model::CullModel::load(&app_handle).summary()
+}
+
+/// Forget everything culling has learned: cue weights, keep policy, and the assistant's
+/// record of your corrections.
 #[tauri::command]
 pub fn reset_cull_model(app_handle: AppHandle) -> Result<(), String> {
-    crate::cull_model::CullModel::reset(&app_handle)
+    crate::cull_model::CullModel::reset(&app_handle)?;
+    crate::assistant::reset_cull_feedback(&app_handle)
 }
 
 /// Eject / unmount the removable volume at `mount_point` (e.g. after import).

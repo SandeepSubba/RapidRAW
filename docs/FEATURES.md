@@ -23,7 +23,14 @@ detail in [`docs/IMAGE_IMPORTER.md`](IMAGE_IMPORTER.md).
   metrics don't apply.
 - **0–5 grades + keep threshold**, a **compare / zoom viewer**, and a green outline
   that marks the images you've **kept** (not just the AI's best guess).
-- **Learns from your culling** — selections personalize future auto-selection.
+- **Focus and light in the score** — focus is measured at the eyes (sharper eye, from face
+  landmarks) and on the subject region at full size, not on a 1920px copy; lighting counts
+  highlights, shadows, too-dark / too-bright frames, and the light on each face.
+- **Learns from your culling** — every import teaches it which frames you keep (cue
+  weights for people, non-people and technical-only scores alike) and how many per burst
+  / how weak a burst you still keep; auto-select applies that next time, and the import
+  settings say what it has learned. The assistant's culls learn from the decisions you
+  override at import.
 - **Grouping modes** — including **time-based (burst) grouping**.
 - **Grid controls** — sort by name, capture date, or quality; **multi-select**
   with Ctrl/Shift+click.
@@ -140,7 +147,8 @@ and dated.
   the grid. Culling here works on the selection (or everything shown when ≤1 is
   selected) using the import's own groups: **pick = mark for import, reject =
   unmark**, ratings and labels are written to the photos on import like manual
-  ones. Nothing touches disk before import. While the import window is open
+  ones. Nothing touches disk before import. The decisions you override before importing
+  are remembered and quoted in later cull requests, so it learns your taste. While the import window is open
   without a grid to work on (source picker, scoring, importing) the assistant
   says so rather than acting on the library hidden behind it.
 

@@ -169,3 +169,22 @@ export const importCullTarget: CullTarget = {
     return changes;
   },
 };
+
+/**
+ * The assistant's own cull in the import window: applied like any import decision, and
+ * remembered so the import can tell which of its judgements you overrode
+ * (utils/importLearning.ts). Chat requests ("mark these keepers") are your decisions, not
+ * the assistant's, so they go through {@link importCullTarget} and are not remembered.
+ */
+export const importAssistantCullTarget: CullTarget = {
+  ...importCullTarget,
+  apply(path: string, d: CullDecision) {
+    if (d.flag || d.rating) {
+      const s = useImportStore.getState();
+      s.setImport({
+        aiDecisions: { ...s.aiDecisions, [path]: { flag: d.flag, rating: d.rating, reason: d.reason } },
+      });
+    }
+    return importCullTarget.apply(path, d);
+  },
+};

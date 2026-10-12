@@ -2452,6 +2452,7 @@ pub fn run() {
             sd_import::eject_drive,
             sd_import::record_cull_picks,
             sd_import::reset_cull_model,
+            sd_import::get_cull_learning,
             lens_correction::get_lensfun_makers,
             lens_correction::get_lensfun_lenses_for_maker,
             lens_correction::autodetect_lens,
@@ -2475,6 +2476,7 @@ pub fn run() {
             scanning::scan_cancel,
             guided_perspective::calculate_guided_perspective,
             assistant::assistant_cull,
+            assistant::record_assistant_cull_feedback,
             culling::assistant_group_images,
             app_settings::is_tethering_supported,
         ])

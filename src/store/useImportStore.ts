@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { CullingSettings, CullingSuggestions, SortDirection } from '../components/ui/AppProperties';
 import { FileTypeFilter } from '../components/views/import/importFilters';
+import type { AiDecision } from '../utils/importLearning';
 
 // What to order the culling grid by. 'date' uses EXIF capture time (loaded after a scan);
 // 'quality' only becomes meaningful once scoring has run.
@@ -104,6 +105,9 @@ interface ImportState {
   sortOrder: SortDirection;
   // EXIF capture time (epoch seconds) per scanned path; loaded after a scan for date sorting.
   captureTimes: Record<string, number>;
+  // The assistant's cull decisions for this scan, compared with what is finally imported
+  // so it can learn from the ones you override (utils/importLearning.ts).
+  aiDecisions: Record<string, AiDecision>;
   error: string | null;
 
   setImport: (updater: Partial<ImportState> | ((state: ImportState) => Partial<ImportState>)) => void;
@@ -156,6 +160,7 @@ const INITIAL: Omit<ImportState, 'setImport' | 'toggleKeep' | 'reset'> = {
   sortKey: 'name',
   sortOrder: SortDirection.Ascending,
   captureTimes: {},
+  aiDecisions: {},
   error: null,
 };
 
@@ -187,6 +192,7 @@ export const useImportStore = create<ImportState>()(
           sourcePath: null,
           scannedPaths: [],
           captureTimes: {},
+          aiDecisions: {},
           cullProgress: null,
           suggestions: null,
           enableGroups: false,

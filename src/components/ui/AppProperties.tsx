@@ -70,6 +70,8 @@ export enum Invokes {
   GroupForImport = 'group_for_import',
   ScoreForImport = 'score_for_import',
   RecordCullPicks = 'record_cull_picks',
+  GetCullLearning = 'get_cull_learning',
+  RecordAssistantCullFeedback = 'record_assistant_cull_feedback',
   ResetCullModel = 'reset_cull_model',
   ListSourceDrives = 'list_source_drives',
   ScanSourceImages = 'scan_source_images',

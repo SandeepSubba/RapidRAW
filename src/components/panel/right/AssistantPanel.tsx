@@ -43,6 +43,7 @@ import { CULL_REQUEST, CullTarget, planCullChunks, runAssistantCull, ShotGroups 
 import {
   buildImportContext,
   importCullScope,
+  importAssistantCullTarget,
   importCullTarget,
   importQGrades,
   importShotGroups,
@@ -1608,7 +1609,7 @@ export default function AssistantPanel() {
   // model can compare frames. Decisions land as each group finishes.
   const runCull = useCallback(
     async (paths: string[], instruction: string, inImport: boolean) => {
-      const target = inImport ? importCullTarget : libraryCullTarget;
+      const target = inImport ? importAssistantCullTarget : libraryCullTarget;
       let shots: ShotGroups | null = inImport ? importShotGroups(paths) : null;
       if (!shots) {
         addReport(
