@@ -100,7 +100,9 @@ Both modes:
 - re-group **instantly** — the analysis is cached on the backend, so changing mode / slider
   never re-decodes images;
 - are deliberately **separate from scoring** (slower) so the toggle stays snappy;
-- land any photo with no group-mate into **"Other images."**
+- show groups and ungrouped photos in **one timeline** in the chosen sort order: a group
+  sits where its first member falls, and ungrouped photos appear in place between the
+  groups (sort by date and the grid reads chronologically straight through).
 
 ## 4. AI scoring
 
@@ -201,7 +203,8 @@ You can always override afterward (keep extras, drop keepers).
 
 ## 7. Manual review: grid, filters, ratings
 
-- **Grid** with similar-group stacks, "Other images" (singles), and "Blurry (excluded)".
+- **Grid** with similar-group stacks and ungrouped photos interleaved in sort order, then
+  "Blurry (excluded)".
 - **Keyboard navigation** across the responsive grid (arrow keys move the focused cell;
   Space keeps/skips; Enter opens the viewer).
 - **Ratings & color labels** (1–5 stars, color labels) per photo — written to the source

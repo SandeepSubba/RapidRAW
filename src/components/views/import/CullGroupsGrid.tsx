@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { Check, Layers, Image as ImageIcon, Droplet, Grid2x2, Eye, Sparkles } from 'lucide-react';
+import { Check, Layers, Droplet, Grid2x2, Eye, Sparkles } from 'lucide-react';
 import { useImportStore } from '../../../store/useImportStore';
 import { useSettingsStore } from '../../../store/useSettingsStore';
 import { useSdImportActions } from '../../../hooks/useSdImportActions';
@@ -98,6 +98,9 @@ function SectionHeader({ icon, title, count }: { icon: React.ReactNode; title: s
 
 const CELL_GRID = 'grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 gap-2';
 
+// A row of the grouped grid: one similar-group stack, or a run of ungrouped photos.
+type TimelineItem = { group: boolean; paths: string[] };
+
 export default function CullGroupsGrid({ suggestions }: { suggestions: CullingSuggestions | null }) {
   const {
     scannedPaths,
@@ -170,7 +173,7 @@ export default function CullGroupsGrid({ suggestions }: { suggestions: CullingSu
   // Reading order + grouping lookups + render-ready arrays, all honouring the file-type
   // filter (hidden paths are dropped; a group that loses members collapses to a single)
   // and the user's chosen sort order (by file name or — once scored — quality).
-  const { flat, groups, singles, blurry, ordered, badgeOf, bestOf, memberOf, collapsed, leadOf } = useMemo(() => {
+  const { flat, groups, singles, timeline, blurry, ordered, badgeOf, bestOf, memberOf, collapsed, leadOf } = useMemo(() => {
     const fileName = (p: string) => p.split(/[\\/]/).pop() || p;
     const badge: Record<string, string> = {};
     const best = new Set<string>();
@@ -206,7 +209,7 @@ export default function CullGroupsGrid({ suggestions }: { suggestions: CullingSu
         lead[p] = p;
       });
       const collapsedList = sorted.map((p) => ({ lead: p, count: 1 }));
-      return { flat: sorted, groups: [] as string[][], singles: sorted, blurry: [] as string[], ordered: sorted, badgeOf: badge, bestOf: best, memberOf: members, collapsed: collapsedList, leadOf: lead };
+      return { flat: sorted, groups: [] as string[][], singles: sorted, timeline: [] as TimelineItem[], blurry: [] as string[], ordered: sorted, badgeOf: badge, bestOf: best, memberOf: members, collapsed: collapsedList, leadOf: lead };
     }
 
     const grouped = new Set<string>();
@@ -241,8 +244,6 @@ export default function CullGroupsGrid({ suggestions }: { suggestions: CullingSu
         reducedSingles.push(visMembers[0]);
       }
     });
-    // Order the groups themselves by their representative.
-    groupList.sort((g1, g2) => cmp(lead[g1[0]], lead[g2[0]]));
 
     const blurrySet = new Set(suggestions.blurryImages.map((b) => b.path));
     suggestions.blurryImages.forEach((b) => (badge[b.path] = `sharp ${b.sharpnessMetric.toFixed(0)}`));
@@ -255,16 +256,27 @@ export default function CullGroupsGrid({ suggestions }: { suggestions: CullingSu
       lead[p] = p;
     });
 
+    // One timeline: groups and ungrouped photos interleaved in the chosen sort order, so
+    // e.g. sorting by date reads chronologically straight through. A group sits where its
+    // first member (in that order) falls; neighbouring singles share one run of cells.
+    const entries = [...groupList, ...singleList.map((p) => [p])].sort((a, b) => cmp(a[0], b[0]));
+    const timelineList: TimelineItem[] = [];
+    entries.forEach((paths) => {
+      const last = timelineList[timelineList.length - 1];
+      if (paths.length > 1) timelineList.push({ group: true, paths });
+      else if (last && !last.group) last.paths.push(paths[0]);
+      else timelineList.push({ group: false, paths: [paths[0]] });
+    });
+
     // Collapsed-stack order (viewer) and reading order (keyboard nav) follow the final
-    // on-screen order: groups, then singles, then blurry.
+    // on-screen order: the timeline, then blurry.
     const collapsedList = [
-      ...groupList.map((g) => ({ lead: lead[g[0]], count: g.length })),
-      ...singleList.map((p) => ({ lead: p, count: 1 })),
+      ...entries.map((paths) => ({ lead: lead[paths[0]], count: paths.length })),
       ...visBlurry.map((p) => ({ lead: p, count: 1 })),
     ];
-    const orderedList = [...groupList.flat(), ...singleList, ...visBlurry];
+    const orderedList = [...entries.flat(), ...visBlurry];
 
-    return { flat: visScanned, groups: groupList, singles: singleList, blurry: visBlurry, ordered: orderedList, badgeOf: badge, bestOf: best, memberOf: members, collapsed: collapsedList, leadOf: lead };
+    return { flat: visScanned, groups: groupList, singles: singleList, timeline: timelineList, blurry: visBlurry, ordered: orderedList, badgeOf: badge, bestOf: best, memberOf: members, collapsed: collapsedList, leadOf: lead };
   }, [suggestions, scannedPaths, visibleSet, scoresReady, alreadyImported, sortKey, sortOrder, captureTimes]);
 
   const onOpen = (p: string) => {
@@ -532,7 +544,7 @@ export default function CullGroupsGrid({ suggestions }: { suggestions: CullingSu
         </button>
 
         <span className="text-xs text-text-secondary">
-          {selectedCount} / {flat.length} kept{suggestions ? ` · ${groups.length} groups` : ''}
+          {selectedCount} / {flat.length} kept{suggestions ? ` · ${groups.length} groups · ${singles.length} ungrouped` : ''}
           {selectedPaths.length > 1 ? ` · ${selectedPaths.length} selected` : ''}
         </span>
         <span className="ml-auto text-xs text-text-secondary">⌘/Ctrl or ⇧ click to multi-select · space to keep/skip · double-click for viewer</span>
@@ -561,13 +573,12 @@ export default function CullGroupsGrid({ suggestions }: { suggestions: CullingSu
           </section>
         )}
 
-        {/* Similar groups as Capture One–style stacks */}
-        {suggestions && groups.length > 0 && (
-          <section>
-            <SectionHeader icon={<Layers size={16} className="text-accent" />} title="Similar groups" count={groups.length} />
-            <div className="space-y-3">
-              {groups.map((paths, idx) => (
-                <div key={idx} className="rounded-lg border border-border-color bg-surface/40 p-3">
+        {/* Groups (Capture One–style stacks) and ungrouped photos, in one sorted timeline */}
+        {suggestions && timeline.length > 0 && (
+          <section className="space-y-3">
+            {timeline.map(({ group, paths }) =>
+              group ? (
+                <div key={paths[0]} className="rounded-lg border border-border-color bg-surface/40 p-3">
                   <div className="flex items-center gap-2 mb-2 text-xs text-text-secondary">
                     <span className="bg-accent/20 text-accent rounded px-1.5 py-0.5 font-medium">{paths.length} similar</span>
                     <span>
@@ -580,24 +591,14 @@ export default function CullGroupsGrid({ suggestions }: { suggestions: CullingSu
                     ))}
                   </div>
                 </div>
-              ))}
-            </div>
-          </section>
-        )}
-
-        {/* Ungrouped singles */}
-        {suggestions && singles.length > 0 && (
-          <section>
-            <SectionHeader
-              icon={<ImageIcon size={16} className="text-text-secondary" />}
-              title="Other images"
-              count={singles.length}
-            />
-            <div className={CELL_GRID}>
-              {singles.map((p) => (
-                <Cell key={p} {...cellProps(p)} badge={p.split(/[\\/]/).pop()} />
-              ))}
-            </div>
+              ) : (
+                <div key={paths[0]} className={`${CELL_GRID} px-3`}>
+                  {paths.map((p) => (
+                    <Cell key={p} {...cellProps(p)} badge={p.split(/[\\/]/).pop()} />
+                  ))}
+                </div>
+              ),
+            )}
           </section>
         )}
 
