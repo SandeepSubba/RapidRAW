@@ -38,10 +38,14 @@ async function writeCullingMetadata(paths: string[], ratings: Record<string, num
   ]);
 }
 
+// Bits in the backend's perceptual hash (culling.rs: DoubleGradient at 16x16
+// hashes a 9x9 image as 72 row + 72 column gradients). Must track that config.
+const HASH_BITS = 144;
+
 // Map a Capture One–style "Similarity %" (higher = stricter) to the backend's
 // perceptual-hash Hamming-distance threshold (lower = stricter).
 function groupSettings(similarity: number) {
-  const threshold = Math.max(1, Math.round(((100 - similarity) / 100) * 64));
+  const threshold = Math.max(1, Math.round(((100 - similarity) / 100) * HASH_BITS));
   return { groupSimilar: true, filterBlurry: false, similarityThreshold: threshold, blurThreshold: 100 };
 }
 
