@@ -107,6 +107,7 @@ export default function CullGroupsGrid({ suggestions }: { suggestions: CullingSu
     similarity,
     groupMode,
     timeGapSeconds,
+    sceneGapSeconds,
     scoresReady,
     fileTypeFilter,
     filterRating,
@@ -129,6 +130,7 @@ export default function CullGroupsGrid({ suggestions }: { suggestions: CullingSu
       similarity: s.similarity,
       groupMode: s.groupMode,
       timeGapSeconds: s.timeGapSeconds,
+      sceneGapSeconds: s.sceneGapSeconds,
       scoresReady: s.scoresReady,
       fileTypeFilter: s.fileTypeFilter,
       filterRating: s.filterRating,
@@ -146,6 +148,7 @@ export default function CullGroupsGrid({ suggestions }: { suggestions: CullingSu
   );
   const actions = useSdImportActions();
   const { setEnableGroups, setSimilarity, setGroupMode, setTimeGap, setSelection, toggleKeepMany, selectAll, selectNone, autoSelectBest } = actions;
+  const gapSeconds = groupMode === 'time' ? timeGapSeconds : sceneGapSeconds;
   const selectedSet = useMemo(() => new Set(selectedPaths), [selectedPaths]);
   const rawExts = useSettingsStore((s) => s.supportedTypes?.raw);
   const selectedCount = keptPaths.size;
@@ -469,7 +472,7 @@ export default function CullGroupsGrid({ suggestions }: { suggestions: CullingSu
               By time
             </button>
           </div>
-          {groupMode === 'visual' ? (
+          {groupMode === 'visual' && (
             <>
               <span className="text-xs text-text-secondary">Similarity</span>
               <input
@@ -484,24 +487,28 @@ export default function CullGroupsGrid({ suggestions }: { suggestions: CullingSu
               />
               <span className="text-xs tabular-nums text-text-secondary w-9">{similarity}%</span>
             </>
-          ) : (
-            <>
-              <span className="text-xs text-text-secondary" data-tooltip="Photos taken within this gap form a burst">
-                Max gap
-              </span>
-              <input
-                type="range"
-                min={1}
-                max={60}
-                step={1}
-                value={timeGapSeconds}
-                disabled={!enableGroups}
-                onChange={(e) => setTimeGap(Number(e.target.value))}
-                className="w-24 accent-accent"
-              />
-              <span className="text-xs tabular-nums text-text-secondary w-9">{timeGapSeconds}s</span>
-            </>
           )}
+          <span
+            className="text-xs text-text-secondary"
+            data-tooltip={
+              groupMode === 'time'
+                ? 'Photos taken within this gap form a burst'
+                : 'Only photos taken within this gap are compared; the closer in time, the easier the match'
+            }
+          >
+            Max gap
+          </span>
+          <input
+            type="range"
+            min={1}
+            max={60}
+            step={1}
+            value={gapSeconds}
+            disabled={!enableGroups}
+            onChange={(e) => setTimeGap(Number(e.target.value))}
+            className="w-24 accent-accent"
+          />
+          <span className="text-xs tabular-nums text-text-secondary w-9">{gapSeconds}s</span>
         </div>
 
         {/* filters: sort order + rating / file type / color label */}

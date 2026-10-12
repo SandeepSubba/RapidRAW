@@ -48,7 +48,7 @@ fn group_cached(
     if mode == "time" {
         group_by_time(analyses, failed, times, time_gap_seconds)
     } else {
-        group_by_scene(analyses, failed, times, settings)
+        group_by_scene(analyses, failed, times, settings, time_gap_seconds)
     }
 }
 
@@ -200,7 +200,8 @@ pub async fn analyze_for_import(
     Ok(count)
 }
 
-/// Group the cached analysis. `mode` = "time" → burst-by-capture-time (gap = `time_gap_seconds`);
+/// Group the cached analysis. `time_gap_seconds` is the max gap for either mode.
+/// `mode` = "time" → burst-by-capture-time;
 /// otherwise visual similarity at the slider's threshold. Cheap (no I/O), so the slider /
 /// mode toggle can call it live. Ranks each group by quality score.
 #[tauri::command]

@@ -49,10 +49,15 @@ function groupSettings(similarity: number) {
   return { groupSimilar: true, filterBlurry: false, similarityThreshold: threshold, blurThreshold: 100 };
 }
 
-// Grouping invoke args from current store state — visual similarity or time-burst mode.
+// Each grouping mode keeps its own max gap: a burst gap for 'time', a wider scene window for 'visual'.
+function gapSeconds(s: { groupMode: 'visual' | 'time'; timeGapSeconds: number; sceneGapSeconds: number }) {
+  return s.groupMode === 'time' ? s.timeGapSeconds : s.sceneGapSeconds;
+}
+
+// Grouping invoke args from current store state — scene (look + time) or time-burst mode.
 function groupArgs() {
   const s = useImportStore.getState();
-  return { settings: groupSettings(s.similarity), mode: s.groupMode, timeGapSeconds: s.timeGapSeconds };
+  return { settings: groupSettings(s.similarity), mode: s.groupMode, timeGapSeconds: gapSeconds(s) };
 }
 
 // Minimum 0–5 grade an auto-selected photo must reach to be kept.
@@ -179,7 +184,7 @@ export function useSdImportActions() {
       await invoke<number>(Invokes.ScoreForImport, {
         groupSettings: groupSettings(s.similarity),
         mode: s.groupMode,
-        timeGapSeconds: s.timeGapSeconds,
+        timeGapSeconds: gapSeconds(s),
         personalize: s.personalizeSelection,
       });
       const suggestions = await invoke<CullingSuggestions>(Invokes.GroupForImport, groupArgs());
@@ -227,8 +232,8 @@ export function useSdImportActions() {
   const setTimeGap = useCallback(
     (seconds: number) => {
       const { enableGroups, analysisReady, groupMode, setImport } = useImportStore.getState();
-      setImport({ timeGapSeconds: seconds });
-      if (enableGroups && analysisReady && groupMode === 'time') regroup();
+      setImport(groupMode === 'time' ? { timeGapSeconds: seconds } : { sceneGapSeconds: seconds });
+      if (enableGroups && analysisReady) regroup();
     },
     [regroup],
   );

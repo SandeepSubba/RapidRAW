@@ -839,8 +839,11 @@ pub fn group_by_time(
 /// How far ahead in capture order a frame looks for a match, so one stray frame
 /// between two takes of the same composition doesn't split them.
 const SCENE_LOOKAHEAD: usize = 3;
-/// Frames shot further apart than this are never linked directly.
-const SCENE_MAX_GAP_SECONDS: i64 = 30;
+/// Frames shot back-to-back are far likelier to be the same scene, so the match
+/// is this much looser at a gap of zero, fading to no bonus at
+/// `SCENE_TIME_BONUS_FADE_SECONDS`.
+const SCENE_TIME_BONUS: f64 = 0.5;
+const SCENE_TIME_BONUS_FADE_SECONDS: f64 = 10.0;
 
 /// Group photos into **scenes**: runs of frames shot close together that look alike.
 ///
@@ -850,12 +853,16 @@ const SCENE_MAX_GAP_SECONDS: i64 = 30;
 /// be much looser: two frames link when their colour signatures *or* their
 /// perceptual hashes are within the threshold. `settings.similarity_threshold` is
 /// in hash bits; the colour signature gets the same fraction of its own range.
-/// Linked frames chain, so a long sequence in one setup becomes one group.
+/// Capture time counts twice: frames more than `max_gap_seconds` apart are never
+/// linked directly, and the closer two frames are the looser the match
+/// (`SCENE_TIME_BONUS`). Linked frames chain, so a long sequence in one setup
+/// becomes one group.
 pub fn group_by_scene(
     analyses: &[ImageAnalysisData],
     failed_paths: Vec<String>,
     times: &std::collections::HashMap<String, i64>,
     settings: &CullingSettings,
+    max_gap_seconds: i64,
 ) -> CullingSuggestions {
     let mut suggestions = CullingSuggestions {
         failed_paths,
@@ -882,13 +889,16 @@ pub fn group_by_scene(
     let mut parent: Vec<usize> = (0..analyses.len()).collect();
     for (k, &a) in order.iter().enumerate() {
         for &b in order.iter().skip(k + 1).take(SCENE_LOOKAHEAD) {
-            if let (Some(ta), Some(tb)) = (time_of(a), time_of(b))
-                && tb - ta > SCENE_MAX_GAP_SECONDS
-            {
+            // No timestamps (shouldn't happen for an analysed scan): no cut-off, no bonus.
+            let gap = time_of(a).zip(time_of(b)).map(|(ta, tb)| tb - ta);
+            if gap.is_some_and(|g| g > max_gap_seconds) {
                 break;
             }
-            if color_hist_distance(&analyses[a].color_hist, &analyses[b].color_hist) <= hist_threshold
-                || analyses[a].hash.dist(&analyses[b].hash) <= hash_threshold
+            let closeness = gap.map_or(0.0, |g| (1.0 - g as f64 / SCENE_TIME_BONUS_FADE_SECONDS).max(0.0));
+            let leniency = 1.0 + SCENE_TIME_BONUS * closeness;
+            let within = |distance: u32, threshold: u32| f64::from(distance) <= f64::from(threshold) * leniency;
+            if within(color_hist_distance(&analyses[a].color_hist, &analyses[b].color_hist), hist_threshold)
+                || within(analyses[a].hash.dist(&analyses[b].hash), hash_threshold)
             {
                 let (ra, rb) = (root(&mut parent, a), root(&mut parent, b));
                 parent[ra] = rb;
@@ -937,6 +947,8 @@ mod scene_grouping_tests {
         }
     }
 
+    const MAX_GAP: i64 = 20;
+
     fn groups(frames: &[ImageAnalysisData], times: &[i64]) -> Vec<Vec<String>> {
         let times = frames.iter().zip(times).map(|(f, &t)| (f.result.path.clone(), t)).collect();
         let settings = CullingSettings {
@@ -945,7 +957,7 @@ mod scene_grouping_tests {
             group_similar: true,
             filter_blurry: false,
         };
-        group_by_scene(frames, vec![], &times, &settings)
+        group_by_scene(frames, vec![], &times, &settings, MAX_GAP)
             .similar_groups
             .into_iter()
             .map(|g| {
@@ -968,7 +980,18 @@ mod scene_grouping_tests {
     #[test]
     fn identical_frames_shot_far_apart_stay_separate() {
         let frames = [frame("a1", 0, 0x00), frame("a2", 0, 0x00)];
-        assert!(groups(&frames, &[0, SCENE_MAX_GAP_SECONDS + 1]).is_empty());
+        assert!(groups(&frames, &[0, MAX_GAP + 1]).is_empty());
+    }
+
+    #[test]
+    fn a_borderline_match_needs_the_frames_to_be_close_in_time() {
+        // Palette distance 60: over the plain threshold (51), inside it with the time bonus.
+        let mut b = frame("b", 0, 0xFF);
+        b.color_hist[0] -= 60;
+        b.color_hist[1] += 60;
+        let frames = [frame("a", 0, 0x00), b];
+        assert_eq!(groups(&frames, &[0, 1]).len(), 1);
+        assert!(groups(&frames, &[0, 15]).is_empty());
     }
 
     #[test]
