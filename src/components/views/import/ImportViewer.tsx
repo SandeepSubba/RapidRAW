@@ -243,7 +243,7 @@ function GroupStrip({ members, activePath, onPick }: { members: string[]; active
             }`}
           >
             <LazyThumb path={p} className="w-full h-full" imgClassName="w-full h-full object-cover" />
-            {kept && <span className="absolute top-0.5 right-0.5 w-3 h-3 rounded-full bg-accent border border-white/60" />}
+            {kept && <span className="absolute top-0.5 right-0.5 w-3 h-3 rounded-full bg-green-500 border border-white/60" />}
           </button>
         );
       })}
@@ -415,7 +415,7 @@ function FilmStrip({
             {count > 1 && (
               <span className="absolute bottom-0.5 left-0.5 text-[9px] bg-black/70 text-white rounded px-1">{count}</span>
             )}
-            {kept && <span className="absolute top-0.5 right-0.5 w-3 h-3 rounded-full bg-accent border border-white/60" />}
+            {kept && <span className="absolute top-0.5 right-0.5 w-3 h-3 rounded-full bg-green-500 border border-white/60" />}
           </button>
         );
       })}
