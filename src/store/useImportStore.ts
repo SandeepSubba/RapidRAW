@@ -25,13 +25,15 @@ export interface ImportFileSettings {
 }
 
 // The culling work done on one source: which photos to keep, plus ratings and colour
-// labels. Saved so it survives the importer closing or the app restarting, and
-// restored when that source is scanned again.
+// labels, and the assistant's cull decisions (so the ones you override after reopening
+// are still learned from at import). Saved so it survives the importer closing or the
+// app restarting, and restored when that source is scanned again.
 export interface SavedSelection {
   sourcePath: string;
   kept: string[];
   ratings: Record<string, number>;
   colors: Record<string, string>;
+  aiDecisions?: Record<string, AiDecision>;
 }
 
 // What a fresh scan of `sourcePath` should start with: the saved work for that source,
@@ -46,6 +48,7 @@ export function restoreSelection(saved: SavedSelection | null, sourcePath: strin
     keptPaths: new Set((mine?.kept ?? []).filter((p) => scanned.has(p))),
     ratings: present(mine?.ratings ?? {}),
     colors: present(mine?.colors ?? {}),
+    aiDecisions: present(mine?.aiDecisions ?? {}),
   };
 }
 
@@ -249,11 +252,27 @@ export const useImportStore = create<ImportState>()(
 // start of a scan empty the working sets with no scan open, so they never reach here.
 useImportStore.subscribe((s, prev) => {
   if (!s.sourcePath || s.scannedPaths.length === 0) return;
-  if (s.keptPaths === prev.keptPaths && s.ratings === prev.ratings && s.colors === prev.colors) return;
+  if (
+    s.keptPaths === prev.keptPaths &&
+    s.ratings === prev.ratings &&
+    s.colors === prev.colors &&
+    s.aiDecisions === prev.aiDecisions
+  )
+    return;
   // Opening another source with nothing picked yet must not discard the saved work.
-  const empty = s.keptPaths.size === 0 && Object.keys(s.ratings).length === 0 && Object.keys(s.colors).length === 0;
+  const empty =
+    s.keptPaths.size === 0 &&
+    Object.keys(s.ratings).length === 0 &&
+    Object.keys(s.colors).length === 0 &&
+    Object.keys(s.aiDecisions).length === 0;
   if (empty && s.savedSelection?.sourcePath !== s.sourcePath) return;
   useImportStore.setState({
-    savedSelection: { sourcePath: s.sourcePath, kept: [...s.keptPaths], ratings: s.ratings, colors: s.colors },
+    savedSelection: {
+      sourcePath: s.sourcePath,
+      kept: [...s.keptPaths],
+      ratings: s.ratings,
+      colors: s.colors,
+      aiDecisions: s.aiDecisions,
+    },
   });
 });
