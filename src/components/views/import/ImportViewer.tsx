@@ -190,7 +190,7 @@ export default function ImportViewer({ initialPath, collapsed, memberOf, leadOf,
                             toggleKeep(p);
                           }}
                           className={`w-4 h-4 rounded-full flex items-center justify-center border shrink-0 ${
-                            kept ? 'bg-accent border-accent text-button-text' : 'border-text-secondary text-transparent'
+                            kept ? 'bg-green-500 border-green-500 text-white' : 'border-text-secondary text-transparent'
                           }`}
                         >
                           <Check size={11} />

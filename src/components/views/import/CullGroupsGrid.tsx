@@ -71,7 +71,7 @@ function Cell({ path, kept, focused, selected, disabled, badge, best, rating, co
           }}
           title={kept ? 'Selected for import — click to skip' : 'Skipped — click to keep'}
           className={`absolute top-1.5 right-1.5 w-5 h-5 rounded-full flex items-center justify-center border transition-colors ${
-            kept ? 'bg-accent border-accent text-button-text' : 'bg-black/50 border-white/60 text-white/30 hover:text-white'
+            kept ? 'bg-green-500 border-green-500 text-white' : 'bg-black/50 border-white/60 text-white/30 hover:text-white'
           }`}
         >
           <Check size={13} />
