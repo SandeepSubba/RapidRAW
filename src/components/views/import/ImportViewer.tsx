@@ -146,7 +146,7 @@ export default function ImportViewer({ initialPath, collapsed, memberOf, leadOf,
           )}
           <button
             onClick={() => toggleKeep(activePath)}
-            className={`ml-auto flex items-center gap-1 px-2 py-1 rounded ${activeKept ? 'bg-accent text-button-text' : 'hover:bg-surface text-text-secondary'}`}
+            className={`ml-auto flex items-center gap-1 px-2 py-1 rounded ${activeKept ? 'bg-green-500 text-white' : 'hover:bg-surface text-text-secondary'}`}
           >
             <Check size={14} /> {activeKept ? 'Keeping' : 'Skipped'}
           </button>
