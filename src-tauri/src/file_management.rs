@@ -82,6 +82,12 @@ fn compute_thumbnail_cache_hash(path_str: &str, adjustments_bytes: &[u8]) -> Opt
     hasher.update(path_str.as_bytes());
     hasher.update(&img_mod_time.to_le_bytes());
     hasher.update(adjustments_bytes);
+    // RAF thumbnails cached before the embedded-JPEG orientation was read are
+    // sideways for portrait shots; this salt retires them without touching
+    // the cache of any other format.
+    if source_path.extension().is_some_and(|e| e.eq_ignore_ascii_case("raf")) {
+        hasher.update(b"raf-orientation-v2");
+    }
     Some(hasher.finalize().to_hex().to_string())
 }
 

@@ -268,6 +268,45 @@ mod preview_candidate_tests {
         assert!(c.windows(2).all(|w| w[0].len() >= w[1].len()));
         assert!(c.iter().all(|b| b.starts_with(&[0xFF, 0xD8])));
     }
+
+    /// A portrait RAF: landscape embedded JPEG whose EXIF says "rotate". The
+    /// thumbnail must come back upright.
+    #[test]
+    fn raf_preview_honours_the_embedded_jpeg_orientation() {
+        let field = exif::Field {
+            tag: exif::Tag::Orientation,
+            ifd_num: exif::In::PRIMARY,
+            value: exif::Value::Short(vec![8]),
+        };
+        let mut writer = exif::experimental::Writer::new();
+        writer.push_field(&field);
+        let mut tiff = std::io::Cursor::new(Vec::new());
+        writer.write(&mut tiff, false).unwrap();
+        let tiff = tiff.into_inner();
+
+        let plain = jpeg_bytes(48, 32);
+        let mut jpeg = plain[..2].to_vec();
+        jpeg.extend_from_slice(&[0xFF, 0xE1]);
+        jpeg.extend_from_slice(&((tiff.len() + 8) as u16).to_be_bytes());
+        jpeg.extend_from_slice(b"Exif\0\0");
+        jpeg.extend_from_slice(&tiff);
+        jpeg.extend_from_slice(&plain[2..]);
+
+        const JPEG_OFFSET: usize = 148;
+        let mut raf = b"FUJIFILMCCD-RAW ".to_vec();
+        raf.resize(84, 0);
+        raf.extend_from_slice(&(JPEG_OFFSET as u32).to_be_bytes());
+        raf.extend_from_slice(&(jpeg.len() as u32).to_be_bytes());
+        raf.resize(JPEG_OFFSET, 0);
+        raf.extend_from_slice(&jpeg);
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("DSCF0001.RAF");
+        std::fs::write(&path, raf).unwrap();
+
+        let preview = fast_raw_preview(path.to_str().unwrap()).unwrap();
+        assert_eq!(preview.dimensions(), (32, 48));
+    }
 }
 
 pub fn fast_raw_preview(path: &str) -> Option<DynamicImage> {
@@ -303,7 +342,8 @@ pub fn fast_raw_preview_scaled(path: &str, max_dim: Option<u32>) -> Option<Dynam
     };
     // Embedded previews are stored unrotated; apply the file's EXIF orientation like
     // the full-decode path does, or portrait raws render sideways in the library grid.
-    let orientation = std::fs::File::open(path).ok().and_then(|f| {
+    let orientation = std::fs::File::open(path).ok().and_then(|mut f| {
+        crate::exif_processing::seek_to_raf_embedded_jpeg(&mut f);
         let mut r = std::io::BufReader::new(f);
         exif::Reader::new()
             .read_from_container(&mut r)
@@ -801,7 +841,7 @@ fn flush_time_burst(
 /// independent of visual similarity. `times` maps result path -> capture epoch seconds; a new
 /// burst starts whenever the gap to the previous photo exceeds `max_gap_seconds`. Each burst
 /// of >=2 becomes a group (representative = highest quality). Photos without a timestamp are
-/// left ungrouped (they fall into the frontend's "Other images").
+/// left ungrouped (the frontend shows them as single photos between the groups).
 pub fn group_by_time(
     successful_analyses: &[ImageAnalysisData],
     failed_paths: Vec<String>,

@@ -1078,10 +1078,11 @@ pub fn get_creation_date_from_path(path: &Path) -> DateTime<Utc> {
 }
 
 /// Positions `file` at the embedded JPEG of a Fuji RAF (its EXIF sits at the
-/// front of that JPEG), or back at the start for any other file. Without this
-/// a RAF falls through to rawler, which maps the whole 30+ MB file just to
-/// read a date — minutes of I/O for a card full of them.
-fn seek_to_raf_embedded_jpeg(file: &mut fs::File) {
+/// front of that JPEG), or back at the start for any other file. kamadak-exif
+/// doesn't know the RAF container, so without this every EXIF read of a RAF
+/// fails: dates fall through to rawler (which maps the whole 30+ MB file) and
+/// the orientation tag is never seen.
+pub(crate) fn seek_to_raf_embedded_jpeg(file: &mut fs::File) {
     use std::io::{Read, Seek, SeekFrom};
 
     let mut header = [0u8; 88];
