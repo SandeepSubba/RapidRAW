@@ -262,7 +262,9 @@ You can always override afterward (keep extras, drop keepers).
 Toggle **Grid ⇄ Viewer**. The viewer has two modes:
 
 - **Single** (default) — a full-resolution loupe with **Fit / 100%** and drag-to-pan, plus
-  a film-strip of all groups and a strip of the current group's frames.
+  a film-strip of all groups and a strip of the current group's frames. Moving to another
+  group (← / → or clicking it in the groups strip) lands on that group's **first** frame;
+  the strip's cover thumbnail is the group's best-scored frame.
 - **Compare** — all frames of a group side by side, at **full resolution** (not
   thumbnails), so you can judge sharpness / eyes / gaze directly. Features:
   - **Mouse-wheel zoom** (up to 6×), **shared across all panes** so you zoom into the same

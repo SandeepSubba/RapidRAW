@@ -36,12 +36,19 @@ export default function ImportViewer({ initialPath, collapsed, memberOf, leadOf,
   const members = memberOf[currentLead] ?? [activePath];
   const groupIndex = collapsed.findIndex((c) => c.lead === currentLead);
 
+  // Entering a group lands on its first frame (display order), not on its lead — the
+  // lead is the app's best pick, which sits anywhere in the burst and made the
+  // selection look like it jumped to a random frame.
+  const openGroup = useCallback(
+    (lead: string) => setActivePath(memberOf[lead]?.[0] ?? lead),
+    [memberOf, setActivePath],
+  );
   const goGroup = useCallback(
     (delta: number) => {
       const ni = groupIndex + delta;
-      if (groupIndex !== -1 && ni >= 0 && ni < collapsed.length) setActivePath(collapsed[ni].lead);
+      if (groupIndex !== -1 && ni >= 0 && ni < collapsed.length) openGroup(collapsed[ni].lead);
     },
-    [groupIndex, collapsed],
+    [groupIndex, collapsed, openGroup],
   );
   const goMember = useCallback(
     (delta: number) => {
@@ -107,7 +114,7 @@ export default function ImportViewer({ initialPath, collapsed, memberOf, leadOf,
       <FilmStrip
         items={collapsed.map((c) => c.lead)}
         activePath={currentLead}
-        onPick={setActivePath}
+        onPick={openGroup}
         countByPath={Object.fromEntries(collapsed.map((c) => [c.lead, c.count]))}
       />
 
