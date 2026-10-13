@@ -652,21 +652,42 @@ export const useKeyboardShortcuts = ({
 
     // Capture One–style increase/decrease shortcuts for the tonal & color
     // sliders, generated from the shared ADJUSTMENT_NUDGES config so the
-    // keybinds and their behaviour stay in lockstep. Each nudges the global
-    // adjustment value and rides the same debounced-history path as the sliders.
+    // keybinds and their behaviour stay in lockstep. Each nudges the adjustment
+    // being edited — the active mask layer while one is selected in the Masks
+    // panel (the same "editing a mask" test the canvas overlays use), otherwise
+    // the global value — and rides the same debounced-history path as the sliders.
     for (const nudge of ADJUSTMENT_NUDGES) {
       actions[nudge.action] = {
         shouldFire: (s: any) => !!s.editor.selectedImage,
-        execute: (e: any) => {
+        execute: (e: any, s: any) => {
           e.preventDefault();
           // Read the step live so user changes in Settings apply without a rebuild.
           const step = resolveNudgeStep(nudge, useSettingsStore.getState().appSettings?.adjustmentSteps);
           const delta = nudge.delta < 0 ? -step : step;
-          setAdjustments((prev: any) => {
-            const current = typeof prev[nudge.adjustmentKey] === 'number' ? prev[nudge.adjustmentKey] : 0;
+          const bump = (value: unknown) => {
+            const current = typeof value === 'number' ? value : 0;
             // Round to 2 decimals so repeated fractional steps don't accumulate float drift.
-            const next = Math.round(Math.min(nudge.max, Math.max(nudge.min, current + delta)) * 100) / 100;
-            return { ...prev, [nudge.adjustmentKey]: next };
+            return Math.round(Math.min(nudge.max, Math.max(nudge.min, current + delta)) * 100) / 100;
+          };
+          const maskId = s.ui.activePanel === Panel.Masks ? s.editor.activeMaskContainerId : null;
+          setAdjustments((prev: any) => {
+            if (maskId && prev.masks?.some((m: any) => m.id === maskId)) {
+              return {
+                ...prev,
+                masks: prev.masks.map((m: any) =>
+                  m.id === maskId
+                    ? {
+                        ...m,
+                        adjustments: {
+                          ...m.adjustments,
+                          [nudge.adjustmentKey]: bump(m.adjustments?.[nudge.adjustmentKey]),
+                        },
+                      }
+                    : m,
+                ),
+              };
+            }
+            return { ...prev, [nudge.adjustmentKey]: bump(prev[nudge.adjustmentKey]) };
           });
         },
       };

@@ -41,10 +41,12 @@ export const ADJUSTMENT_NUDGES: AdjustmentNudge[] = [
   // exposure). The letter names the adjustment; the held leader suppresses its
   // own single-key action until release, so + never leaks to zoom. All fully
   // remappable in Settings > Controls.
-  // Exposure (E). Step matches Capture One (0.1 EV). Note: the UI's Exposure
-  // slider writes `brightness`; `exposure` is the EV Shift slider.
-  { action: 'exposure_up', description: 'settings.keybinds.actions.exposure_up', defaultCombo: ['KeyE', 'Equal'], adjustmentKey: 'brightness', delta: 0.1, min: -5, max: 5 },
-  { action: 'exposure_down', description: 'settings.keybinds.actions.exposure_down', defaultCombo: ['KeyE', 'Minus'], adjustmentKey: 'brightness', delta: -0.1, min: -5, max: 5 },
+  // Exposure (E). Step matches Capture One (0.1 EV). Targets `exposure`, the
+  // slider labelled Exposure in both the Basic panel (inside the Tone Mapper box)
+  // and the mask panel; `brightness` is the separate Brightness slider. (Before
+  // the v1.6.5 labels, "Exposure" wrote `brightness`, hence the old mapping.)
+  { action: 'exposure_up', description: 'settings.keybinds.actions.exposure_up', defaultCombo: ['KeyE', 'Equal'], adjustmentKey: 'exposure', delta: 0.1, min: -5, max: 5 },
+  { action: 'exposure_down', description: 'settings.keybinds.actions.exposure_down', defaultCombo: ['KeyE', 'Minus'], adjustmentKey: 'exposure', delta: -0.1, min: -5, max: 5 },
   // Contrast (C).
   { action: 'contrast_up', description: 'settings.keybinds.actions.contrast_up', defaultCombo: ['KeyC', 'Equal'], adjustmentKey: 'contrast', delta: 1, min: -100, max: 100 },
   { action: 'contrast_down', description: 'settings.keybinds.actions.contrast_down', defaultCombo: ['KeyC', 'Minus'], adjustmentKey: 'contrast', delta: -1, min: -100, max: 100 },
@@ -77,7 +79,10 @@ export const ADJUSTMENT_NUDGES: AdjustmentNudge[] = [
 // built-in |delta|. The direction (sign) always comes from the nudge itself, so
 // a single configurable step drives both the increase and decrease shortcuts.
 export function resolveNudgeStep(nudge: AdjustmentNudge, overrides?: Record<string, number>): number {
-  const override = overrides?.[nudge.adjustmentKey];
+  // The Exposure nudges were keyed `brightness` until they were pointed at `exposure`;
+  // a step saved under the old key still applies.
+  const override =
+    overrides?.[nudge.adjustmentKey] ?? (nudge.adjustmentKey === 'exposure' ? overrides?.brightness : undefined);
   return typeof override === 'number' && override > 0 ? override : Math.abs(nudge.delta);
 }
 

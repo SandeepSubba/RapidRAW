@@ -234,7 +234,9 @@ and dated.
   ride in the normal adjustments (undo, presets, copy/paste — "Point Color"
   group) and render on the GPU next to the 8-band mixer.
 - **Capture One–style keyboard shortcuts** for the core tonal & color sliders —
-  shown in **Settings → Controls → Adjustments** and fully remappable.
+  shown in **Settings → Controls → Adjustments** and fully remappable (hold the
+  letter, press +/−; e.g. E = Exposure, C = Contrast). With a mask layer selected
+  in the Masks panel they adjust **that mask's** sliders; otherwise the global ones.
 - **Blown-highlight handling** — RAW highlights that clip are desaturated toward
   neutral white instead of going magenta/colored.
 - **Keyboard filmstrip selection** — build a multi-image selection from the keyboard
