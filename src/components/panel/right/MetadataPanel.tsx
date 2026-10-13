@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Camera, Check, ChevronDown, ChevronRight, Copy, Plus, Star, Tag, X, User } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -135,20 +135,33 @@ function MetadataItem({ label, value }: MetaDataItemProps) {
 interface EditableMetadataItemProps {
   label: string;
   value: string;
+  /** The selected images disagree on this field: show "Mixed" until it is set for all. */
+  mixed?: boolean;
   onSave: (val: string) => void;
 }
 
-function EditableMetadataItem({ label, value, onSave }: EditableMetadataItemProps) {
+function EditableMetadataItem({ label, value, mixed = false, onSave }: EditableMetadataItemProps) {
   const { t } = useTranslation();
   const [isEditing, setIsEditing] = useState(false);
   const [localValue, setLocalValue] = useState(value || '');
+  // Enter / Escape end the edit before the input unmounts; the blur that follows
+  // must not save a second time (or save after an Escape).
+  const settledRef = useRef(false);
 
   useEffect(() => {
     setLocalValue(value || '');
     setIsEditing(false);
-  }, [value]);
+  }, [value, mixed]);
+
+  const startEditing = () => {
+    settledRef.current = false;
+    setLocalValue(value || '');
+    setIsEditing(true);
+  };
 
   const handleSave = () => {
+    if (settledRef.current) return;
+    settledRef.current = true;
     setIsEditing(false);
     const trimmedLocal = localValue.trim();
     const trimmedProp = (value || '').trim();
@@ -158,8 +171,16 @@ function EditableMetadataItem({ label, value, onSave }: EditableMetadataItemProp
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') handleSave();
-    if (e.key === 'Escape') {
+    if (e.key !== 'Enter' && e.key !== 'Escape') return;
+    // Stop the key here: once the input closes, focus is back on the page and the
+    // global shortcuts would see this same press — Enter opens the image in the
+    // editor, Escape leaves the current view.
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.key === 'Enter') {
+      handleSave();
+    } else {
+      settledRef.current = true;
       setLocalValue(value || '');
       setIsEditing(false);
     }
@@ -182,24 +203,44 @@ function EditableMetadataItem({ label, value, onSave }: EditableMetadataItemProp
             autoFocus
             type="text"
             value={localValue}
+            placeholder={mixed ? t('editor.metadata.author.mixed') : ''}
             onChange={(e) => setLocalValue(e.target.value)}
             onBlur={handleSave}
             onKeyDown={handleKeyDown}
-            className="bg-bg-secondary border border-accent rounded-sm px-2 py-0.5 text-xs text-text-primary text-right outline-hidden w-full shadow-sm focus:ring-1 focus:ring-accent/30"
+            // Explicit text, caret and fill colours: native text fields otherwise
+            // take the OS light-mode defaults (black text) on some WebViews.
+            className="bg-bg-primary border border-accent rounded-sm px-2 py-0.5 text-xs text-text-primary caret-text-primary [-webkit-text-fill-color:currentColor] placeholder:text-text-tertiary text-right outline-hidden w-full shadow-sm focus:ring-1 focus:ring-accent/30"
           />
         ) : (
           <div
-            onClick={() => setIsEditing(true)}
-            className="text-xs px-2 py-0.5 min-h-[24px] flex items-center justify-end rounded-sm cursor-text border transition-colors text-right truncate w-full text-text-primary bg-bg-secondary/40 border-surface/50 hover:bg-bg-secondary/80 hover:border-text-tertiary/40"
-            data-tooltip={value ? t('editor.metadata.clickToEdit') : t('editor.metadata.emptyClickToAdd')}
+            onClick={startEditing}
+            className={clsx(
+              'text-xs px-2 py-0.5 min-h-[24px] flex items-center justify-end rounded-sm cursor-text border transition-colors text-right truncate w-full bg-bg-primary border-border-color hover:border-text-tertiary/60',
+              value ? 'text-text-primary' : 'italic text-text-tertiary',
+            )}
+            data-tooltip={
+              mixed
+                ? t('editor.metadata.author.mixedTooltip')
+                : value
+                  ? t('editor.metadata.clickToEdit')
+                  : t('editor.metadata.emptyClickToAdd')
+            }
           >
-            {value}
+            {mixed ? t('editor.metadata.author.mixed') : value || t('editor.metadata.author.add')}
           </div>
         )}
       </div>
     </div>
   );
 }
+
+/** An EXIF text value as the panel shows it: no wrapping quotes, camera "default" as empty. */
+const cleanExifText = (raw: unknown) => {
+  const clean = String(raw ?? '')
+    .replace(/^"|"$/g, '')
+    .trim();
+  return clean.toLowerCase() === 'default' ? '' : clean;
+};
 
 const EDITABLE_FIELDS = [
   { key: 'ImageDescription', label: 'title' },
@@ -265,17 +306,62 @@ export default function MetadataPanel() {
   };
   const isBatch = targetPaths.length > 1;
 
-  // Copy the focused image's creator-detail fields to every selected image.
-  const handleSyncMetadata = () => {
-    if (!selectedImage || !isBatch) return;
+  // Creator fields across the whole selection: one value when every selected image
+  // agrees, otherwise "mixed". Images whose metadata the library hasn't loaded yet are
+  // fetched, so a mixed selection is never shown as agreeing.
+  const imageList = useLibraryStore((s) => s.imageList);
+  const exifByPath = useMemo(() => {
+    const map = new Map<string, Record<string, string> | null>();
+    imageList.forEach((img) => map.set(img.path, img.exif));
+    return map;
+  }, [imageList]);
+  const missingExifKey = isBatch ? targetPaths.filter((p) => !exifByPath.get(p)).join('\n') : '';
+  useEffect(() => {
+    if (!missingExifKey || !isAuthorExpanded) return;
+    const missing = missingExifKey.split('\n');
+    invoke<Record<string, Record<string, string>>>(Invokes.ReadExifForPaths, { paths: missing })
+      .then((fetched) => {
+        useLibraryStore.getState().setLibrary((state: any) => ({
+          imageList: state.imageList.map((img: any) => (fetched[img.path] ? { ...img, exif: fetched[img.path] } : img)),
+        }));
+      })
+      .catch((e) => console.error('Failed to read metadata for the selection:', e));
+  }, [missingExifKey, isAuthorExpanded]);
+
+  const creatorFields = useMemo(
+    () =>
+      EDITABLE_FIELDS.map((field) => {
+        const own = cleanExifText(selectedImage?.exif?.[field.key]);
+        if (!isBatch) return { ...field, value: own, mixed: false };
+        const values = new Set(
+          targetPaths.map((p) => (p === selectedImage?.path ? own : cleanExifText(exifByPath.get(p)?.[field.key]))),
+        );
+        return values.size === 1
+          ? { ...field, value: [...values][0], mixed: false }
+          : { ...field, value: '', mixed: true };
+      }),
+    [selectedImage?.path, selectedImage?.exif, isBatch, targetPaths, exifByPath],
+  );
+
+  // Copy the shown image's creator details to every selected image. Only the fields it
+  // has are copied — an empty field on the source must not wipe the others' values.
+  const sourceName = (selectedImage?.path || '').split('?vc=')[0].split(/[\\/]/).pop() || '';
+  const syncUpdates = useMemo(() => {
     const updates: Record<string, string> = {};
     EDITABLE_FIELDS.forEach((field) => {
-      const raw = (selectedImage.exif?.[field.key] as string) || '';
-      const clean = raw.replace(/^"|"$/g, '').trim();
-      updates[field.key] = clean.toLowerCase() === 'default' ? '' : clean;
+      const value = cleanExifText(selectedImage?.exif?.[field.key]);
+      if (value) updates[field.key] = value;
     });
-    handleUpdateExif(targetPaths, updates);
-    toast.success(t('editor.metadata.author.syncSuccess', { count: targetPaths.length }));
+    return updates;
+  }, [selectedImage?.exif]);
+  const handleSyncMetadata = async () => {
+    if (!selectedImage || !isBatch || Object.keys(syncUpdates).length === 0) return;
+    const paths = getPathsToUpdate();
+    await handleUpdateExif(paths, syncUpdates);
+    const fields = EDITABLE_FIELDS.filter((f) => syncUpdates[f.key])
+      .map((f) => t(`editor.metadata.fields.${f.label}` as any) as string)
+      .join(', ');
+    toast.success(t('editor.metadata.author.syncedFields', { fields, count: paths.length }));
   };
 
   const { cameraGridSettings, lensSetting, bodySetting, gpsData, otherExifEntries } = useMemo(() => {
@@ -592,21 +678,17 @@ export default function MetadataPanel() {
                       className="overflow-hidden"
                     >
                       <div className="px-2 pb-3 pt-2 border-t border-surface/50 flex flex-col gap-0.5">
-                        {EDITABLE_FIELDS.map((field) => {
-                          const rawValue = (selectedImage?.exif?.[field.key] as string) || '';
-                          const cleanValue = rawValue.replace(/^"|"$/g, '').trim();
-                          const displayValue = cleanValue.toLowerCase() === 'default' ? '' : cleanValue;
-                          return (
-                            <EditableMetadataItem
-                              key={field.key}
-                              label={t(`editor.metadata.fields.${field.label}`)}
-                              value={displayValue}
-                              onSave={(newVal) => {
-                                handleUpdateExif(targetPaths, { [field.key]: newVal });
-                              }}
-                            />
-                          );
-                        })}
+                        {creatorFields.map((field) => (
+                          <EditableMetadataItem
+                            key={field.key}
+                            label={t(`editor.metadata.fields.${field.label}`)}
+                            value={field.value}
+                            mixed={field.mixed}
+                            onSave={(newVal) => {
+                              handleUpdateExif(getPathsToUpdate(), { [field.key]: newVal });
+                            }}
+                          />
+                        ))}
                         {isBatch && (
                           <div className="mt-2 pt-2 border-t border-surface/50 flex flex-col gap-2">
                             <Text variant={TextVariants.small} color={TextColors.secondary}>
@@ -614,11 +696,18 @@ export default function MetadataPanel() {
                             </Text>
                             <button
                               onClick={handleSyncMetadata}
-                              data-tooltip={t('editor.metadata.author.syncTooltip')}
-                              className="flex items-center justify-center gap-2 px-2 py-1.5 bg-bg-secondary/40 hover:bg-card-active border border-surface/50 rounded-md transition-colors text-xs text-text-primary"
+                              disabled={Object.keys(syncUpdates).length === 0}
+                              data-tooltip={
+                                Object.keys(syncUpdates).length === 0
+                                  ? t('editor.metadata.author.syncNothing', { file: sourceName })
+                                  : t('editor.metadata.author.syncFromTooltip', { file: sourceName })
+                              }
+                              className="flex items-center justify-center gap-2 px-2 py-1.5 bg-bg-primary hover:bg-card-active border border-border-color hover:border-text-tertiary/60 rounded-md transition-colors text-xs text-text-primary disabled:opacity-40 disabled:hover:bg-bg-primary min-w-0"
                             >
-                              <Copy size={14} />{' '}
-                              {t('editor.metadata.author.syncToSelected', { count: targetPaths.length })}
+                              <Copy size={14} className="shrink-0" />
+                              <span className="truncate">
+                                {t('editor.metadata.author.syncFrom', { file: sourceName, count: targetPaths.length })}
+                              </span>
                             </button>
                           </div>
                         )}

@@ -714,11 +714,18 @@
     },
     "metadata": {
       "author": {
+        "add": "Add",
         "batchHint": "Edits apply to all {{count}} selected images.",
         "creatorDetails": "Creator Details",
+        "mixed": "Mixed",
+        "mixedTooltip": "The selected images differ — type a value to set it for all of them",
+        "syncFrom": "Copy {{file}} to all {{count}}",
+        "syncFromTooltip": "Fill in the selected images with {{file}}'s Title, Author, Copyright and Comments. Fields {{file}} leaves empty are not touched.",
+        "syncNothing": "{{file}} has no creator details to copy",
         "syncSuccess": "Metadata synced to {{count}} images",
         "syncToSelected": "Sync to {{count}} selected",
         "syncTooltip": "Copy this image's creator details to all selected images",
+        "syncedFields": "Copied {{fields}} to {{count}} images",
         "title": "Author & Copyright"
       },
       "camera": {

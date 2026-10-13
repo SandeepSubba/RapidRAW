@@ -310,7 +310,12 @@ and dated.
 
 ## Library & metadata
 
-- **Batch metadata editing** + sync across selected images.
+- **Batch metadata editing** + sync across selected images. With several images
+  selected, Creator Details shows each field's shared value or **Mixed**, and typing a
+  value sets it on all of them (grouped RAW+JPEG siblings included). **Copy <file> to
+  all** copies only the fields that image has filled in — an empty field never wipes
+  the others. Enter saves and Escape cancels without triggering library shortcuts
+  (Enter used to open the image).
 - Selection stays on the nearest visible image when a rating filter would hide the
   current one.
 

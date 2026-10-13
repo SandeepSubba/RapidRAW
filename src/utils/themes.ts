@@ -1,6 +1,8 @@
 import { Theme } from '../components/ui/AppProperties';
 
 export interface ThemeProps {
+  /** Tells the WebView which native control colours to use (text fields, scrollbars). */
+  colorScheme: 'dark' | 'light';
   cssVariables: any;
   id: Theme;
   name: string;
@@ -10,6 +12,7 @@ export interface ThemeProps {
 export const THEMES: Array<ThemeProps> = [
   {
     id: Theme.Dark,
+    colorScheme: 'dark',
     name: 'settings.themes.dark',
     splashImage: '/splash-dark.jpg',
     cssVariables: {
@@ -27,6 +30,7 @@ export const THEMES: Array<ThemeProps> = [
   },
   {
     id: Theme.Light,
+    colorScheme: 'light',
     name: 'settings.themes.light',
     splashImage: '/splash-light.jpg',
     cssVariables: {
@@ -44,6 +48,7 @@ export const THEMES: Array<ThemeProps> = [
   },
   {
     id: Theme.Grey,
+    colorScheme: 'dark',
     name: 'settings.themes.grey',
     splashImage: '/splash-grey.jpg',
     cssVariables: {

@@ -496,6 +496,9 @@ export const useAppInitialization = ({
     Object.entries(finalCssVariables).forEach(([key, value]) => {
       root.style.setProperty(key, value as string);
     });
+    // Without this the WebView draws native controls for the OS appearance — on a
+    // light-mode system a text field in a dark theme can get black text.
+    root.style.colorScheme = baseTheme.colorScheme;
 
     const fontFamily = appSettings?.fontFamily || 'poppins';
     const fontStack =
