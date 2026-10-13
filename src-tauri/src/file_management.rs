@@ -82,13 +82,44 @@ fn compute_thumbnail_cache_hash(path_str: &str, adjustments_bytes: &[u8]) -> Opt
     hasher.update(path_str.as_bytes());
     hasher.update(&img_mod_time.to_le_bytes());
     hasher.update(adjustments_bytes);
-    // RAF thumbnails cached before the embedded-JPEG orientation was read are
-    // sideways for portrait shots; this salt retires them without touching
-    // the cache of any other format.
-    if source_path.extension().is_some_and(|e| e.eq_ignore_ascii_case("raf")) {
+    // Unedited RAF thumbnails cached before the embedded-JPEG orientation was
+    // read are sideways for portrait shots; this salt retires them. Only
+    // unedited ones: a RAF with adjustments is thumbnailed by the full decode,
+    // which always rotated correctly, and redoing those costs a RAW decode each.
+    let unedited = adjustments_bytes.is_empty() || adjustments_bytes == b"null";
+    if unedited && source_path.extension().is_some_and(|e| e.eq_ignore_ascii_case("raf")) {
         hasher.update(b"raf-orientation-v2");
     }
     Some(hasher.finalize().to_hex().to_string())
+}
+
+#[cfg(test)]
+mod thumbnail_cache_key_tests {
+    use super::*;
+
+    /// The key as it was before the RAF orientation salt existed.
+    fn unsalted(path: &Path, adjustments: &[u8]) -> String {
+        let mtime = fs::metadata(path).unwrap().modified().unwrap();
+        let secs = mtime.duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(path.to_string_lossy().as_bytes());
+        hasher.update(&secs.to_le_bytes());
+        hasher.update(adjustments);
+        hasher.finalize().to_hex().to_string()
+    }
+
+    #[test]
+    fn only_unedited_rafs_get_a_new_cache_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let raf = dir.path().join("DSCF0001.RAF");
+        fs::write(&raf, b"x").unwrap();
+        let key = |adj: &[u8]| compute_thumbnail_cache_hash(&raf.to_string_lossy(), adj).unwrap();
+
+        let edited = br#"{"exposure":0.5}"#;
+        assert_eq!(key(edited), unsalted(&raf, edited), "edited RAFs must keep their cached thumbnails");
+        assert_ne!(key(b"null"), unsalted(&raf, b"null"));
+        assert_ne!(key(b""), unsalted(&raf, b""));
+    }
 }
 
 struct ImageFileMetadata {
