@@ -87,7 +87,16 @@ impl WgpuDisplay {
                     match self.surface.get_current_texture() {
                         wgpu::CurrentSurfaceTexture::Success(tex)
                         | wgpu::CurrentSurfaceTexture::Suboptimal(tex) => tex,
-                        _ => panic!("Failed to acquire surface texture"),
+                        // Still unavailable right after a reconfigure: Windows
+                        // can withhold the surface while another window covers
+                        // this one (an external editor in front, say). Skip the
+                        // frame; the next transform update or focus repaint
+                        // draws it. This used to panic, and the focus repaint
+                        // runs on the main thread, so it took the app down.
+                        _ => {
+                            log::warn!("Display surface unavailable after reconfigure; skipping this frame");
+                            return;
+                        }
                     }
                 }
                 _ => return,

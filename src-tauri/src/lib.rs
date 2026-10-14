@@ -1572,6 +1572,12 @@ fn setup_logging(app_handle: &tauri::AppHandle) {
 
     let log_file_path = log_dir.join("app.log");
 
+    // Keep the previous session's log: after a crash it's the only record of
+    // why the app closed, and truncating on the next launch erased it.
+    if log_file_path.exists() {
+        let _ = fs::rename(&log_file_path, log_dir.join("app.prev.log"));
+    }
+
     let log_file = fs::OpenOptions::new()
         .write(true)
         .create(true)
