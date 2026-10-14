@@ -223,6 +223,22 @@ and dated.
 
 - **Auto-correct** with highlight guards and face-aware metering that **learns
   from your edits** over time.
+- **Choose what Auto touches** (Capture One–style) — the chevron next to the Auto
+  button (or right-click it) opens a checklist: Exposure, Contrast, Highlights &
+  Shadows, Whites & Blacks, White Balance, Vibrance, and Clarity/Dehaze/Vignette.
+  The creative ones (Vibrance, Clarity/Dehaze/Vignette) are off by default — they
+  were what wiped a preset's look. The choice is saved and also drives the
+  library's batch Auto.
+- **Auto white balance** — a grey-world estimate over the least-saturated mid-tone
+  pixels (what you'd click with the picker), damped to 70% and capped at ±40 so a
+  colourful scene can't swing it. Previously Auto never touched white balance.
+- **Keep current look** (on by default) — Auto analyses the photo *as rendered*,
+  with your preset, edits, masks and LUT, and adds the correction on top of the
+  current sliders instead of replacing them with values measured on the untouched
+  photo. A preset's contrast or vignette survives; pressing Auto twice converges
+  rather than repeating. Turn it off for the old behaviour (absolute values from
+  the raw decode). Batch Auto in the library always starts from the untouched
+  photo (no per-file render).
 
 ## Editing & color
 

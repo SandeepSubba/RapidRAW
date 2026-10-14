@@ -320,6 +320,7 @@ export interface AppSettings {
   zoomPhotoToPixelClick?: boolean;
   keybinds?: { [action: string]: string[] };
   adjustmentSteps?: { [adjustmentKey: string]: number };
+  autoAdjust?: AutoAdjustOptions;
   tonemapperOverrideEnabled?: boolean;
   defaultRawTonemapper?: string;
   defaultNonRawTonemapper?: string;
@@ -440,6 +441,29 @@ export interface ImageFile {
   is_raw: boolean;
   group_id: string | null;
 }
+
+/** Which tools the Auto button writes, and whether it corrects on top of the current look. */
+export interface AutoAdjustOptions {
+  exposure: boolean;
+  contrast: boolean;
+  tone: boolean;
+  levels: boolean;
+  whiteBalance: boolean;
+  vibrance: boolean;
+  effects: boolean;
+  keepLook: boolean;
+}
+
+export const DEFAULT_AUTO_ADJUST: AutoAdjustOptions = {
+  exposure: true,
+  contrast: true,
+  tone: true,
+  levels: true,
+  whiteBalance: true,
+  vibrance: false,
+  effects: false,
+  keepLook: true,
+};
 
 export interface Option {
   color?: string;

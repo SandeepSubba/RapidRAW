@@ -53,6 +53,11 @@ Rules:
   kind's learning (vector shapes must match), so add cues deliberately and document them in
   docs/IMAGE_IMPORTER.md §4. Only the assistant's own culls are stored as `aiDecisions`;
   chat-directed changes go through `importCullTarget` and must not be recorded.
+- Auto adjust (`calculate_auto_adjustments`) takes the frontend's adjustments JSON;
+  with `AutoAdjustOptions.keep_look` it renders them through the preset-preview path
+  (analysis.rs `render_for_analysis`) and returns deltas tagged `_relative` that the
+  frontend ADDS to the sliders. `auto_results_to_json` filters by the options —
+  batch auto (file_management.rs) must go through it too, absolute mode only.
 - The `claudecode` assistant provider shells out to the `claude` CLI (absolute
   path in settings); prompts go via stdin — never argv (E2BIG with mask-laden
   adjustments).

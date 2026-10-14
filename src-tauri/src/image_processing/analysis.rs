@@ -718,27 +718,160 @@ pub fn perform_auto_analysis(
     }
 }
 
-pub fn auto_results_to_json(results: &AutoAdjustmentResults) -> serde_json::Value {
-    json!({
-        "exposure": results.exposure,
-        "brightness": results.brightness,
-        "contrast": results.contrast,
-        "highlights": results.highlights,
-        "shadows": results.shadows,
-        "vibrance": results.vibrancy,
-        "vignetteAmount": results.vignette_amount,
-        "clarity": results.clarity,
-        "centré": results.centre,
+/// The adjustments Auto writes, limited to the tools enabled in `options`. `white_balance`
+/// is the (temperature, tint) slider shift when it was estimated. `relative` tags the
+/// values as corrections to ADD to the current sliders (keep-look mode) rather than
+/// absolute settings; the frontend reads the tag and applies them accordingly.
+pub fn auto_results_to_json(
+    results: &AutoAdjustmentResults,
+    options: &crate::app_settings::AutoAdjustOptions,
+    white_balance: Option<(f64, f64)>,
+    relative: bool,
+) -> serde_json::Value {
+    let mut out = serde_json::Map::new();
+    let mut put = |k: &str, v: f64| {
+        out.insert(k.to_string(), json!(v));
+    };
+    if options.exposure {
+        put("exposure", results.exposure);
+        put("brightness", results.brightness);
+    }
+    if options.contrast {
+        put("contrast", results.contrast);
+    }
+    if options.tone {
+        put("highlights", results.highlights);
+        put("shadows", results.shadows);
+    }
+    if options.levels {
+        put("whites", results.whites);
+        put("blacks", results.blacks);
+    }
+    if options.vibrance {
+        put("vibrance", results.vibrancy);
+    }
+    if options.effects {
+        put("clarity", results.clarity);
+        put("dehaze", results.dehaze);
+        put("vignetteAmount", results.vignette_amount);
+        put("centré", results.centre);
+    }
+    if let Some((temperature, tint)) = white_balance.filter(|_| options.white_balance) {
+        put("temperature", temperature);
+        put("tint", tint);
+    }
 
-        "dehaze": results.dehaze,
-        "sectionVisibility": {
-            "basic": true,
-            "color": true,
-            "effects": true
-        },
-        "whites": results.whites,
-        "blacks": results.blacks
-    })
+    // A hidden section renders as if its sliders were zero, so make the ones Auto
+    // just wrote visible (clarity/dehaze live in "details", vignette/centré in "effects").
+    let mut visibility = serde_json::Map::new();
+    if options.exposure || options.contrast || options.tone || options.levels {
+        visibility.insert("basic".into(), json!(true));
+    }
+    if options.vibrance || (options.white_balance && white_balance.is_some()) {
+        visibility.insert("color".into(), json!(true));
+    }
+    if options.effects {
+        visibility.insert("details".into(), json!(true));
+        visibility.insert("effects".into(), json!(true));
+    }
+    out.insert("sectionVisibility".into(), serde_json::Value::Object(visibility));
+    out.insert("_relative".into(), json!(relative));
+    serde_json::Value::Object(out)
+}
+
+/// Linear RGB of every pixel of a small copy of `image`, for colour statistics.
+/// `is_raw` images are already linear; others are sRGB-encoded (the same rule the
+/// white-balance picker uses).
+fn linear_pixels(image: &DynamicImage, is_raw: bool) -> Vec<[f32; 3]> {
+    const DIM: u32 = 256;
+    let small = if image.width().max(image.height()) > DIM {
+        image.thumbnail(DIM, DIM)
+    } else {
+        image.clone()
+    };
+    small
+        .to_rgb32f()
+        .pixels()
+        .map(|p| {
+            let c = [p[0].max(0.0), p[1].max(0.0), p[2].max(0.0)];
+            if is_raw {
+                c
+            } else {
+                c.map(srgb_channel_to_linear)
+            }
+        })
+        .filter(|c| c.iter().all(|v| v.is_finite()))
+        .collect()
+}
+
+/// Estimate the scene illuminant from the photo itself: grey-world over the LEAST
+/// saturated third of the mid-tone pixels. Plain grey-world is thrown by a colourful
+/// subject (a red dress reads as a warm cast); restricting it to the pixels that are
+/// already nearly neutral — walls, concrete, clothing, skin highlights — keeps the
+/// estimate on what a photographer would click with the picker. `current` is the white
+/// balance the pixels are rendered under (as shot for the untouched photo).
+pub fn estimate_white_balance(
+    image: &DynamicImage,
+    is_raw: bool,
+    current: WhiteBalance,
+) -> Option<WhiteBalance> {
+    const NEUTRAL_SHARE: f64 = 0.33;
+    const MIN_SAMPLES: usize = 64;
+
+    let pixels = linear_pixels(image, is_raw);
+    if pixels.len() < MIN_SAMPLES {
+        return None;
+    }
+    let luma = |c: &[f32; 3]| 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+    let mut lumas: Vec<f32> = pixels.iter().map(luma).collect();
+    lumas.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    // Mid-tones only: shadows are noisy and colour-shifted, highlights may be clipped
+    // in one channel (which looks like a cast but isn't).
+    let lo = lumas[(lumas.len() as f64 * 0.10) as usize].max(0.005);
+    let hi = lumas[((lumas.len() as f64 * 0.95) as usize).min(lumas.len() - 1)];
+
+    let mut candidates: Vec<([f32; 3], f32)> = pixels
+        .iter()
+        .filter(|c| {
+            let l = luma(c);
+            l >= lo && l <= hi
+        })
+        .map(|c| {
+            let max = c[0].max(c[1]).max(c[2]);
+            let min = c[0].min(c[1]).min(c[2]);
+            (*c, if max > 0.0 { (max - min) / max } else { 1.0 })
+        })
+        .collect();
+    if candidates.len() < MIN_SAMPLES {
+        return None;
+    }
+    candidates.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+    let keep = ((candidates.len() as f64 * NEUTRAL_SHARE) as usize).max(MIN_SAMPLES).min(candidates.len());
+    let mut sum = [0.0f64; 3];
+    for (c, _) in &candidates[..keep] {
+        sum[0] += c[0] as f64;
+        sum[1] += c[1] as f64;
+        sum[2] += c[2] as f64;
+    }
+    let n = keep as f64;
+    white_balance::pick_white_balance([sum[0] / n, sum[1] / n, sum[2] / n], current)
+}
+
+/// Temperature / Tint slider values (relative to `base`) that neutralise the photo's
+/// estimated cast. Damped: grey-world is a guess, so Auto goes most of the way and
+/// never swings further than a strong manual nudge — the user can always finish it.
+pub fn auto_white_balance_shift(
+    image: &DynamicImage,
+    is_raw: bool,
+    current: WhiteBalance,
+    base: WhiteBalance,
+) -> Option<(f64, f64)> {
+    const DAMPING: f64 = 0.7;
+    const MAX_SHIFT: f64 = 40.0;
+    let target = estimate_white_balance(image, is_raw, current)?;
+    let (t, n) = white_balance::relative_shift(base, target);
+    let damp = |v: f64| (v * DAMPING).clamp(-MAX_SHIFT, MAX_SHIFT).round();
+    Some((damp(t), damp(n)))
 }
 
 /// Median luma of a region (or the whole image when `rect` is None).
@@ -1048,21 +1181,79 @@ pub async fn update_auto_profile_from_image(app_handle: tauri::AppHandle, image_
     let _ = crate::app_settings::save_settings(settings, app_handle);
 }
 
+/// Render the open photo with `js_adjustments` at analysis size — the same path the
+/// preset previews use — so Auto can measure what the user is looking at (preset,
+/// edits, masks, LUT) instead of the untouched decode.
+fn render_for_analysis(
+    state: &tauri::State<'_, AppState>,
+    app_handle: &tauri::AppHandle,
+    loaded: &crate::app_state::LoadedImage,
+    js_adjustments: &serde_json::Value,
+) -> Result<DynamicImage, String> {
+    const ANALYSIS_DIM: u32 = 1024;
+    let context = crate::gpu_processing::get_or_init_gpu_context(state, app_handle)?;
+    let (preview, scale_for_gpu, unscaled_crop_offset) =
+        crate::generate_transformed_preview(state, loaded, js_adjustments, ANALYSIS_DIM)?;
+    let (w, h) = preview.dimensions();
+    let mask_definitions: Vec<crate::mask_generation::MaskDefinition> = js_adjustments
+        .get("masks")
+        .and_then(|m| serde_json::from_value(m.clone()).ok())
+        .unwrap_or_default();
+    let scaled_offset = (unscaled_crop_offset.0 * scale_for_gpu, unscaled_crop_offset.1 * scale_for_gpu);
+    let mask_bitmaps: Vec<image::ImageBuffer<image::Luma<u8>, Vec<u8>>> = mask_definitions
+        .iter()
+        .filter_map(|def| {
+            crate::mask_generation::get_cached_or_generate_mask(
+                state,
+                &loaded.path,
+                def,
+                w,
+                h,
+                scale_for_gpu,
+                scaled_offset,
+                js_adjustments,
+            )
+        })
+        .collect();
+    let tm_override = resolve_tonemapper_override_from_handle(app_handle, loaded.is_raw);
+    let mut all = get_all_adjustments_from_json(js_adjustments, loaded.is_raw, loaded.as_shot_white_balance, tm_override);
+    all.global.show_clipping = 0;
+    let lut = js_adjustments["lutPath"]
+        .as_str()
+        .and_then(|p| crate::lut_processing::get_or_load_lut(state, p).ok());
+    crate::gpu_processing::process_and_get_dynamic_image(
+        &context,
+        state,
+        &preview,
+        crate::cache_utils::calculate_full_job_hash(&loaded.path, js_adjustments),
+        crate::gpu_processing::RenderRequest { adjustments: all, mask_bitmaps: &mask_bitmaps, lut, roi: None },
+        "auto_adjust_analysis",
+    )
+}
+
+/// Auto-correct the open photo. With `adjustments` given and "keep current look" on,
+/// the photo is analysed as rendered with those adjustments and the result is a
+/// correction to add on top (tagged `_relative`); otherwise the untouched decode is
+/// analysed and the result replaces the sliders. Only the tools enabled in
+/// Settings → Auto adjust are written.
 #[tauri::command]
 pub async fn calculate_auto_adjustments(
+    adjustments: Option<serde_json::Value>,
     state: tauri::State<'_, AppState>,
     app_handle: tauri::AppHandle,
 ) -> Result<serde_json::Value, String> {
-    let (original_image, image_path) = {
+    let loaded = {
         let guard = state.original_image.lock().unwrap();
-        let loaded = guard
+        guard
             .as_ref()
-            .ok_or("No image loaded for auto adjustments")?;
-        (loaded.image.clone(), loaded.path.clone())
+            .ok_or("No image loaded for auto adjustments")?
+            .clone()
     };
+    let image_path = loaded.path.clone();
 
     let settings = crate::app_settings::load_settings(app_handle.clone()).unwrap_or_default();
     let profile = settings.auto_profile.clone();
+    let options = settings.auto_adjust.unwrap_or_default();
 
     // Bootstrap: with no learned profile yet, scan the current folder's edited
     // thumbnails in the background so the NEXT auto benefits. Ongoing learning
@@ -1092,8 +1283,141 @@ pub async fn calculate_auto_adjustments(
         }
     }
 
-    let face_median = detect_face_median_luma(&app_handle, &state, &original_image).await;
-    let results = perform_auto_analysis(&original_image, face_median, profile.as_ref());
+    // Keep-look: measure the rendered photo. If the GPU can't render (no context on a
+    // headless box, say) fall back to the untouched decode rather than failing.
+    let rendered = match (&adjustments, options.keep_look) {
+        (Some(js), true) => match render_for_analysis(&state, &app_handle, &loaded, js) {
+            Ok(img) => Some(img),
+            Err(e) => {
+                log::warn!("[auto] keep-look render failed, analysing the untouched photo: {e}");
+                None
+            }
+        },
+        _ => None,
+    };
+    let relative = rendered.is_some();
+    let (analysis_image, is_raw): (&DynamicImage, bool) = match &rendered {
+        Some(img) => (img, false),
+        None => (&loaded.image, loaded.is_raw),
+    };
 
-    Ok(auto_results_to_json(&results))
+    let face_median = detect_face_median_luma(&app_handle, &state, analysis_image).await;
+    let results = perform_auto_analysis(analysis_image, face_median, profile.as_ref());
+
+    let white_balance = if options.white_balance {
+        let as_shot = loaded.as_shot_white_balance;
+        let js = adjustments.as_ref();
+        if relative {
+            // The render was balanced to the current sliders; the shift is added to them.
+            let current = js
+                .filter(|j| is_section_visible(j, "color"))
+                .map(|j| white_balance::from_adjustments(j, as_shot))
+                .unwrap_or(as_shot);
+            auto_white_balance_shift(analysis_image, is_raw, current, current)
+        } else {
+            // The decode is balanced as shot; the sliders are relative to the stored
+            // base (a picked/Kelvin white point) when there is one, else as shot.
+            let base = js
+                .and_then(|j| j.get("whiteBalance"))
+                .and_then(|v| serde_json::from_value::<WhiteBalance>(v.clone()).ok())
+                .unwrap_or(as_shot);
+            auto_white_balance_shift(analysis_image, is_raw, as_shot, base)
+        }
+    } else {
+        None
+    };
+
+    Ok(auto_results_to_json(&results, &options, white_balance, relative))
+}
+
+#[cfg(test)]
+mod auto_adjust_tests {
+    use super::*;
+    use crate::app_settings::AutoAdjustOptions;
+
+    fn results() -> AutoAdjustmentResults {
+        AutoAdjustmentResults {
+            exposure: 0.4,
+            brightness: 0.1,
+            contrast: 12.0,
+            highlights: -30.0,
+            shadows: 20.0,
+            vibrancy: 15.0,
+            vignette_amount: -8.0,
+            temperature: 0.0,
+            tint: 0.0,
+            dehaze: 5.0,
+            clarity: 9.0,
+            centre: 3.0,
+            whites: -4.0,
+            blacks: 6.0,
+        }
+    }
+
+    #[test]
+    fn only_enabled_tools_are_written() {
+        let opts = AutoAdjustOptions { vibrance: false, effects: false, white_balance: false, ..Default::default() };
+        let json = auto_results_to_json(&results(), &opts, Some((10.0, -5.0)), false);
+        for k in ["exposure", "brightness", "contrast", "highlights", "shadows", "whites", "blacks"] {
+            assert!(json.get(k).is_some(), "{k} missing");
+        }
+        for k in ["vibrance", "clarity", "dehaze", "vignetteAmount", "centré", "temperature", "tint"] {
+            assert!(json.get(k).is_none(), "{k} should not be written");
+        }
+        assert_eq!(json["_relative"], json!(false));
+        let vis = &json["sectionVisibility"];
+        assert_eq!(vis["basic"], json!(true));
+        assert!(vis.get("effects").is_none());
+        assert!(vis.get("color").is_none());
+    }
+
+    #[test]
+    fn white_balance_and_effects_when_enabled() {
+        let opts = AutoAdjustOptions { effects: true, white_balance: true, exposure: false, ..Default::default() };
+        let json = auto_results_to_json(&results(), &opts, Some((10.0, -5.0)), true);
+        assert_eq!(json["temperature"], json!(10.0));
+        assert_eq!(json["tint"], json!(-5.0));
+        assert_eq!(json["clarity"], json!(9.0));
+        assert!(json.get("exposure").is_none());
+        assert_eq!(json["_relative"], json!(true));
+        assert_eq!(json["sectionVisibility"]["color"], json!(true));
+        assert_eq!(json["sectionVisibility"]["details"], json!(true));
+    }
+
+    /// A flat scene with a warm cast: Auto must cool it (negative Temperature) and
+    /// a neutral scene must be left alone.
+    #[test]
+    fn warm_cast_is_cooled_and_neutral_is_kept() {
+        let mut warm = image::Rgb32FImage::new(64, 64);
+        let mut neutral = image::Rgb32FImage::new(64, 64);
+        for (x, y, p) in warm.enumerate_pixels_mut() {
+            let l = 0.2 + 0.4 * ((x + y) % 16) as f32 / 16.0; // mid-tone texture
+            *p = image::Rgb([l * 1.25, l, l * 0.8]);
+        }
+        for (x, y, p) in neutral.enumerate_pixels_mut() {
+            let l = 0.2 + 0.4 * ((x + y) % 16) as f32 / 16.0;
+            *p = image::Rgb([l, l, l]);
+        }
+        let reference = WhiteBalance::reference();
+        let (t_warm, _) =
+            auto_white_balance_shift(&DynamicImage::ImageRgb32F(warm), true, reference, reference).unwrap();
+        let (t_neutral, n_neutral) =
+            auto_white_balance_shift(&DynamicImage::ImageRgb32F(neutral), true, reference, reference).unwrap();
+        assert!(t_warm < -5.0, "warm cast should cool the slider, got {t_warm}");
+        assert!(t_neutral.abs() <= 1.0 && n_neutral.abs() <= 1.0, "neutral drifted: {t_neutral}, {n_neutral}");
+    }
+
+    /// A colourful subject on neutral ground must not read as a cast.
+    #[test]
+    fn saturated_subject_does_not_fool_the_estimate() {
+        let mut img = image::Rgb32FImage::new(64, 64);
+        for (x, y, p) in img.enumerate_pixels_mut() {
+            let l = 0.25 + 0.3 * ((x * 7 + y * 3) % 10) as f32 / 10.0;
+            // Lower-right quarter: a strongly red subject.
+            *p = if x > 32 && y > 32 { image::Rgb([0.6, 0.08, 0.05]) } else { image::Rgb([l, l, l]) };
+        }
+        let reference = WhiteBalance::reference();
+        let (t, n) = auto_white_balance_shift(&DynamicImage::ImageRgb32F(img), true, reference, reference).unwrap();
+        assert!(t.abs() <= 2.0 && n.abs() <= 2.0, "red subject biased the estimate: {t}, {n}");
+    }
 }

@@ -3008,12 +3008,33 @@ pub async fn apply_auto_adjustments_to_paths(
                 )
                 .map_err(|e| e.to_string())?;
 
+                let mut existing_metadata = crate::exif_processing::load_sidecar(&sidecar_path);
+
                 // Batch auto runs inside spawn_blocking without the async face model;
                 // it stays global-metered. The editor's auto command is face-aware.
+                // It always starts from the untouched photo (no render per file), so
+                // "keep current look" does not apply here; the tool selection does.
+                let options = settings.auto_adjust.unwrap_or_default();
                 let auto_results = perform_auto_analysis(&image, None, settings.auto_profile.as_ref());
-                let auto_adjustments_json = auto_results_to_json(&auto_results);
-
-                let mut existing_metadata = crate::exif_processing::load_sidecar(&sidecar_path);
+                let white_balance = if options.white_balance {
+                    let as_shot = crate::white_balance::as_shot_white_balance(&source_path_str);
+                    let base = existing_metadata
+                        .adjustments
+                        .get("whiteBalance")
+                        .and_then(|v| serde_json::from_value::<crate::white_balance::WhiteBalance>(v.clone()).ok())
+                        .unwrap_or(as_shot);
+                    crate::image_processing::auto_white_balance_shift(
+                        &image,
+                        crate::formats::is_raw_file(&source_path_str),
+                        as_shot,
+                        base,
+                    )
+                } else {
+                    None
+                };
+                let mut auto_adjustments_json =
+                    auto_results_to_json(&auto_results, &options, white_balance, false);
+                auto_adjustments_json.as_object_mut().map(|m| m.remove("_relative"));
 
                 if existing_metadata.adjustments.is_null() {
                     existing_metadata.adjustments = serde_json::json!({});

@@ -15,7 +15,7 @@ import {
   normalizeLoadedAdjustments,
 } from '../utils/adjustments';
 import { calculateCenteredCrop } from '../utils/cropUtils';
-import { Invokes } from '../components/ui/AppProperties';
+import { DEFAULT_AUTO_ADJUST, Invokes } from '../components/ui/AppProperties';
 import { globalImageCache } from '../utils/ImageLRUCache';
 
 export const debouncedSetHistory = debounce((newAdj: Adjustments) => {
@@ -92,16 +92,31 @@ export function useEditorActions() {
     [handleRotate],
   );
 
+  // Auto-correct with the tools chosen in the Auto options. In keep-look mode the
+  // backend analyses the photo as rendered with the current adjustments and returns
+  // corrections tagged `_relative`, which are added to the sliders so a preset's look
+  // survives; otherwise it returns absolute values measured on the untouched photo.
   const handleAutoAdjustments = useCallback(async () => {
-    const selectedImage = useEditorStore.getState().selectedImage;
+    const { selectedImage, adjustments } = useEditorStore.getState();
     if (!selectedImage?.isReady) return;
+    const options = { ...DEFAULT_AUTO_ADJUST, ...(useSettingsStore.getState().appSettings?.autoAdjust ?? {}) };
     try {
-      const autoAdjustments: Adjustments = await invoke(Invokes.CalculateAutoAdjustments);
-      setAdjustments((prev: Adjustments) => ({
-        ...prev,
-        ...autoAdjustments,
-        sectionVisibility: { ...prev.sectionVisibility, ...autoAdjustments.sectionVisibility },
-      }));
+      const result: Record<string, any> = await invoke(Invokes.CalculateAutoAdjustments, {
+        adjustments: options.keepLook ? adjustments : null,
+      });
+      const { _relative: relative, sectionVisibility, ...values } = result;
+      const limit = (key: string) => (key === 'exposure' || key === 'brightness' ? 5 : 100);
+      setAdjustments((prev: Adjustments) => {
+        const next: Record<string, any> = { ...prev };
+        Object.entries(values).forEach(([key, value]) => {
+          if (typeof value !== 'number') return;
+          const current = typeof next[key] === 'number' ? next[key] : 0;
+          const raw = relative ? current + value : value;
+          next[key] = Math.round(Math.max(-limit(key), Math.min(limit(key), raw)) * 100) / 100;
+        });
+        next.sectionVisibility = { ...prev.sectionVisibility, ...(sectionVisibility ?? {}) };
+        return next as Adjustments;
+      });
     } catch (err) {
       toast.error(`Failed to apply auto adjustments: ${err}`);
     }

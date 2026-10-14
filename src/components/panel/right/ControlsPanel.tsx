@@ -1,5 +1,14 @@
-import React, { useCallback, useState } from 'react';
-import { RotateCcw, Copy, ClipboardPaste, Aperture, ChartArea, PencilSparkles, LayoutList } from 'lucide-react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  RotateCcw,
+  Copy,
+  ClipboardPaste,
+  Aperture,
+  ChartArea,
+  PencilSparkles,
+  LayoutList,
+  ChevronDown,
+} from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import clsx from 'clsx';
 import { useTranslation } from 'react-i18next';
@@ -21,7 +30,8 @@ import {
   getVisibleAdjustmentSections,
 } from '../../../utils/adjustments';
 import { useContextMenu } from '../../../context/ContextMenuContext';
-import { OPTION_SEPARATOR, Orientation } from '../../ui/AppProperties';
+import { AutoAdjustOptions, DEFAULT_AUTO_ADJUST, OPTION_SEPARATOR, Orientation } from '../../ui/AppProperties';
+import Switch from '../../ui/Switch';
 import Text from '../../ui/Text';
 import { TextVariants, TextColors, TextWeights } from '../../../types/typography';
 import { useShallow } from 'zustand/react/shallow';
@@ -33,8 +43,103 @@ import { useUIStore } from '../../../store/useUIStore';
 import { useEditorActions } from '../../../hooks/useEditorActions';
 import { useWaveformControls } from '../../../hooks/useWaveformControls';
 
+const AUTO_TOOLS: Array<keyof AutoAdjustOptions> = [
+  'exposure',
+  'contrast',
+  'tone',
+  'levels',
+  'whiteBalance',
+  'vibrance',
+  'effects',
+];
+
+/**
+ * Capture One–style checklist for the Auto button: which tools it may write and
+ * whether it corrects on top of the current look. Saved in settings, so the shortcut
+ * and the library's batch Auto follow the same choice.
+ */
+function AutoAdjustOptionsPopover({ onClose }: { onClose(): void }) {
+  const { t } = useTranslation();
+  const ref = useRef<HTMLDivElement>(null);
+  const { appSettings, handleSettingsChange } = useSettingsStore(
+    useShallow((state) => ({ appSettings: state.appSettings, handleSettingsChange: state.handleSettingsChange })),
+  );
+  const options: AutoAdjustOptions = { ...DEFAULT_AUTO_ADJUST, ...(appSettings?.autoAdjust ?? {}) };
+  const update = (patch: Partial<AutoAdjustOptions>) => {
+    if (!appSettings) return;
+    handleSettingsChange({ ...appSettings, autoAdjust: { ...options, ...patch } });
+  };
+  const noneSelected = AUTO_TOOLS.every((tool) => !options[tool]);
+
+  useEffect(() => {
+    const onPointerDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    window.addEventListener('keydown', onKey, true);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      window.removeEventListener('keydown', onKey, true);
+    };
+  }, [onClose]);
+
+  return (
+    <motion.div
+      ref={ref}
+      initial={{ opacity: 0, y: -4 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -4 }}
+      transition={{ duration: 0.15 }}
+      className="absolute right-0 top-full mt-1 z-50 w-72 bg-surface border border-border-color rounded-lg shadow-xl p-3 flex flex-col gap-2"
+    >
+      <Text variant={TextVariants.label} color={TextColors.primary}>
+        {t('editor.adjustments.auto.title')}
+      </Text>
+      <Text variant={TextVariants.small} color={TextColors.secondary}>
+        {t('editor.adjustments.auto.tools')}
+      </Text>
+      <div className="flex flex-col gap-1.5">
+        {AUTO_TOOLS.map((tool) => (
+          <Switch
+            key={tool}
+            label={t(`editor.adjustments.auto.${tool}`)}
+            checked={options[tool]}
+            onChange={(checked) => update({ [tool]: checked })}
+          />
+        ))}
+      </div>
+      {noneSelected && (
+        <Text variant={TextVariants.small} color={TextColors.secondary} className="italic">
+          {t('editor.adjustments.auto.nothingSelected')}
+        </Text>
+      )}
+      <div className="border-t border-border-color pt-2 mt-1 flex flex-col gap-1">
+        <Switch
+          label={t('editor.adjustments.auto.keepLook')}
+          checked={options.keepLook}
+          onChange={(checked) => update({ keepLook: checked })}
+        />
+        <Text variant={TextVariants.small} color={TextColors.secondary}>
+          {t('editor.adjustments.auto.keepLookDesc')}
+        </Text>
+        <Text variant={TextVariants.small} color={TextColors.secondary} className="opacity-70">
+          {t('editor.adjustments.auto.batchNote')}
+        </Text>
+      </div>
+    </motion.div>
+  );
+}
+
 export default function Controls() {
   const { t } = useTranslation();
+  const [isAutoOptionsOpen, setIsAutoOptionsOpen] = useState(false);
+  const closeAutoOptions = useCallback(() => setIsAutoOptionsOpen(false), []);
   const isTetherActive = useTetherStore((s) => s.isActive);
   const [isTetherOpen, setIsTetherOpen] = useState(true);
   const { showContextMenu } = useContextMenu();
@@ -238,15 +343,35 @@ export default function Controls() {
     <div className="flex flex-col h-full">
       <div className="p-3 flex justify-between items-center shrink-0 border-b border-surface">
         <Text variant={TextVariants.title}>{t('editor.adjustments.title')}</Text>
-        <div className="flex items-center gap-1">
-          <button
-            className="p-2 rounded-full hover:bg-surface disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            disabled={!selectedImage}
-            onClick={handleAutoAdjustments}
-            data-tooltip={t('editor.adjustments.tooltips.autoAdjust')}
-          >
-            <PencilSparkles size={18} />
-          </button>
+        <div className="flex items-center gap-1 relative">
+          <div className="flex items-center rounded-full hover:bg-surface transition-colors">
+            <button
+              className="p-2 pr-1 rounded-l-full disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              disabled={!selectedImage}
+              onClick={handleAutoAdjustments}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setIsAutoOptionsOpen((open) => !open);
+              }}
+              data-tooltip={t('editor.adjustments.tooltips.autoAdjust')}
+            >
+              <PencilSparkles size={18} />
+            </button>
+            <button
+              className={clsx(
+                'p-1 pr-1.5 rounded-r-full transition-colors',
+                isAutoOptionsOpen ? 'text-text-primary' : 'text-text-secondary hover:text-text-primary',
+              )}
+              onClick={() => setIsAutoOptionsOpen((open) => !open)}
+              data-tooltip={t('editor.adjustments.auto.options')}
+              aria-expanded={isAutoOptionsOpen}
+            >
+              <ChevronDown size={14} />
+            </button>
+          </div>
+          <AnimatePresence>
+            {isAutoOptionsOpen && <AutoAdjustOptionsPopover onClose={closeAutoOptions} />}
+          </AnimatePresence>
           <button
             className={clsx(
               'p-2 rounded-full transition-colors',

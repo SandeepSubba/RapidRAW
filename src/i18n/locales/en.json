@@ -343,6 +343,22 @@
         "deleteProfile": "Delete profile",
         "profileNamePlaceholder": "Profile name (e.g. Portra 400)",
         "save": "Save"
+      },
+      "auto": {
+        "title": "Auto adjust",
+        "options": "Auto adjust options",
+        "tools": "Tools",
+        "exposure": "Exposure",
+        "contrast": "Contrast",
+        "tone": "Highlights & Shadows",
+        "levels": "Whites & Blacks",
+        "whiteBalance": "White Balance",
+        "vibrance": "Vibrance",
+        "effects": "Clarity, Dehaze & Vignette",
+        "keepLook": "Keep current look",
+        "keepLookDesc": "Correct the photo as it looks now — on top of presets and edits — instead of replacing them with values measured on the untouched photo.",
+        "batchNote": "The library’s batch Auto uses the same tools but always starts from the untouched photo.",
+        "nothingSelected": "Pick at least one tool."
       }
     },
     "ai": {

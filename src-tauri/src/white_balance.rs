@@ -226,6 +226,15 @@ impl WhiteBalance {
     }
 }
 
+/// The Temperature / Tint slider values (relative units, ±100) that take `base` to
+/// `target` — the inverse of [`WhiteBalance::shifted`], and the same arithmetic as
+/// the frontend's `toRelativeWhiteBalance`.
+pub fn relative_shift(base: WhiteBalance, target: WhiteBalance) -> (f64, f64) {
+    let temperature = (1.0e6 / base.temperature - 1.0e6 / target.temperature) / MIRED_PER_RELATIVE_UNIT;
+    let tint = (target.tint - base.tint) / TINT_PER_RELATIVE_UNIT;
+    (temperature.clamp(-100.0, 100.0), tint.clamp(-100.0, 100.0))
+}
+
 pub fn adaptation_log_gains(current: WhiteBalance, target: WhiteBalance) -> [f32; 3] {
     (current.lms() / target.lms())
         .to_array()
@@ -283,4 +292,20 @@ pub fn as_shot_white_balance(path: &str) -> WhiteBalance {
         .unwrap()
         .insert(source_path, white_balance);
     white_balance
+}
+
+#[cfg(test)]
+mod relative_shift_tests {
+    use super::*;
+
+    #[test]
+    fn relative_shift_inverts_shifted() {
+        let base = WhiteBalance { temperature: 5200.0, tint: 4.0 };
+        for (t, n) in [(12.0, -7.0), (-30.0, 20.0), (0.0, 0.0)] {
+            let target = base.shifted(t, n);
+            let (rt, rn) = relative_shift(base, target);
+            assert!((rt - t).abs() < 0.01, "temperature {t} -> {rt}");
+            assert!((rn - n).abs() < 0.01, "tint {n} -> {rn}");
+        }
+    }
 }

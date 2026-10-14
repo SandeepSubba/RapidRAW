@@ -483,6 +483,45 @@ pub struct AutoProfile {
     pub learned_at: u64,
 }
 
+/// Which tools the Auto button is allowed to touch (Capture One's "Auto Adjust"
+/// checklist), and whether it corrects the photo as it currently looks (on top of
+/// presets and edits) or starts from the untouched photo.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct AutoAdjustOptions {
+    /// Exposure + Brightness.
+    pub exposure: bool,
+    pub contrast: bool,
+    /// Highlights + Shadows.
+    pub tone: bool,
+    /// Whites + Blacks.
+    pub levels: bool,
+    /// Temperature + Tint.
+    pub white_balance: bool,
+    pub vibrance: bool,
+    /// Clarity, Dehaze, Vignette, Centré — creative, so off by default: they are
+    /// what erased a preset's look.
+    pub effects: bool,
+    /// Analyse the rendered photo and add the correction to the current values
+    /// instead of replacing them with values measured on the untouched photo.
+    pub keep_look: bool,
+}
+
+impl Default for AutoAdjustOptions {
+    fn default() -> Self {
+        Self {
+            exposure: true,
+            contrast: true,
+            tone: true,
+            levels: true,
+            white_balance: true,
+            vibrance: false,
+            effects: false,
+            keep_look: true,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
@@ -593,6 +632,8 @@ pub struct AppSettings {
     pub display_edit_icon: Option<bool>,
     #[serde(default)]
     pub auto_profile: Option<AutoProfile>,
+    #[serde(default)]
+    pub auto_adjust: Option<AutoAdjustOptions>,
     #[serde(default = "default_linear_raw_mode")]
     pub linear_raw_mode: String,
     #[serde(default)]
@@ -751,6 +792,7 @@ impl Default for AppSettings {
             enable_folder_image_counts: Some(false),
             display_edit_icon: Some(true),
             auto_profile: None,
+            auto_adjust: None,
             linear_raw_mode: default_linear_raw_mode(),
             enable_xmp_sync: Some(true),
             create_xmp_if_missing: Some(false),
