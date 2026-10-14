@@ -358,7 +358,19 @@
         "keepLook": "Keep current look",
         "keepLookDesc": "Correct the photo as it looks now — on top of presets and edits — instead of replacing them with values measured on the untouched photo.",
         "batchNote": "The library’s batch Auto uses the same tools but always starts from the untouched photo.",
-        "nothingSelected": "Pick at least one tool."
+        "nothingSelected": "Pick at least one tool.",
+        "learnedNothing": "Learns from your edits as you go — nothing learned yet.",
+        "learnedFrom_one": "Learned from {{count}} edit",
+        "learnedFrom_other": "Learned from {{count}} edits",
+        "learnedSoft": "you keep contrast soft",
+        "learnedPunchy": "you like punchy contrast",
+        "learnedVivid": "you go vivid",
+        "learnedMuted": "you keep colour muted",
+        "learnedWarm": "you keep a warm cast",
+        "learnedCool": "you keep a cool cast",
+        "learnedFaces_one": "{{count}} face reference",
+        "learnedFaces_other": "{{count}} face references",
+        "resetLearning": "Reset learning"
       }
     },
     "ai": {

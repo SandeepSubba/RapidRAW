@@ -3028,6 +3028,7 @@ pub async fn apply_auto_adjustments_to_paths(
                         crate::formats::is_raw_file(&source_path_str),
                         as_shot,
                         base,
+                        settings.auto_profile.as_ref(),
                     )
                 } else {
                     None
@@ -3745,6 +3746,21 @@ pub fn get_thumb_cache_dir(app_handle: &AppHandle) -> Result<PathBuf, String> {
         fs::create_dir_all(&thumb_cache_dir).map_err(|e| e.to_string())?;
     }
     Ok(thumb_cache_dir)
+}
+
+/// The cached thumbnail of `image_path` rendered WITH its current edits — the
+/// medium one, else the small one, else the pre-v1.6.5 single file. None when the
+/// cache hasn't been written yet. This is what Auto learns the user's taste from.
+pub fn cached_edited_thumbnail(app_handle: &AppHandle, image_path: &str) -> Option<DynamicImage> {
+    let dir = resolve_thumbnail_cache_dir(app_handle)
+        .or_else(|_| get_thumb_cache_dir(app_handle))
+        .ok()?;
+    let hash = get_cache_key_hash(image_path)?;
+    ["_medium.jpg", "_small.jpg", ".jpg"]
+        .iter()
+        .map(|suffix| dir.join(format!("{hash}{suffix}")))
+        .find(|p| p.exists())
+        .and_then(|p| image::open(p).ok())
 }
 
 pub fn get_cache_key_hash(path_str: &str) -> Option<String> {

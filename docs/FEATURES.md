@@ -222,7 +222,15 @@ and dated.
 ## Auto-correct
 
 - **Auto-correct** with highlight guards and face-aware metering that **learns
-  from your edits** over time.
+  from your edits** over time: every saved edit's rendered thumbnail teaches it the
+  brightness you give faces and mid-tones (as before) and, new, the **look you
+  finish with** — how much contrast you keep, how many deep shadows and near-whites
+  you tolerate, how saturated you go, and any warm/cool cast you keep on purpose.
+  Auto then aims for *your* targets instead of the stock ones (after 3 edits;
+  medians/running averages, clamped so an odd edit can't steer it). The Auto
+  options popover says what it has picked up ("Learned from 12 edits · you keep
+  contrast soft · you keep a warm cast") with a **Reset learning** link. Learning is
+  per machine (it lives in settings.json, not the sidecars).
 - **Choose what Auto touches** (Capture One–style) — the chevron next to the Auto
   button (or right-click it) opens a checklist: Exposure, Contrast, Highlights &
   Shadows, Whites & Blacks, White Balance, Vibrance, and Clarity/Dehaze/Vignette.

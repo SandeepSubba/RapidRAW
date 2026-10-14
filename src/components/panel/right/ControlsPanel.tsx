@@ -29,8 +29,9 @@ import {
   ADJUSTMENT_SECTIONS,
   getVisibleAdjustmentSections,
 } from '../../../utils/adjustments';
+import { invoke } from '@tauri-apps/api/core';
 import { useContextMenu } from '../../../context/ContextMenuContext';
-import { AutoAdjustOptions, DEFAULT_AUTO_ADJUST, OPTION_SEPARATOR, Orientation } from '../../ui/AppProperties';
+import { AutoAdjustOptions, DEFAULT_AUTO_ADJUST, Invokes, OPTION_SEPARATOR, Orientation } from '../../ui/AppProperties';
 import Switch from '../../ui/Switch';
 import Text from '../../ui/Text';
 import { TextVariants, TextColors, TextWeights } from '../../../types/typography';
@@ -58,9 +59,53 @@ const AUTO_TOOLS: Array<keyof AutoAdjustOptions> = [
  * whether it corrects on top of the current look. Saved in settings, so the shortcut
  * and the library's batch Auto follow the same choice.
  */
+/** What Auto has learned from the user's edits (mirrors app_settings::AutoProfile). */
+interface AutoLearning {
+  faceSamples: number;
+  globalSamples: number;
+  styleSamples: number;
+  rangeTarget: number;
+  saturationTarget: number;
+  wbResidualTemperature: number;
+  wbResidualTint: number;
+}
+
+/** One line on what Auto has picked up, or null while it still uses stock targets. */
+function describeAutoLearning(l: AutoLearning | null, t: (k: any, o?: any) => string): string | null {
+  if (!l) return null;
+  const edits = Math.max(l.styleSamples, l.faceSamples + l.globalSamples);
+  if (edits === 0) return null;
+  const parts = [t('editor.adjustments.auto.learnedFrom', { count: edits })];
+  if (l.styleSamples >= 3) {
+    if (l.rangeTarget < 195) parts.push(t('editor.adjustments.auto.learnedSoft'));
+    else if (l.rangeTarget > 235) parts.push(t('editor.adjustments.auto.learnedPunchy'));
+    if (l.saturationTarget > 0.26) parts.push(t('editor.adjustments.auto.learnedVivid'));
+    else if (l.saturationTarget < 0.14) parts.push(t('editor.adjustments.auto.learnedMuted'));
+    if (l.wbResidualTemperature >= 3) parts.push(t('editor.adjustments.auto.learnedWarm'));
+    else if (l.wbResidualTemperature <= -3) parts.push(t('editor.adjustments.auto.learnedCool'));
+  }
+  if (l.faceSamples >= 3) parts.push(t('editor.adjustments.auto.learnedFaces', { count: l.faceSamples }));
+  return parts.join(' · ');
+}
+
 function AutoAdjustOptionsPopover({ onClose }: { onClose(): void }) {
   const { t } = useTranslation();
   const ref = useRef<HTMLDivElement>(null);
+  const [learning, setLearning] = useState<AutoLearning | null>(null);
+  useEffect(() => {
+    invoke<AutoLearning>(Invokes.GetAutoLearning)
+      .then(setLearning)
+      .catch(() => setLearning(null));
+  }, []);
+  const learned = describeAutoLearning(learning, t);
+  const resetLearning = async () => {
+    try {
+      await invoke(Invokes.ResetAutoProfile);
+      setLearning(null);
+    } catch (e) {
+      console.error('Failed to reset auto learning:', e);
+    }
+  };
   const { appSettings, handleSettingsChange } = useSettingsStore(
     useShallow((state) => ({ appSettings: state.appSettings, handleSettingsChange: state.handleSettingsChange })),
   );
@@ -130,6 +175,19 @@ function AutoAdjustOptionsPopover({ onClose }: { onClose(): void }) {
         </Text>
         <Text variant={TextVariants.small} color={TextColors.secondary} className="opacity-70">
           {t('editor.adjustments.auto.batchNote')}
+        </Text>
+      </div>
+      <div className="border-t border-border-color pt-2 mt-1">
+        <Text variant={TextVariants.small} color={TextColors.secondary}>
+          {learned ?? t('editor.adjustments.auto.learnedNothing')}
+          {learned && (
+            <>
+              {' '}
+              <button onClick={resetLearning} className="text-accent hover:underline">
+                {t('editor.adjustments.auto.resetLearning')}
+              </button>
+            </>
+          )}
         </Text>
       </div>
     </motion.div>

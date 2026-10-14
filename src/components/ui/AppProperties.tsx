@@ -49,6 +49,8 @@ export enum Invokes {
   ApplyAutoAdjustmentsToPaths = 'apply_auto_adjustments_to_paths',
   ApplyDenoising = 'apply_denoising',
   CalculateAutoAdjustments = 'calculate_auto_adjustments',
+  GetAutoLearning = 'get_auto_learning',
+  ResetAutoProfile = 'reset_auto_profile',
   SampleWhiteBalance = 'sample_white_balance',
   CancelAiTask = 'cancel_ai_task',
   CancelExport = 'cancel_export',

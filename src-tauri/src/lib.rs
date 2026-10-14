@@ -2381,6 +2381,8 @@ pub fn run() {
             export_processing::cancel_export,
             export_processing::estimate_export_sizes,
             image_processing::calculate_auto_adjustments,
+            image_processing::get_auto_learning,
+            image_processing::reset_auto_profile,
             image_processing::sample_white_balance,
             mask_generation::generate_mask_overlay,
             file_management::update_exif_fields,

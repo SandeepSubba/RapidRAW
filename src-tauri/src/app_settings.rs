@@ -481,6 +481,61 @@ pub struct AutoProfile {
     pub face_samples: u32,
     pub global_samples: u32,
     pub learned_at: u64,
+    // The look of the user's finished photos (v2 — older profiles get the stock
+    // values and start learning these on the next edit).
+    /// Finished photos measured for the style targets below.
+    #[serde(default)]
+    pub style_samples: u32,
+    /// 1st→99th percentile luma span the user ends up with (stock 220).
+    #[serde(default = "default_range_target")]
+    pub range_target: f64,
+    /// Share of pixels left in deep shadow (< 32) in finished photos (stock 0.05).
+    #[serde(default = "default_shadow_mass")]
+    pub shadow_mass: f64,
+    /// Share of pixels left near white (≥ 240) in finished photos (stock 0.02).
+    #[serde(default = "default_highlight_mass")]
+    pub highlight_mass: f64,
+    /// Mean saturation of finished photos (stock 0.20).
+    #[serde(default = "default_saturation_target")]
+    pub saturation_target: f64,
+    /// Cast the user keeps on purpose, in Temperature / Tint slider units
+    /// (+ = warm / magenta) — Auto aims for it instead of dead neutral.
+    #[serde(default)]
+    pub wb_residual_temperature: f64,
+    #[serde(default)]
+    pub wb_residual_tint: f64,
+}
+
+fn default_range_target() -> f64 {
+    220.0
+}
+fn default_shadow_mass() -> f64 {
+    0.05
+}
+fn default_highlight_mass() -> f64 {
+    0.02
+}
+fn default_saturation_target() -> f64 {
+    0.20
+}
+
+impl Default for AutoProfile {
+    fn default() -> Self {
+        Self {
+            face_target_luma: 165.0,
+            midtone_target_luma: 128.0,
+            face_samples: 0,
+            global_samples: 0,
+            learned_at: 0,
+            style_samples: 0,
+            range_target: default_range_target(),
+            shadow_mass: default_shadow_mass(),
+            highlight_mass: default_highlight_mass(),
+            saturation_target: default_saturation_target(),
+            wb_residual_temperature: 0.0,
+            wb_residual_tint: 0.0,
+        }
+    }
 }
 
 /// Which tools the Auto button is allowed to touch (Capture One's "Auto Adjust"

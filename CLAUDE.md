@@ -58,6 +58,9 @@ Rules:
   (analysis.rs `render_for_analysis`) and returns deltas tagged `_relative` that the
   frontend ADDS to the sliders. `auto_results_to_json` filters by the options —
   batch auto (file_management.rs) must go through it too, absolute mode only.
+  `AutoProfile` (settings.json) is learned from rendered edited thumbnails only
+  (`measure_output_style` / `learn_style`); new fields need serde defaults so v1
+  profiles keep loading. Auto never learns from its own output — only from saves.
 - The `claudecode` assistant provider shells out to the `claude` CLI (absolute
   path in settings); prompts go via stdin — never argv (E2BIG with mask-laden
   adjustments).

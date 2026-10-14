@@ -470,6 +470,15 @@ pub fn perform_auto_analysis(
         .filter(|p| p.global_samples >= MIN_PROFILE_SAMPLES)
         .map(|p| p.midtone_target_luma)
         .unwrap_or(128.0);
+    // How the user's finished photos look: how much contrast they keep, how many deep
+    // shadows and near-whites they tolerate, how saturated they go. Stock values until
+    // enough edits have been seen (the clamps keep a few odd edits from steering Auto
+    // somewhere silly).
+    let style = profile.filter(|p| p.style_samples >= MIN_PROFILE_SAMPLES as u32);
+    let target_range = style.map(|p| p.range_target.clamp(150.0, 240.0)).unwrap_or(220.0);
+    let shadow_percent_threshold = style.map(|p| p.shadow_mass.clamp(0.01, 0.15)).unwrap_or(0.05);
+    let highlight_tolerance = style.map(|p| p.highlight_mass.clamp(0.005, 0.08)).unwrap_or(0.02);
+    let saturation_target = style.map(|p| p.saturation_target.clamp(0.10, 0.35)).unwrap_or(0.20);
 
     const LUMA_R: f32 = 0.2126;
     const LUMA_G: f32 = 0.7152;
@@ -484,12 +493,10 @@ pub fn perform_auto_analysis(
     const CLIPPED_PERCENT_THRESHOLD: f64 = 0.005;
     const EXPOSURE_CEILING: f64 = 250.0;
 
-    const TARGET_RANGE: f64 = 220.0;
     const CONTRAST_SCALE: f64 = 10.0;
     const HIGHLIGHT_CONTRAST_REDUCE: f64 = 0.5;
 
     const SHADOW_LUMA_MAX: usize = 32;
-    const SHADOW_PERCENT_THRESHOLD: f64 = 0.05;
     const SHADOW_BOOST_SCALE: f64 = 40.0;
     const SHADOW_MAX: f64 = 50.0;
     const HIGHLIGHT_BOOST_SCALE: f64 = 120.0;
@@ -497,7 +504,6 @@ pub fn perform_auto_analysis(
     const HIGHLIGHT_RECOVERY_FLOOR: f64 = 30.0;
     const CLIPPED_RECOVERY_SCALE: f64 = 800.0;
 
-    const VIBRANCY_SAT_THRESHOLD: f32 = 0.2;
     const VIBRANCY_SCALE: f64 = 120.0;
 
     const DEHAZE_RANGE_THRESHOLD: f64 = 120.0;
@@ -614,22 +620,25 @@ pub fn perform_auto_analysis(
     }
 
     let mut contrast = 0.0f64;
-    if range < TARGET_RANGE {
-        contrast = ((TARGET_RANGE / range) - 1.0) * CONTRAST_SCALE;
+    if range < target_range {
+        contrast = ((target_range / range) - 1.0) * CONTRAST_SCALE;
     }
-    if highlight_percent > HIGHLIGHT_PERCENT_THRESHOLD {
+    if highlight_percent > highlight_tolerance {
         contrast *= HIGHLIGHT_CONTRAST_REDUCE;
     }
 
     let shadow_percent = luma_hist[0..SHADOW_LUMA_MAX].iter().sum::<u32>() as f64 / total_pixels;
 
     let mut shadows = 0.0f64;
-    if shadow_percent > SHADOW_PERCENT_THRESHOLD {
-        shadows = (shadow_percent * SHADOW_BOOST_SCALE).min(SHADOW_MAX);
+    if shadow_percent > shadow_percent_threshold {
+        // Lift only the part the user wouldn't keep.
+        shadows = ((shadow_percent - shadow_percent_threshold + 0.05) * SHADOW_BOOST_SCALE).min(SHADOW_MAX);
     }
 
+    // The exposure guard above keeps the stock clipping threshold on purpose: a taste
+    // for bright, airy photos must not disable blown-highlight protection.
     let mut highlights = 0.0f64;
-    if highlight_percent > HIGHLIGHT_PERCENT_THRESHOLD {
+    if highlight_percent > highlight_tolerance {
         // Linear scaling alone lands at token values (a few percent of near-white
         // pixels -> -4); when highlights are genuinely at risk, recover with a
         // meaningful floor and grow with the clipped mass.
@@ -639,8 +648,8 @@ pub fn perform_auto_analysis(
     }
 
     let mut vibrancy = 0.0f64;
-    if mean_saturation < VIBRANCY_SAT_THRESHOLD {
-        vibrancy = (VIBRANCY_SAT_THRESHOLD - mean_saturation) as f64 * VIBRANCY_SCALE;
+    if (mean_saturation as f64) < saturation_target {
+        vibrancy = (saturation_target - mean_saturation as f64) * VIBRANCY_SCALE;
     }
 
     let mut dehaze = 0.0f64;
@@ -865,13 +874,111 @@ pub fn auto_white_balance_shift(
     is_raw: bool,
     current: WhiteBalance,
     base: WhiteBalance,
+    profile: Option<&crate::app_settings::AutoProfile>,
 ) -> Option<(f64, f64)> {
     const DAMPING: f64 = 0.7;
     const MAX_SHIFT: f64 = 40.0;
+    const MIN_PROFILE_SAMPLES: u32 = 3;
     let target = estimate_white_balance(image, is_raw, current)?;
     let (t, n) = white_balance::relative_shift(base, target);
+    // Someone who keeps their photos a touch warm doesn't want Auto to undo it every
+    // time: aim for the cast they keep, not dead neutral.
+    let (rt, rn) = profile
+        .filter(|p| p.style_samples >= MIN_PROFILE_SAMPLES)
+        .map(|p| (p.wb_residual_temperature, p.wb_residual_tint))
+        .unwrap_or((0.0, 0.0));
     let damp = |v: f64| (v * DAMPING).clamp(-MAX_SHIFT, MAX_SHIFT).round();
-    Some((damp(t), damp(n)))
+    Some((damp(t + rt), damp(n + rn)))
+}
+
+/// What a finished photo looks like, measured on its rendered thumbnail — the
+/// statistics [`perform_auto_analysis`] steers toward, so Auto can learn them from
+/// the user's own edits instead of using stock targets.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct OutputStyle {
+    /// 1st→99th percentile luma span.
+    pub range: f64,
+    /// Share of pixels below luma 32.
+    pub shadow_mass: f64,
+    /// Share of pixels at luma 240 and above.
+    pub highlight_mass: f64,
+    /// Mean HSV-style saturation.
+    pub saturation: f64,
+    /// The cast kept on purpose, in Temperature / Tint slider units (+ = warm /
+    /// magenta): minus the shift that would neutralise the photo.
+    pub wb_residual: Option<(f64, f64)>,
+}
+
+pub fn measure_output_style(rendered: &DynamicImage) -> OutputStyle {
+    const DIM: u32 = 512;
+    let small = if rendered.width().max(rendered.height()) > DIM { rendered.thumbnail(DIM, DIM) } else { rendered.clone() };
+    let rgb = small.to_rgb8();
+    let total = (rgb.width() * rgb.height()) as f64;
+    let mut hist = [0u32; 256];
+    let mut sat_sum = 0.0f64;
+    for p in rgb.pixels() {
+        let (r, g, b) = (p[0] as f32, p[1] as f32, p[2] as f32);
+        let luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        hist[(luma.round() as usize).min(255)] += 1;
+        let max = r.max(g).max(b);
+        if max > 0.0 {
+            sat_sum += ((max - r.min(g).min(b)) / max) as f64;
+        }
+    }
+    let percentile = |p: f64| {
+        let target = (total * p) as u32;
+        let mut acc = 0u32;
+        for (i, &v) in hist.iter().enumerate() {
+            acc += v;
+            if acc >= target {
+                return i as f64;
+            }
+        }
+        255.0
+    };
+    let wb_residual = estimate_white_balance(&small, false, WhiteBalance::reference()).map(|est| {
+        let (t, n) = white_balance::relative_shift(WhiteBalance::reference(), est);
+        (-t, -n)
+    });
+    OutputStyle {
+        range: (percentile(0.99) - percentile(0.01)).max(1.0),
+        shadow_mass: hist[..32].iter().sum::<u32>() as f64 / total,
+        highlight_mass: hist[240..].iter().sum::<u32>() as f64 / total,
+        saturation: sat_sum / total,
+        wb_residual,
+    }
+}
+
+/// Fold one finished photo into the profile's style targets (running average).
+pub fn learn_style(profile: &mut crate::app_settings::AutoProfile, style: &OutputStyle, alpha: f64) {
+    const MAX_RESIDUAL: f64 = 20.0;
+    let blend = |old: f64, new: f64| if profile.style_samples == 0 { new } else { old * (1.0 - alpha) + new * alpha };
+    profile.range_target = blend(profile.range_target, style.range.clamp(120.0, 255.0));
+    profile.shadow_mass = blend(profile.shadow_mass, style.shadow_mass.clamp(0.0, 0.3));
+    profile.highlight_mass = blend(profile.highlight_mass, style.highlight_mass.clamp(0.0, 0.15));
+    profile.saturation_target = blend(profile.saturation_target, style.saturation.clamp(0.0, 0.6));
+    if let Some((t, n)) = style.wb_residual {
+        profile.wb_residual_temperature = blend(profile.wb_residual_temperature, t.clamp(-MAX_RESIDUAL, MAX_RESIDUAL));
+        profile.wb_residual_tint = blend(profile.wb_residual_tint, n.clamp(-MAX_RESIDUAL, MAX_RESIDUAL));
+    }
+    profile.style_samples += 1;
+}
+
+/// What Auto has learned so far, for the options popover.
+#[tauri::command]
+pub fn get_auto_learning(app_handle: tauri::AppHandle) -> crate::app_settings::AutoProfile {
+    crate::app_settings::load_settings(app_handle)
+        .ok()
+        .and_then(|s| s.auto_profile)
+        .unwrap_or_default()
+}
+
+/// Forget what Auto learned from the user's edits (back to stock targets).
+#[tauri::command]
+pub fn reset_auto_profile(app_handle: tauri::AppHandle) -> Result<(), String> {
+    let mut settings = crate::app_settings::load_settings(app_handle.clone())?;
+    settings.auto_profile = None;
+    crate::app_settings::save_settings(settings, app_handle)
 }
 
 /// Median luma of a region (or the whole image when `rect` is None).
@@ -928,7 +1035,6 @@ pub async fn learn_auto_profile_from_folder(
         "blacks",
     ];
 
-    let thumb_dir = crate::file_management::get_thumb_cache_dir(app_handle).ok()?;
     let face_session = crate::ai_processing::get_or_init_face_model(
         app_handle,
         &state.ai_state,
@@ -939,6 +1045,7 @@ pub async fn learn_auto_profile_from_folder(
 
     let mut face_lumas: Vec<f64> = Vec::new();
     let mut global_lumas: Vec<f64> = Vec::new();
+    let mut styles: Vec<OutputStyle> = Vec::new();
 
     for entry in std::fs::read_dir(folder).ok()?.flatten() {
         let sidecar = entry.path();
@@ -967,14 +1074,11 @@ pub async fn learn_auto_profile_from_folder(
         if !image_path.exists() {
             continue;
         }
-        let Some(hash) = crate::file_management::get_cache_key_hash(image_path_str) else {
-            continue;
-        };
-        let thumb_path = thumb_dir.join(format!("{}.jpg", hash));
-        let Ok(thumb) = image::open(&thumb_path) else {
+        let Some(thumb) = crate::file_management::cached_edited_thumbnail(app_handle, image_path_str) else {
             continue;
         };
         let gray = thumb.to_luma8();
+        styles.push(measure_output_style(&thumb));
 
         let mut counted_face = false;
         if let Some(session) = &face_session {
@@ -1016,13 +1120,28 @@ pub async fn learn_auto_profile_from_folder(
         .map(|d| d.as_secs())
         .unwrap_or(0);
 
-    Some(crate::app_settings::AutoProfile {
+    let mut profile = crate::app_settings::AutoProfile {
         face_target_luma: face_target,
         midtone_target_luma: midtone_target,
         face_samples: face_n as u32,
         global_samples: global_n as u32,
         learned_at,
-    })
+        ..Default::default()
+    };
+    // Medians, so one odd edit can't set the style.
+    if styles.len() >= MIN_SAMPLES {
+        let med = |f: &dyn Fn(&OutputStyle) -> Option<f64>| median_f64(&mut styles.iter().filter_map(f).collect());
+        let style = OutputStyle {
+            range: med(&|s| Some(s.range)).unwrap_or(220.0),
+            shadow_mass: med(&|s| Some(s.shadow_mass)).unwrap_or(0.05),
+            highlight_mass: med(&|s| Some(s.highlight_mass)).unwrap_or(0.02),
+            saturation: med(&|s| Some(s.saturation)).unwrap_or(0.2),
+            wb_residual: med(&|s| s.wb_residual.map(|r| r.0)).zip(med(&|s| s.wb_residual.map(|r| r.1))),
+        };
+        learn_style(&mut profile, &style, 1.0);
+        profile.style_samples = styles.len() as u32;
+    }
+    Some(profile)
 }
 
 /// Median luma (0-255) of the dominant (largest) detected face, or None when no
@@ -1092,13 +1211,8 @@ pub async fn update_auto_profile_from_image(app_handle: tauri::AppHandle, image_
     }
 
     let state = tauri::Manager::state::<AppState>(&app_handle);
-    let Ok(thumb_dir) = crate::file_management::get_thumb_cache_dir(&app_handle) else {
-        return;
-    };
-    let Some(hash) = crate::file_management::get_cache_key_hash(&image_path) else {
-        return;
-    };
-    let Ok(thumb) = image::open(thumb_dir.join(format!("{}.jpg", hash))) else {
+    let Some(thumb) = crate::file_management::cached_edited_thumbnail(&app_handle, &image_path) else {
+        log::debug!("[auto-profile] no cached thumbnail yet for {image_path}");
         return;
     };
     let gray = thumb.to_luma8();
@@ -1135,16 +1249,8 @@ pub async fn update_auto_profile_from_image(app_handle: tauri::AppHandle, image_
     let Ok(mut settings) = crate::app_settings::load_settings(app_handle.clone()) else {
         return;
     };
-    let mut profile = settings
-        .auto_profile
-        .clone()
-        .unwrap_or(crate::app_settings::AutoProfile {
-            face_target_luma: 165.0,
-            midtone_target_luma: 128.0,
-            face_samples: 0,
-            global_samples: 0,
-            learned_at: 0,
-        });
+    let mut profile = settings.auto_profile.clone().unwrap_or_default();
+    learn_style(&mut profile, &measure_output_style(&thumb), EMA_ALPHA);
 
     if let Some(s) = face_sample {
         let s = s.clamp(140.0, 215.0);
@@ -1162,8 +1268,6 @@ pub async fn update_auto_profile_from_image(app_handle: tauri::AppHandle, image_
             profile.midtone_target_luma * (1.0 - EMA_ALPHA) + s * EMA_ALPHA
         };
         profile.global_samples += 1;
-    } else {
-        return;
     }
     profile.learned_at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1171,11 +1275,16 @@ pub async fn update_auto_profile_from_image(app_handle: tauri::AppHandle, image_
         .unwrap_or(0);
 
     log::info!(
-        "[auto-profile] updated from edit: face {:.0} (n={}), midtone {:.0} (n={})",
+        "[auto-profile] updated from edit: face {:.0} (n={}), midtone {:.0} (n={}), style n={} range {:.0} sat {:.2} wb {:+.0}/{:+.0}",
         profile.face_target_luma,
         profile.face_samples,
         profile.midtone_target_luma,
-        profile.global_samples
+        profile.global_samples,
+        profile.style_samples,
+        profile.range_target,
+        profile.saturation_target,
+        profile.wb_residual_temperature,
+        profile.wb_residual_tint
     );
     settings.auto_profile = Some(profile);
     let _ = crate::app_settings::save_settings(settings, app_handle);
@@ -1313,7 +1422,7 @@ pub async fn calculate_auto_adjustments(
                 .filter(|j| is_section_visible(j, "color"))
                 .map(|j| white_balance::from_adjustments(j, as_shot))
                 .unwrap_or(as_shot);
-            auto_white_balance_shift(analysis_image, is_raw, current, current)
+            auto_white_balance_shift(analysis_image, is_raw, current, current, profile.as_ref())
         } else {
             // The decode is balanced as shot; the sliders are relative to the stored
             // base (a picked/Kelvin white point) when there is one, else as shot.
@@ -1321,7 +1430,7 @@ pub async fn calculate_auto_adjustments(
                 .and_then(|j| j.get("whiteBalance"))
                 .and_then(|v| serde_json::from_value::<WhiteBalance>(v.clone()).ok())
                 .unwrap_or(as_shot);
-            auto_white_balance_shift(analysis_image, is_raw, as_shot, base)
+            auto_white_balance_shift(analysis_image, is_raw, as_shot, base, profile.as_ref())
         }
     } else {
         None
@@ -1400,9 +1509,9 @@ mod auto_adjust_tests {
         }
         let reference = WhiteBalance::reference();
         let (t_warm, _) =
-            auto_white_balance_shift(&DynamicImage::ImageRgb32F(warm), true, reference, reference).unwrap();
+            auto_white_balance_shift(&DynamicImage::ImageRgb32F(warm), true, reference, reference, None).unwrap();
         let (t_neutral, n_neutral) =
-            auto_white_balance_shift(&DynamicImage::ImageRgb32F(neutral), true, reference, reference).unwrap();
+            auto_white_balance_shift(&DynamicImage::ImageRgb32F(neutral), true, reference, reference, None).unwrap();
         assert!(t_warm < -5.0, "warm cast should cool the slider, got {t_warm}");
         assert!(t_neutral.abs() <= 1.0 && n_neutral.abs() <= 1.0, "neutral drifted: {t_neutral}, {n_neutral}");
     }
@@ -1417,7 +1526,78 @@ mod auto_adjust_tests {
             *p = if x > 32 && y > 32 { image::Rgb([0.6, 0.08, 0.05]) } else { image::Rgb([l, l, l]) };
         }
         let reference = WhiteBalance::reference();
-        let (t, n) = auto_white_balance_shift(&DynamicImage::ImageRgb32F(img), true, reference, reference).unwrap();
+        let (t, n) = auto_white_balance_shift(&DynamicImage::ImageRgb32F(img), true, reference, reference, None).unwrap();
         assert!(t.abs() <= 2.0 && n.abs() <= 2.0, "red subject biased the estimate: {t}, {n}");
+    }
+}
+
+#[cfg(test)]
+mod auto_learning_tests {
+    use super::*;
+    use crate::app_settings::AutoProfile;
+
+    fn flat_gradient(contrast: f32, warmth: f32) -> DynamicImage {
+        let mut img = image::RgbImage::new(64, 64);
+        for (x, y, p) in img.enumerate_pixels_mut() {
+            let t = ((x + y) % 32) as f32 / 31.0;
+            let l = 128.0 + (t - 0.5) * contrast;
+            *p = image::Rgb([
+                (l * (1.0 + warmth)).clamp(0.0, 255.0) as u8,
+                l.clamp(0.0, 255.0) as u8,
+                (l * (1.0 - warmth)).clamp(0.0, 255.0) as u8,
+            ]);
+        }
+        DynamicImage::ImageRgb8(img)
+    }
+
+    #[test]
+    fn style_measures_contrast_and_kept_warmth() {
+        let flat = measure_output_style(&flat_gradient(60.0, 0.0));
+        let punchy = measure_output_style(&flat_gradient(220.0, 0.0));
+        assert!(punchy.range > flat.range + 100.0, "{} vs {}", punchy.range, flat.range);
+        let (t, _) = measure_output_style(&flat_gradient(120.0, 0.12)).wb_residual.unwrap();
+        assert!(t > 3.0, "a warm finished photo should read as a kept warm residual, got {t}");
+        let (t0, n0) = flat.wb_residual.unwrap();
+        assert!(t0.abs() <= 1.0 && n0.abs() <= 1.0);
+    }
+
+    #[test]
+    fn learned_style_changes_what_auto_asks_for() {
+        // A low-contrast scene: stock Auto adds contrast toward a 220 span...
+        let scene = flat_gradient(120.0, 0.0);
+        let stock = perform_auto_analysis(&scene, None, None);
+        assert!(stock.contrast > 0.0);
+        // ...but a user whose finished photos stay soft (span ~150) gets much less.
+        let mut soft = AutoProfile::default();
+        for _ in 0..3 {
+            learn_style(&mut soft, &measure_output_style(&flat_gradient(150.0, 0.0)), 0.5);
+        }
+        let learned = perform_auto_analysis(&scene, None, Some(&soft));
+        assert!(learned.contrast < stock.contrast * 0.6, "{} vs {}", learned.contrast, stock.contrast);
+    }
+
+    #[test]
+    fn kept_warmth_is_not_undone_by_auto_white_balance() {
+        let reference = WhiteBalance::reference();
+        let mut warm_lover = AutoProfile::default();
+        for _ in 0..3 {
+            learn_style(&mut warm_lover, &measure_output_style(&flat_gradient(120.0, 0.12)), 0.5);
+        }
+        assert!(warm_lover.wb_residual_temperature > 3.0);
+        // A neutral photo: stock Auto leaves it, the warm-loving profile warms it.
+        let neutral = flat_gradient(120.0, 0.0);
+        let (t_stock, _) = auto_white_balance_shift(&neutral, false, reference, reference, None).unwrap();
+        let (t_learned, _) = auto_white_balance_shift(&neutral, false, reference, reference, Some(&warm_lover)).unwrap();
+        assert!(t_stock.abs() <= 1.0);
+        assert!(t_learned > t_stock + 2.0, "{t_learned} vs {t_stock}");
+    }
+
+    #[test]
+    fn old_profiles_load_with_stock_style() {
+        let v1 = r#"{"faceTargetLuma":170,"midtoneTargetLuma":120,"faceSamples":4,"globalSamples":9,"learnedAt":1}"#;
+        let p: AutoProfile = serde_json::from_str(v1).unwrap();
+        assert_eq!(p.style_samples, 0);
+        assert_eq!(p.range_target, 220.0);
+        assert_eq!(p.wb_residual_temperature, 0.0);
     }
 }
