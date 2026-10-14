@@ -31,7 +31,7 @@ import {
 } from '../../../utils/adjustments';
 import { invoke } from '@tauri-apps/api/core';
 import { useContextMenu } from '../../../context/ContextMenuContext';
-import { AutoAdjustOptions, DEFAULT_AUTO_ADJUST, Invokes, OPTION_SEPARATOR, Orientation } from '../../ui/AppProperties';
+import { AutoAdjustOptions, Invokes, OPTION_SEPARATOR, Orientation, resolveAutoAdjust } from '../../ui/AppProperties';
 import Switch from '../../ui/Switch';
 import Text from '../../ui/Text';
 import { TextVariants, TextColors, TextWeights } from '../../../types/typography';
@@ -46,12 +46,17 @@ import { useWaveformControls } from '../../../hooks/useWaveformControls';
 
 const AUTO_TOOLS: Array<keyof AutoAdjustOptions> = [
   'exposure',
+  'brightness',
   'contrast',
-  'tone',
-  'levels',
+  'highlights',
+  'shadows',
+  'whites',
+  'blacks',
   'whiteBalance',
   'vibrance',
-  'effects',
+  'clarity',
+  'dehaze',
+  'vignette',
 ];
 
 /**
@@ -109,7 +114,7 @@ function AutoAdjustOptionsPopover({ onClose }: { onClose(): void }) {
   const { appSettings, handleSettingsChange } = useSettingsStore(
     useShallow((state) => ({ appSettings: state.appSettings, handleSettingsChange: state.handleSettingsChange })),
   );
-  const options: AutoAdjustOptions = { ...DEFAULT_AUTO_ADJUST, ...(appSettings?.autoAdjust ?? {}) };
+  const options = resolveAutoAdjust(appSettings?.autoAdjust);
   const update = (patch: Partial<AutoAdjustOptions>) => {
     if (!appSettings) return;
     handleSettingsChange({ ...appSettings, autoAdjust: { ...options, ...patch } });
@@ -141,7 +146,7 @@ function AutoAdjustOptionsPopover({ onClose }: { onClose(): void }) {
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -4 }}
       transition={{ duration: 0.15 }}
-      className="absolute right-0 top-full mt-1 z-50 w-72 bg-surface border border-border-color rounded-lg shadow-xl p-3 flex flex-col gap-2"
+      className="absolute right-0 top-full mt-1 z-50 w-[22rem] bg-surface border border-border-color rounded-lg shadow-xl p-3 flex flex-col gap-2"
     >
       <Text variant={TextVariants.label} color={TextColors.primary}>
         {t('editor.adjustments.auto.title')}
@@ -149,7 +154,7 @@ function AutoAdjustOptionsPopover({ onClose }: { onClose(): void }) {
       <Text variant={TextVariants.small} color={TextColors.secondary}>
         {t('editor.adjustments.auto.tools')}
       </Text>
-      <div className="flex flex-col gap-1.5">
+      <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
         {AUTO_TOOLS.map((tool) => (
           <Switch
             key={tool}

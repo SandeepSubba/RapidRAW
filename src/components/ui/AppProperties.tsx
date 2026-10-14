@@ -444,28 +444,67 @@ export interface ImageFile {
   group_id: string | null;
 }
 
-/** Which tools the Auto button writes, and whether it corrects on top of the current look. */
+/** Which sliders the Auto button writes (one switch each), and whether it corrects on top of the current look. */
 export interface AutoAdjustOptions {
   exposure: boolean;
+  brightness: boolean;
   contrast: boolean;
-  tone: boolean;
-  levels: boolean;
+  highlights: boolean;
+  shadows: boolean;
+  whites: boolean;
+  blacks: boolean;
   whiteBalance: boolean;
   vibrance: boolean;
-  effects: boolean;
+  clarity: boolean;
+  dehaze: boolean;
+  vignette: boolean;
   keepLook: boolean;
 }
 
 export const DEFAULT_AUTO_ADJUST: AutoAdjustOptions = {
   exposure: true,
+  brightness: true,
   contrast: true,
-  tone: true,
-  levels: true,
+  highlights: true,
+  shadows: true,
+  whites: true,
+  blacks: true,
   whiteBalance: true,
   vibrance: false,
-  effects: false,
+  clarity: false,
+  dehaze: false,
+  vignette: false,
   keepLook: true,
 };
+
+/**
+ * Saved options merged over the defaults. The first version saved grouped switches
+ * (tone, levels, effects); they still count until the per-slider ones are saved.
+ */
+export function resolveAutoAdjust(saved?: Partial<AutoAdjustOptions> & Record<string, any>): AutoAdjustOptions {
+  const s = saved ?? {};
+  const pick = (key: keyof AutoAdjustOptions, legacy?: string) =>
+    typeof s[key] === 'boolean'
+      ? s[key]
+      : legacy && typeof s[legacy] === 'boolean'
+        ? s[legacy]
+        : DEFAULT_AUTO_ADJUST[key];
+  return {
+    exposure: pick('exposure'),
+    brightness: pick('brightness', 'exposure'),
+    contrast: pick('contrast'),
+    highlights: pick('highlights', 'tone'),
+    shadows: pick('shadows', 'tone'),
+    whites: pick('whites', 'levels'),
+    blacks: pick('blacks', 'levels'),
+    whiteBalance: pick('whiteBalance'),
+    vibrance: pick('vibrance'),
+    clarity: pick('clarity', 'effects'),
+    dehaze: pick('dehaze', 'effects'),
+    vignette: pick('vignette', 'effects'),
+    keepLook: pick('keepLook'),
+  };
+}
 
 export interface Option {
   color?: string;

@@ -15,7 +15,7 @@ import {
   normalizeLoadedAdjustments,
 } from '../utils/adjustments';
 import { calculateCenteredCrop } from '../utils/cropUtils';
-import { DEFAULT_AUTO_ADJUST, Invokes } from '../components/ui/AppProperties';
+import { Invokes, resolveAutoAdjust } from '../components/ui/AppProperties';
 import { globalImageCache } from '../utils/ImageLRUCache';
 
 export const debouncedSetHistory = debounce((newAdj: Adjustments) => {
@@ -99,7 +99,7 @@ export function useEditorActions() {
   const handleAutoAdjustments = useCallback(async () => {
     const { selectedImage, adjustments } = useEditorStore.getState();
     if (!selectedImage?.isReady) return;
-    const options = { ...DEFAULT_AUTO_ADJUST, ...(useSettingsStore.getState().appSettings?.autoAdjust ?? {}) };
+    const options = resolveAutoAdjust(useSettingsStore.getState().appSettings?.autoAdjust);
     try {
       const result: Record<string, any> = await invoke(Invokes.CalculateAutoAdjustments, {
         adjustments: options.keepLook ? adjustments : null,

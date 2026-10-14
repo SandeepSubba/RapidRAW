@@ -232,11 +232,11 @@ and dated.
   contrast soft · you keep a warm cast") with a **Reset learning** link. Learning is
   per machine (it lives in settings.json, not the sidecars).
 - **Choose what Auto touches** (Capture One–style) — the chevron next to the Auto
-  button (or right-click it) opens a checklist: Exposure, Contrast, Highlights &
-  Shadows, Whites & Blacks, White Balance, Vibrance, and Clarity/Dehaze/Vignette.
-  The creative ones (Vibrance, Clarity/Dehaze/Vignette) are off by default — they
-  were what wiped a preset's look. The choice is saved and also drives the
-  library's batch Auto.
+  button (or right-click it) opens one switch per slider: Exposure, Brightness,
+  Contrast, Highlights, Shadows, Whites, Blacks, White Balance, Vibrance, Clarity,
+  Dehaze and Vignette. The creative ones (Vibrance, Clarity, Dehaze, Vignette) are
+  off by default — they were what wiped a preset's look. The choice is saved and
+  also drives the library's batch Auto.
 - **Auto white balance** — a grey-world estimate over the least-saturated mid-tone
   pixels (what you'd click with the picker), damped to 70% and capped at ±40 so a
   colourful scene can't swing it. Previously Auto never touched white balance.

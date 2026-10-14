@@ -347,14 +347,11 @@
       "auto": {
         "title": "Auto adjust",
         "options": "Auto adjust options",
-        "tools": "Tools",
+        "tools": "Sliders Auto may change",
         "exposure": "Exposure",
         "contrast": "Contrast",
-        "tone": "Highlights & Shadows",
-        "levels": "Whites & Blacks",
         "whiteBalance": "White Balance",
         "vibrance": "Vibrance",
-        "effects": "Clarity, Dehaze & Vignette",
         "keepLook": "Keep current look",
         "keepLookDesc": "Correct the photo as it looks now — on top of presets and edits — instead of replacing them with values measured on the untouched photo.",
         "batchNote": "The library’s batch Auto uses the same tools but always starts from the untouched photo.",
@@ -370,7 +367,15 @@
         "learnedCool": "you keep a cool cast",
         "learnedFaces_one": "{{count}} face reference",
         "learnedFaces_other": "{{count}} face references",
-        "resetLearning": "Reset learning"
+        "resetLearning": "Reset learning",
+        "brightness": "Brightness",
+        "highlights": "Highlights",
+        "shadows": "Shadows",
+        "whites": "Whites",
+        "blacks": "Blacks",
+        "clarity": "Clarity",
+        "dehaze": "Dehaze",
+        "vignette": "Vignette"
       }
     },
     "ai": {

@@ -741,28 +741,25 @@ pub fn auto_results_to_json(
     let mut put = |k: &str, v: f64| {
         out.insert(k.to_string(), json!(v));
     };
-    if options.exposure {
-        put("exposure", results.exposure);
-        put("brightness", results.brightness);
+    let sliders: [(bool, &str, f64); 11] = [
+        (options.exposure, "exposure", results.exposure),
+        (options.brightness, "brightness", results.brightness),
+        (options.contrast, "contrast", results.contrast),
+        (options.highlights, "highlights", results.highlights),
+        (options.shadows, "shadows", results.shadows),
+        (options.whites, "whites", results.whites),
+        (options.blacks, "blacks", results.blacks),
+        (options.vibrance, "vibrance", results.vibrancy),
+        (options.clarity, "clarity", results.clarity),
+        (options.dehaze, "dehaze", results.dehaze),
+        (options.vignette, "vignetteAmount", results.vignette_amount),
+    ];
+    for (on, key, value) in sliders {
+        if on {
+            put(key, value);
+        }
     }
-    if options.contrast {
-        put("contrast", results.contrast);
-    }
-    if options.tone {
-        put("highlights", results.highlights);
-        put("shadows", results.shadows);
-    }
-    if options.levels {
-        put("whites", results.whites);
-        put("blacks", results.blacks);
-    }
-    if options.vibrance {
-        put("vibrance", results.vibrancy);
-    }
-    if options.effects {
-        put("clarity", results.clarity);
-        put("dehaze", results.dehaze);
-        put("vignetteAmount", results.vignette_amount);
+    if options.vignette {
         put("centré", results.centre);
     }
     if let Some((temperature, tint)) = white_balance.filter(|_| options.white_balance) {
@@ -773,14 +770,23 @@ pub fn auto_results_to_json(
     // A hidden section renders as if its sliders were zero, so make the ones Auto
     // just wrote visible (clarity/dehaze live in "details", vignette/centré in "effects").
     let mut visibility = serde_json::Map::new();
-    if options.exposure || options.contrast || options.tone || options.levels {
+    let basic = options.exposure
+        || options.brightness
+        || options.contrast
+        || options.highlights
+        || options.shadows
+        || options.whites
+        || options.blacks;
+    if basic {
         visibility.insert("basic".into(), json!(true));
     }
     if options.vibrance || (options.white_balance && white_balance.is_some()) {
         visibility.insert("color".into(), json!(true));
     }
-    if options.effects {
+    if options.clarity || options.dehaze {
         visibility.insert("details".into(), json!(true));
+    }
+    if options.vignette {
         visibility.insert("effects".into(), json!(true));
     }
     out.insert("sectionVisibility".into(), serde_json::Value::Object(visibility));
@@ -1465,7 +1471,7 @@ mod auto_adjust_tests {
 
     #[test]
     fn only_enabled_tools_are_written() {
-        let opts = AutoAdjustOptions { vibrance: false, effects: false, white_balance: false, ..Default::default() };
+        let opts = AutoAdjustOptions { vibrance: false, white_balance: false, ..Default::default() };
         let json = auto_results_to_json(&results(), &opts, Some((10.0, -5.0)), false);
         for k in ["exposure", "brightness", "contrast", "highlights", "shadows", "whites", "blacks"] {
             assert!(json.get(k).is_some(), "{k} missing");
@@ -1482,7 +1488,15 @@ mod auto_adjust_tests {
 
     #[test]
     fn white_balance_and_effects_when_enabled() {
-        let opts = AutoAdjustOptions { effects: true, white_balance: true, exposure: false, ..Default::default() };
+        let opts = AutoAdjustOptions {
+            clarity: true,
+            dehaze: true,
+            vignette: true,
+            white_balance: true,
+            exposure: false,
+            brightness: false,
+            ..Default::default()
+        };
         let json = auto_results_to_json(&results(), &opts, Some((10.0, -5.0)), true);
         assert_eq!(json["temperature"], json!(10.0));
         assert_eq!(json["tint"], json!(-5.0));
@@ -1491,6 +1505,16 @@ mod auto_adjust_tests {
         assert_eq!(json["_relative"], json!(true));
         assert_eq!(json["sectionVisibility"]["color"], json!(true));
         assert_eq!(json["sectionVisibility"]["details"], json!(true));
+        assert_eq!(json["sectionVisibility"]["effects"], json!(true));
+    }
+
+    #[test]
+    fn each_slider_switch_is_independent() {
+        let opts = AutoAdjustOptions { shadows: false, blacks: false, ..Default::default() };
+        let json = auto_results_to_json(&results(), &opts, None, false);
+        assert!(json.get("highlights").is_some() && json.get("shadows").is_none());
+        assert!(json.get("whites").is_some() && json.get("blacks").is_none());
+        assert!(json.get("temperature").is_none(), "no estimate, no white balance");
     }
 
     /// A flat scene with a warm cast: Auto must cool it (negative Temperature) and

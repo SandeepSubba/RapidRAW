@@ -538,25 +538,27 @@ impl Default for AutoProfile {
     }
 }
 
-/// Which tools the Auto button is allowed to touch (Capture One's "Auto Adjust"
-/// checklist), and whether it corrects the photo as it currently looks (on top of
-/// presets and edits) or starts from the untouched photo.
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
-#[serde(rename_all = "camelCase", default)]
+/// Which sliders the Auto button is allowed to touch (Capture One's "Auto Adjust"
+/// checklist, one switch per slider), and whether it corrects the photo as it
+/// currently looks (on top of presets and edits) or starts from the untouched photo.
+#[derive(Serialize, Clone, Copy, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct AutoAdjustOptions {
-    /// Exposure + Brightness.
     pub exposure: bool,
+    pub brightness: bool,
     pub contrast: bool,
-    /// Highlights + Shadows.
-    pub tone: bool,
-    /// Whites + Blacks.
-    pub levels: bool,
+    pub highlights: bool,
+    pub shadows: bool,
+    pub whites: bool,
+    pub blacks: bool,
     /// Temperature + Tint.
     pub white_balance: bool,
     pub vibrance: bool,
-    /// Clarity, Dehaze, Vignette, Centré — creative, so off by default: they are
-    /// what erased a preset's look.
-    pub effects: bool,
+    // Creative, so off by default: they are what erased a preset's look.
+    pub clarity: bool,
+    pub dehaze: bool,
+    /// Vignette + Centré (one effect, two sliders).
+    pub vignette: bool,
     /// Analyse the rendered photo and add the correction to the current values
     /// instead of replacing them with values measured on the untouched photo.
     pub keep_look: bool,
@@ -566,14 +568,93 @@ impl Default for AutoAdjustOptions {
     fn default() -> Self {
         Self {
             exposure: true,
+            brightness: true,
             contrast: true,
-            tone: true,
-            levels: true,
+            highlights: true,
+            shadows: true,
+            whites: true,
+            blacks: true,
             white_balance: true,
             vibrance: false,
-            effects: false,
+            clarity: false,
+            dehaze: false,
+            vignette: false,
             keep_look: true,
         }
+    }
+}
+
+/// On-disk form: every switch optional (missing = default) plus the grouped
+/// switches the first version saved — `tone` (highlights + shadows), `levels`
+/// (whites + blacks) and `effects` (clarity + dehaze + vignette) — so a settings
+/// file written by it keeps its choices.
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+struct AutoAdjustOptionsWire {
+    exposure: Option<bool>,
+    brightness: Option<bool>,
+    contrast: Option<bool>,
+    highlights: Option<bool>,
+    shadows: Option<bool>,
+    whites: Option<bool>,
+    blacks: Option<bool>,
+    white_balance: Option<bool>,
+    vibrance: Option<bool>,
+    clarity: Option<bool>,
+    dehaze: Option<bool>,
+    vignette: Option<bool>,
+    keep_look: Option<bool>,
+    tone: Option<bool>,
+    levels: Option<bool>,
+    effects: Option<bool>,
+}
+
+impl<'de> Deserialize<'de> for AutoAdjustOptions {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let w = AutoAdjustOptionsWire::deserialize(d)?;
+        let base = AutoAdjustOptions::default();
+        Ok(AutoAdjustOptions {
+            exposure: w.exposure.unwrap_or(base.exposure),
+            brightness: w.brightness.or(w.exposure).unwrap_or(base.brightness),
+            contrast: w.contrast.unwrap_or(base.contrast),
+            highlights: w.highlights.or(w.tone).unwrap_or(base.highlights),
+            shadows: w.shadows.or(w.tone).unwrap_or(base.shadows),
+            whites: w.whites.or(w.levels).unwrap_or(base.whites),
+            blacks: w.blacks.or(w.levels).unwrap_or(base.blacks),
+            white_balance: w.white_balance.unwrap_or(base.white_balance),
+            vibrance: w.vibrance.unwrap_or(base.vibrance),
+            clarity: w.clarity.or(w.effects).unwrap_or(base.clarity),
+            dehaze: w.dehaze.or(w.effects).unwrap_or(base.dehaze),
+            vignette: w.vignette.or(w.effects).unwrap_or(base.vignette),
+            keep_look: w.keep_look.unwrap_or(base.keep_look),
+        })
+    }
+}
+
+#[cfg(test)]
+mod auto_adjust_options_tests {
+    use super::*;
+
+    #[test]
+    fn grouped_switches_from_the_first_version_still_apply() {
+        let saved = r#"{"exposure":true,"contrast":false,"tone":false,"levels":true,"whiteBalance":false,"vibrance":true,"effects":true,"keepLook":false}"#;
+        let o: AutoAdjustOptions = serde_json::from_str(saved).unwrap();
+        assert!(!o.contrast && !o.highlights && !o.shadows);
+        assert!(o.whites && o.blacks);
+        assert!(!o.white_balance && o.vibrance);
+        assert!(o.clarity && o.dehaze && o.vignette);
+        assert!(!o.keep_look);
+    }
+
+    #[test]
+    fn per_slider_switches_win_over_grouped_ones_and_round_trip() {
+        let saved = r#"{"tone":false,"shadows":true,"whites":false}"#;
+        let o: AutoAdjustOptions = serde_json::from_str(saved).unwrap();
+        assert!(!o.highlights && o.shadows && !o.whites && o.blacks);
+        let again: AutoAdjustOptions = serde_json::from_str(&serde_json::to_string(&o).unwrap()).unwrap();
+        assert_eq!(again, o);
+        let empty: AutoAdjustOptions = serde_json::from_str("{}").unwrap();
+        assert_eq!(empty, AutoAdjustOptions::default());
     }
 }
 
