@@ -146,7 +146,9 @@ function AutoAdjustOptionsPopover({ onClose }: { onClose(): void }) {
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -4 }}
       transition={{ duration: 0.15 }}
-      className="absolute right-0 top-full mt-1 z-50 w-[22rem] bg-surface border border-border-color rounded-lg shadow-xl p-3 flex flex-col gap-2"
+      // Spans the panel (anchored to its header) rather than hanging off the button:
+      // the panel clips anything wider than itself.
+      className="absolute left-3 right-3 top-full z-50 bg-surface border border-border-color rounded-lg shadow-xl p-3 flex flex-col gap-2"
     >
       <Text variant={TextVariants.label} color={TextColors.primary}>
         {t('editor.adjustments.auto.title')}
@@ -404,9 +406,9 @@ export default function Controls() {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="p-3 flex justify-between items-center shrink-0 border-b border-surface">
+      <div className="p-3 flex justify-between items-center shrink-0 border-b border-surface relative">
         <Text variant={TextVariants.title}>{t('editor.adjustments.title')}</Text>
-        <div className="flex items-center gap-1 relative">
+        <div className="flex items-center gap-1">
           <div className="flex items-center rounded-full hover:bg-surface transition-colors">
             <button
               className="p-2 pr-1 rounded-l-full disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
