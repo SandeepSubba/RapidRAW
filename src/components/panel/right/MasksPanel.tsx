@@ -283,6 +283,8 @@ export default function MasksPanel() {
     handleGenerateAiFaceRegionMask,
     handleCancelAiTask,
   } = useAiMasking();
+  const showMaskOverlay = useUIStore((s) => s.showMaskOverlay);
+  const toggleMaskOverlay = useUIStore((s) => s.toggleMaskOverlay);
   const { setCustomEscapeHandler, isAdjustmentsPanelVisible } = useUIStore(
     useShallow((state) => {
       const leftVisible = state.uiVisibility.leftPanel;
@@ -1082,6 +1084,17 @@ export default function MasksPanel() {
         <div className="p-3 flex justify-between items-center shrink-0 border-b border-surface">
           <Text variant={TextVariants.title}>{t('editor.masks.maskingTitle')}</Text>
           <div className="flex items-center gap-1">
+            <button
+              className={clsx(
+                'p-2 rounded-full transition-colors hover:bg-surface',
+                !showMaskOverlay && 'text-text-secondary',
+              )}
+              onClick={toggleMaskOverlay}
+              data-tooltip={showMaskOverlay ? t('editor.masks.hideOverlay') : t('editor.masks.showOverlay')}
+              aria-pressed={!showMaskOverlay}
+            >
+              {showMaskOverlay ? <Eye size={18} /> : <EyeOff size={18} />}
+            </button>
             <button
               className={clsx(
                 'p-2 rounded-full transition-colors',

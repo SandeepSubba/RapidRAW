@@ -186,6 +186,12 @@ export const KEYBIND_DEFINITIONS: KeybindDefinition[] = [
     section: 'view',
   },
   {
+    action: 'toggle_mask_overlay',
+    description: 'settings.keybinds.actions.toggle_mask_overlay',
+    defaultCombo: ['KeyO'],
+    section: 'view',
+  },
+  {
     action: 'toggle_fullscreen',
     description: 'settings.keybinds.actions.toggle_fullscreen',
     defaultCombo: ['KeyF'],

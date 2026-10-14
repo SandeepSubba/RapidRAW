@@ -37,6 +37,7 @@ import { RenderSize } from '../../../hooks/useImageRenderSize';
 import { useOsPlatform } from '../../../hooks/useOsPlatform';
 import { useTranslation } from 'react-i18next';
 import { useEditorStore } from '../../../store/useEditorStore';
+import { useUIStore } from '../../../store/useUIStore';
 import type { OverlayMode } from '../right/CropPanel';
 import CompositionOverlays from './overlays/CompositionOverlays';
 import { calculateStraightenAngle, orientPoint, unorientPoint } from '../../../utils/cropUtils';
@@ -3564,8 +3565,9 @@ const ImageCanvas = memo(
     }, [setIsMaskTouchInteracting]);
 
     const currentActiveSubMaskId = activeAiSubMaskId || activeMaskId;
+    const showMaskOverlay = useUIStore((s) => s.showMaskOverlay);
     const maskOpacity =
-      isShowingOriginal || isSliderDragging || isMaskInteractionActive
+      !showMaskOverlay || isShowingOriginal || isSliderDragging || isMaskInteractionActive
         ? 0
         : isDirectPatchActive
           ? hoveredMarkerId === currentActiveSubMaskId || isMaskControlHovered

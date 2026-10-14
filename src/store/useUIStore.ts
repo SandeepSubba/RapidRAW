@@ -216,6 +216,10 @@ export interface UIState {
   isImportViewActive: boolean;
   isFullScreen: boolean;
   isWindowFullScreen: boolean;
+  // The red tint the editor lays over the active mask's area. Off hides it so the
+  // adjustment can be judged on the photo itself; the mask tools stay usable.
+  showMaskOverlay: boolean;
+  toggleMaskOverlay: () => void;
   isInstantTransition: boolean;
   isLayoutReady: boolean;
   uiVisibility: UiVisibility;
@@ -286,6 +290,8 @@ export const useUIStore = create<UIState>((set, get) => ({
   isImportViewActive: false,
   isFullScreen: false,
   isWindowFullScreen: false,
+  showMaskOverlay: true,
+  toggleMaskOverlay: () => set({ showMaskOverlay: !get().showMaskOverlay }),
   isInstantTransition: false,
   isLayoutReady: false,
   uiVisibility: { filmstrip: true, leftPanel: true, rightPanel: true, quickFilter: false },

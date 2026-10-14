@@ -743,7 +743,9 @@
         "createNew": "Create New {{name}} Mask",
         "selectNewSourcePoint": "{{modifier}} + Click to select a new source point",
         "moveOrSelectSourcePoint": "Drag to move the source point · {{modifier}} + Click to set a new one"
-      }
+      },
+      "hideOverlay": "Hide mask overlay (O)",
+      "showOverlay": "Show mask overlay (O)"
     },
     "metadata": {
       "author": {
@@ -1878,7 +1880,8 @@
         "zoom_in": "Zoom in",
         "zoom_in_step": "Zoom in (by step)",
         "zoom_out": "Zoom out",
-        "zoom_out_step": "Zoom out (by step)"
+        "zoom_out_step": "Zoom out (by step)",
+        "toggle_mask_overlay": "Show / hide mask overlay"
       },
       "sections": {
         "adjustments": "Adjustments",

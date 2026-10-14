@@ -348,6 +348,14 @@ export const useKeyboardShortcuts = ({
           s.editor.redo();
         },
       },
+      // Lightroom's O: show / hide the red mask overlay while masking.
+      toggle_mask_overlay: {
+        shouldFire: (s: any) => !!s.editor.selectedImage,
+        execute: (e: any, s: any) => {
+          e.preventDefault();
+          s.ui.toggleMaskOverlay();
+        },
+      },
       toggle_fullscreen: {
         shouldFire: (s: any) => !!s.editor.selectedImage,
         execute: (e: any, s: any) => {

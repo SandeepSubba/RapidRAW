@@ -189,6 +189,9 @@ and dated.
 
 ## Masks & AI retouching
 
+- **Mask overlay on/off** — the eye button in the Masks panel header (or **O**,
+  remappable) hides the red tint over the masked area so the adjustment can be
+  judged on the photo; the mask handles and tools keep working.
 - **AI Eyes / Mouth masks** — auto-select facial features.
 - **Face masks** using YuNet landmarks with a two-pass refine and library-tuned
   placement.
