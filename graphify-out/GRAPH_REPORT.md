@@ -6,17 +6,17 @@
 
 | Metric | Value |
 |--------|-------|
-| Nodes | 5588 |
-| Edges | 7086 |
-| Communities | 290 |
+| Nodes | 5591 |
+| Edges | 7091 |
+| Communities | 297 |
 | Hyperedges | 0 |
 
 ### Confidence Breakdown
 
 | Level | Count | Percentage |
 |-------|-------|------------|
-| EXTRACTED | 5359 | 75.6% |
-| INFERRED | 1727 | 24.4% |
+| EXTRACTED | 5362 | 75.6% |
+| INFERRED | 1729 | 24.4% |
 | AMBIGUOUS | 0 | 0.0% |
 
 ## 🌟 God Nodes (Most Connected)
@@ -26,11 +26,11 @@
 | file_management | 162 | 0 |
 | AssistantPanel | 115 | 2 |
 | MasksPanel | 100 | 1 |
-| exif_processing | 98 | 16 |
+| exif_processing | 98 | 25 |
 | SettingsPanel | 91 | 3 |
-| image_processing | 90 | 10 |
 | App | 90 | 4 |
-| export_processing | 88 | 6 |
+| image_processing | 90 | 9 |
+| export_processing | 88 | 16 |
 | CropPanel | 85 | 5 |
 | AIPanel | 80 | 7 |
 
@@ -38,16 +38,15 @@
 
 - **src_components_panel_library_tethermenu_tsx_handleconfig** → **src_components_panel_library_tethermenu_tsx_run** (calls)
 - **src_components_panel_right_assistantpanel_tsx_applypointcolors** → **src_components_panel_right_assistantpanel_tsx_sampleviewcolor** (calls)
-- **src_utils_croputils_ts_calculateareapreservingcrop** → **src_utils_croputils_ts_getorienteddimensions** (calls)
-- **src_utils_croputils_ts_calculateautocropforrotation** → **src_utils_croputils_ts_iscropwithinbounds** (calls)
-- **src_tauri_src_ai_processing_rs_download_and_verify_model** → **src_tauri_src_ai_processing_rs_download_model** (calls)
+- **src_hooks_usesdimportactions_ts_usesdimportactions** → **src_hooks_usesdimportactions_ts_visiblenow** (calls)
+- **src_hooks_usesdimportactions_ts_usesdimportactions** → **src_hooks_usesdimportactions_ts_rawexts** (calls)
+- **src_tauri_src_android_integration_rs_put_android_content_value_string** → **src_tauri_src_android_integration_rs_map_android_jni_error** (calls)
 
 ## 🏘️ Communities
 
-### Community 0 — view_pixels_match_a_library_rotate_then_crop() (132 nodes, cohesion: 0.02)
+### Community 0 — view_pixels_match_a_library_rotate_then_crop() (126 nodes, cohesion: 0.02)
 
 - file_management
-- apply_auto_lens_correction()
 - assistant_prepare_image()
 - assistant_prepare_label()
 - assistant_prepare_region()
@@ -66,7 +65,8 @@
 - ExportPresetFile
 - extension_is_preserved_and_stem_not_mangled()
 - extract_xmp_label()
-- _…and 112 more_
+- extract_xmp_rating()
+- _…and 106 more_
 
 ### Community 1 — setCombinedRef() (101 nodes, cohesion: 0.02)
 
@@ -188,29 +188,29 @@
 - framer-motion/AnimatePresence
 - _…and 66 more_
 
-### Community 6 — WatermarkSettings (81 nodes, cohesion: 0.03)
+### Community 6 — weighted_median_labels() (83 nodes, cohesion: 0.06)
 
-- export_processing
-- apply_export_geometry()
-- apply_export_geometry_and_watermark()
-- apply_watermark()
-- BorderBasis
-- bordered_size()
-- BorderOptions
-- build_single_mask_adjustments()
-- calculate_border_thickness()
-- calculate_pad_target()
-- calculate_resize_target()
-- cancel_export()
-- component_matches()
-- compose_image_on_canvas()
-- compute_export_geometry()
-- compute_export_output_size()
-- compute_fused_geometry()
-- encode_grayscale_to_png()
-- ensure_export_not_cancelled()
-- exceeds_max_dimension()
-- _…and 61 more_
+- focus_stacking
+- AlignConfig
+- .default()
+- AlignPyramids
+- box_filter()
+- build_align_pyramids()
+- check_dims()
+- collapse_pyramid()
+- convolve_separable()
+- decide_labels()
+- DecisionMaps
+- decode_frame()
+- depth_preview_plane()
+- .drop()
+- .len()
+- downsample()
+- erode_mask()
+- fit_dims()
+- focus_domain()
+- focus_scores()
+- _…and 63 more_
 
 ### Community 7 — setCombinedRef() (7) (81 nodes, cohesion: 0.03)
 
@@ -260,31 +260,7 @@
 - lucide-react/Copy
 - _…and 57 more_
 
-### Community 9 — truncate() (74 nodes, cohesion: 0.05)
-
-- assistant
-- anthropic_content()
-- apply_edits_tool()
-- assistant_chat()
-- assistant_cull()
-- assistant_dev_cancel()
-- assistant_dev_chat()
-- assistant_list_models()
-- assistant_test_connection()
-- AssistantResponse
-- build_cli_prompt()
-- build_url()
-- call_anthropic()
-- call_claude_code()
-- call_openai_compatible()
-- ChatMessage
-- claude_cli_oauth_token()
-- corr()
-- corrections_and_habits_reach_the_prompt()
-- credentials_json_token_extraction()
-- _…and 54 more_
-
-### Community 10 — yc_to_rgb() (72 nodes, cohesion: 0.04)
+### Community 9 — yc_to_rgb() (72 nodes, cohesion: 0.04)
 
 - image_processing
 - AdjustmentScales
@@ -308,7 +284,7 @@
 - GeometryParams
 - _…and 52 more_
 
-### Community 11 — linearToSrgb8() (72 nodes, cohesion: 0.03)
+### Community 10 — linearToSrgb8() (72 nodes, cohesion: 0.03)
 
 - ImageCanvas
 - commitDrag()
@@ -332,7 +308,7 @@
 - react-image-crop/ReactCrop
 - _…and 52 more_
 
-### Community 12 — WgpuTransformPayload (70 nodes, cohesion: 0.03)
+### Community 11 — WgpuTransformPayload (71 nodes, cohesion: 0.03)
 
 - lib
 - apply_adjustments()
@@ -354,33 +330,33 @@
 - get_image_dimensions()
 - get_log_file_path()
 - get_original_image()
-- _…and 50 more_
+- _…and 51 more_
 
-### Community 13 — setActiveItem() (67 nodes, cohesion: 0.03)
+### Community 12 — truncate() (68 nodes, cohesion: 0.05)
 
-- PresetsPanel
-- DroppableFolderItem()
-- FolderItemDisplay()
-- ../../../context/ContextMenuContext/useContextMenu
-- @dnd-kit/core/DndContext
-- @dnd-kit/core/DragOverlay
-- @dnd-kit/core/PointerSensor
-- @dnd-kit/core/useDraggable
-- @dnd-kit/core/useDroppable
-- @dnd-kit/core/useSensor
-- @dnd-kit/core/useSensors
-- framer-motion/AnimatePresence
-- framer-motion/motion
-- ../../../hooks/useEditorActions/useEditorActions
-- ../../../hooks/usePresets/PresetImportFailure
-- ../../../hooks/usePresets/PresetListType
-- ../../../hooks/usePresets/usePresets
-- ../../../hooks/usePresets/UserPreset
-- lucide-react/CopyPlus
-- lucide-react/Edit
-- _…and 47 more_
+- assistant
+- anthropic_content()
+- apply_edits_tool()
+- assistant_chat()
+- assistant_cull()
+- assistant_dev_cancel()
+- assistant_dev_chat()
+- assistant_list_models()
+- assistant_test_connection()
+- AssistantResponse
+- call_claude_code()
+- ChatMessage
+- claude_cli_oauth_token()
+- corr()
+- corrections_and_habits_reach_the_prompt()
+- credentials_json_token_extraction()
+- cull_learning_section()
+- cull_shape()
+- CullCorrection
+- CullDecision
+- _…and 48 more_
 
-### Community 14 — try_fast_embedded_preview() (67 nodes, cohesion: 0.05)
+### Community 13 — try_fast_embedded_preview() (67 nodes, cohesion: 0.05)
 
 - culling
 - analyze_image()
@@ -402,6 +378,30 @@
 - decode_jpeg_scaled()
 - entry()
 - face_exposure()
+- _…and 47 more_
+
+### Community 14 — setActiveItem() (67 nodes, cohesion: 0.03)
+
+- PresetsPanel
+- DroppableFolderItem()
+- FolderItemDisplay()
+- ../../../context/ContextMenuContext/useContextMenu
+- @dnd-kit/core/DndContext
+- @dnd-kit/core/DragOverlay
+- @dnd-kit/core/PointerSensor
+- @dnd-kit/core/useDraggable
+- @dnd-kit/core/useDroppable
+- @dnd-kit/core/useSensor
+- @dnd-kit/core/useSensors
+- framer-motion/AnimatePresence
+- framer-motion/motion
+- ../../../hooks/useEditorActions/useEditorActions
+- ../../../hooks/usePresets/PresetImportFailure
+- ../../../hooks/usePresets/PresetListType
+- ../../../hooks/usePresets/usePresets
+- ../../../hooks/usePresets/UserPreset
+- lucide-react/CopyPlus
+- lucide-react/Edit
 - _…and 47 more_
 
 ### Community 15 — toggleSection() (15) (66 nodes, cohesion: 0.03)
@@ -428,29 +428,29 @@
 - lucide-react/Briefcase
 - _…and 46 more_
 
-### Community 16 — try_get_exif_creation_date() (62 nodes, cohesion: 0.05)
+### Community 16 — WatermarkSettings (63 nodes, cohesion: 0.04)
 
-- exif_processing
-- CachedExifEntry
-- clean_creation_datetime_str()
-- creation_datetime_to_utc()
-- declared_segment_length_matches_the_bytes_written()
-- decode_user_comment()
-- embeddable_formats_are_reported_correctly()
-- ExifCacheState
-- .get_cache_file_path()
-- flush_all_dirty_caches()
-- fmt_date_str()
-- format_min_max()
-- get_creation_date_from_bytes()
-- get_creation_date_from_path()
-- get_exif_cache()
-- get_exif_from_rrcache()
-- get_file_stamp()
-- has_embedded_xmp()
-- has_embedded_xmp_is_false_for_a_plain_encode()
-- heal_cached_user_comment()
-- _…and 42 more_
+- export_processing
+- apply_export_geometry()
+- apply_export_geometry_and_watermark()
+- apply_watermark()
+- BorderBasis
+- bordered_size()
+- BorderOptions
+- calculate_border_thickness()
+- calculate_pad_target()
+- calculate_resize_target()
+- cancel_export()
+- component_matches()
+- compute_export_geometry()
+- compute_export_output_size()
+- compute_fused_geometry()
+- exceeds_max_dimension()
+- ExportAdjustmentsMode
+- ExportCancellationRequest
+- ExportGeometry
+- .has_border()
+- _…and 43 more_
 
 ### Community 17 — updateSetting() (61 nodes, cohesion: 0.03)
 
@@ -572,55 +572,7 @@
 - react/React
 - _…and 33 more_
 
-### Community 22 — write_scan_sidecar() (52 nodes, cohesion: 0.08)
-
-- scanning
-- auto_tone_for()
-- average_scans()
-- average_scans_midpoints_two_passes()
-- base_sample_reads_density_and_follows_orientation()
-- detect_frame_crop()
-- detect_frame_rect()
-- fill_masked()
-- FilmMeta
-- .field()
-- frame_crop_trims_holder_bars_and_lamp_area()
-- crate::tethering::unique_path
-- serde::Serialize
-- std::io::Read
-- std::path::{Path, PathBuf}
-- std::process::{Child, Command, Stdio}
-- std::sync::{Arc, Mutex}
-- std::sync::atomic::{AtomicBool, AtomicU64, Ordering}
-- super::{average_scans, detect_frame_crop, fill_masked, ir_defect_mask}
-- tauri::{AppHandle, Emitter}
-- _…and 32 more_
-
-### Community 23 — CullingPreview() (51 nodes, cohesion: 0.04)
-
-- CullingView
-- clsx()
-- CullingPreview()
-- clsx/clsx
-- ../editor/ExifIcons/IconAperture
-- ../editor/ExifIcons/IconFocalLength
-- ../editor/ExifIcons/IconIso
-- ../editor/ExifIcons/IconShutter
-- framer-motion/AnimatePresence
-- framer-motion/motion
-- ../../../hooks/useLibraryActions/useLibraryActions
-- ./LibraryItems/Thumbnail
-- lucide-react/Check
-- lucide-react/Info
-- lucide-react/Link
-- lucide-react/Loader2
-- lucide-react/Maximize
-- lucide-react/Plus
-- lucide-react/SlidersHorizontal
-- lucide-react/SquarePen
-- _…and 31 more_
-
-### Community 24 — startEditing() (51 nodes, cohesion: 0.04)
+### Community 22 — startEditing() (51 nodes, cohesion: 0.04)
 
 - MetadataPanel
 - catch()
@@ -644,7 +596,7 @@
 - lucide-react/ChevronRight
 - _…and 31 more_
 
-### Community 25 — transpose() (50 nodes, cohesion: 0.05)
+### Community 23 — transpose() (51 nodes, cohesion: 0.05)
 
 - ai_processing
 - accumulator_to_rgb32f()
@@ -659,13 +611,61 @@
 - box_filter_opt()
 - CachedDepthMap
 - ClipModels
-- download_model()
 - edt_1d()
 - edt_2d()
 - extract_tile_mirror()
+- face_area()
+- face_iou()
 - FaceBox
 - fast_guided_filter()
-- generate_image_embeddings()
+- _…and 31 more_
+
+### Community 24 — CullingPreview() (51 nodes, cohesion: 0.04)
+
+- CullingView
+- clsx()
+- CullingPreview()
+- clsx/clsx
+- ../editor/ExifIcons/IconAperture
+- ../editor/ExifIcons/IconFocalLength
+- ../editor/ExifIcons/IconIso
+- ../editor/ExifIcons/IconShutter
+- framer-motion/AnimatePresence
+- framer-motion/motion
+- ../../../hooks/useLibraryActions/useLibraryActions
+- ./LibraryItems/Thumbnail
+- lucide-react/Check
+- lucide-react/Info
+- lucide-react/Link
+- lucide-react/Loader2
+- lucide-react/Maximize
+- lucide-react/Plus
+- lucide-react/SlidersHorizontal
+- lucide-react/SquarePen
+- _…and 31 more_
+
+### Community 25 — try_get_exif_creation_date() (50 nodes, cohesion: 0.05)
+
+- exif_processing
+- CachedExifEntry
+- creation_datetime_to_utc()
+- declared_segment_length_matches_the_bytes_written()
+- decode_user_comment()
+- embeddable_formats_are_reported_correctly()
+- ExifCacheState
+- .get_cache_file_path()
+- flush_all_dirty_caches()
+- format_min_max()
+- get_creation_date_from_path()
+- get_exif_cache()
+- has_embedded_xmp()
+- has_embedded_xmp_is_false_for_a_plain_encode()
+- heal_cached_user_comment()
+- chrono::{DateTime, Local, LocalResult, NaiveDateTime, TimeZone, Utc}
+- crate::formats::is_raw_file
+- crate::image_processing::ImageMetadata
+- exif::{Exif, In, Value}
+- little_exif::exif_tag::ExifTag
 - _…and 30 more_
 
 ### Community 26 — TransformParams (49 nodes, cohesion: 0.05)
@@ -742,31 +742,7 @@
 - ../../types/typography/TextWeights
 - _…and 26 more_
 
-### Community 29 — updateParametricValue() (45 nodes, cohesion: 0.05)
-
-- Curves
-- buildParametricPoints()
-- convertParametricToPoints()
-- getCurvePath()
-- getHistogramPath()
-- getParametricMarkers()
-- getSplitterGradient()
-- getZeroHistogramPath()
-- handleContainerStart()
-- handleContextMenu()
-- handleDoubleClick()
-- handlePointContextMenu()
-- handlePointStart()
-- handleToggleMode()
-- hasFineAdjustmentModifier()
-- ../../context/ContextMenuContext/useContextMenu
-- framer-motion/AnimatePresence
-- framer-motion/motion
-- lucide-react/ClipboardPaste
-- lucide-react/Copy
-- _…and 25 more_
-
-### Community 30 — parseRgb() (45 nodes, cohesion: 0.04)
+### Community 29 — parseRgb() (45 nodes, cohesion: 0.04)
 
 - Editor
 - checkCropValid()
@@ -790,31 +766,31 @@
 - react/useRef
 - _…and 25 more_
 
-### Community 31 — weighted_median_labels() (45 nodes, cohesion: 0.10)
+### Community 30 — updateParametricValue() (45 nodes, cohesion: 0.05)
 
-- box_filter()
-- build_align_pyramids()
-- collapse_pyramid()
-- convolve_separable()
-- decide_labels()
-- decode_frame()
-- depth_preview_plane()
-- .len()
-- downsample()
-- fit_dims()
-- focus_domain()
-- focus_scores()
-- gaussian_blur()
-- gaussian_kernel()
-- gaussian_pyramid()
-- guided_filter()
-- laplacian_pyramid()
-- .fold_radial_into_poly()
-- .rescaled()
-- level_count()
+- Curves
+- buildParametricPoints()
+- convertParametricToPoints()
+- getCurvePath()
+- getHistogramPath()
+- getParametricMarkers()
+- getSplitterGradient()
+- getZeroHistogramPath()
+- handleContainerStart()
+- handleContextMenu()
+- handleDoubleClick()
+- handlePointContextMenu()
+- handlePointStart()
+- handleToggleMode()
+- hasFineAdjustmentModifier()
+- ../../context/ContextMenuContext/useContextMenu
+- framer-motion/AnimatePresence
+- framer-motion/motion
+- lucide-react/ClipboardPaste
+- lucide-react/Copy
 - _…and 25 more_
 
-### Community 32 — ThumbnailComponent() (44 nodes, cohesion: 0.05)
+### Community 31 — ThumbnailComponent() (44 nodes, cohesion: 0.05)
 
 - LibraryItems
 - clsx()
@@ -838,7 +814,7 @@
 - lucide-react/Star
 - _…and 24 more_
 
-### Community 33 — handleWheel() (33) (43 nodes, cohesion: 0.05)
+### Community 32 — handleWheel() (32) (43 nodes, cohesion: 0.05)
 
 - CollageModal
 - clsx()
@@ -862,31 +838,31 @@
 - lucide-react/Proportions
 - _…and 23 more_
 
-### Community 34 — sync_xmp_for_rrdata() (39 nodes, cohesion: 0.07)
+### Community 33 — write_scan_sidecar() (40 nodes, cohesion: 0.07)
 
-- tagging
-- add_tag_for_paths()
-- clear_ai_tags()
-- clear_all_tags()
-- clip_aesthetic()
-- clip_prompt_probs()
-- extract_color_tags()
-- FaceCues
-- generate_tags_with_clip()
-- anyhow::Result
-- crate::{AppState, candidates::TAG_CANDIDATES}
-- crate::file_management::{self, parse_virtual_path}
-- crate::formats::is_supported_image_file
-- crate::hierarchy::TAG_HIERARCHY
-- crate::image_processing::ImageMetadata
-- futures::stream::{self, StreamExt}
-- image::{DynamicImage, imageops::FilterType}
-- ndarray::{Array, Axis}
-- ort::session::Session
-- ort::value::Tensor
-- _…and 19 more_
+- scanning
+- average_scans()
+- average_scans_midpoints_two_passes()
+- base_sample_reads_density_and_follows_orientation()
+- fill_masked()
+- FilmMeta
+- .field()
+- crate::tethering::unique_path
+- serde::Serialize
+- std::io::Read
+- std::path::{Path, PathBuf}
+- std::process::{Child, Command, Stdio}
+- std::sync::{Arc, Mutex}
+- std::sync::atomic::{AtomicBool, AtomicU64, Ordering}
+- super::{average_scans, detect_frame_crop, fill_masked, ir_defect_mask}
+- tauri::{AppHandle, Emitter}
+- ir_mask_and_fill_remove_synthetic_speck()
+- is_film_source()
+- open_image()
+- parse_caps()
+- _…and 20 more_
 
-### Community 35 — UsbCameraState (39 nodes, cohesion: 0.07)
+### Community 34 — UsbCameraState (39 nodes, cohesion: 0.07)
 
 - usb
 - aperture_from_lens_names()
@@ -908,6 +884,30 @@
 - super::{max_aperture_from_name, parse_f_number}
 - super::unique_path
 - tauri::Emitter
+- _…and 19 more_
+
+### Community 35 — sync_xmp_for_rrdata() (39 nodes, cohesion: 0.07)
+
+- tagging
+- add_tag_for_paths()
+- clear_ai_tags()
+- clear_all_tags()
+- clip_aesthetic()
+- clip_prompt_probs()
+- extract_color_tags()
+- FaceCues
+- generate_tags_with_clip()
+- anyhow::Result
+- crate::{AppState, candidates::TAG_CANDIDATES}
+- crate::file_management::{self, parse_virtual_path}
+- crate::formats::is_supported_image_file
+- crate::hierarchy::TAG_HIERARCHY
+- crate::image_processing::ImageMetadata
+- futures::stream::{self, StreamExt}
+- image::{DynamicImage, imageops::FilterType}
+- ndarray::{Array, Axis}
+- ort::session::Session
+- ort::value::Tensor
 - _…and 19 more_
 
 ### Community 36 — unique_lut_destination() (38 nodes, cohesion: 0.08)
@@ -939,31 +939,7 @@
 - mozjpeg_rs::{Encoder, Preset}
 - _…and 18 more_
 
-### Community 37 — TetherChip() (37 nodes, cohesion: 0.05)
-
-- BottomBar
-- clsx()
-- clsx/clsx
-- ./Filmstrip/Filmstrip
-- framer-motion/AnimatePresence
-- framer-motion/motion
-- ../../hooks/useLibraryActions/useLibraryActions
-- lucide-react/Check
-- lucide-react/ClipboardPaste
-- lucide-react/Copy
-- lucide-react/Filter
-- lucide-react/PanelBottom
-- lucide-react/PanelLeft
-- lucide-react/PanelRight
-- lucide-react/Settings
-- lucide-react/Star
-- react-i18next/useTranslation
-- react/useEffect
-- react/useRef
-- react/useState
-- _…and 17 more_
-
-### Community 38 — handleWheel() (37 nodes, cohesion: 0.05)
+### Community 37 — handleWheel() (37 nodes, cohesion: 0.05)
 
 - DenoiseModal
 - defaultIntensityFor()
@@ -987,31 +963,31 @@
 - lucide-react/ZoomOut
 - _…and 17 more_
 
-### Community 39 — walsh_hadamard_1d() (37 nodes, cohesion: 0.07)
+### Community 38 — TetherChip() (37 nodes, cohesion: 0.05)
 
-- denoising
-- block_matching_joint()
-- Bm3dParams
-- .from_intensity()
-- build_3d_group()
-- compute_ssd_flat()
-- dct_1d_8()
-- dct_2d_8x8()
-- DctTables
-- .new()
-- extract_patch()
-- idct_1d_8()
-- idct_2d_8x8()
-- base64::{Engine as _, engine::general_purpose}
-- crate::app_settings::load_settings
-- crate::app_state::AppState
-- crate::file_management::parse_virtual_path
-- crate::formats::is_raw_file
-- crate::image_loader::load_base_image_from_bytes
-- crate::image_processing::apply_cpu_default_raw_processing
+- BottomBar
+- clsx()
+- clsx/clsx
+- ./Filmstrip/Filmstrip
+- framer-motion/AnimatePresence
+- framer-motion/motion
+- ../../hooks/useLibraryActions/useLibraryActions
+- lucide-react/Check
+- lucide-react/ClipboardPaste
+- lucide-react/Copy
+- lucide-react/Filter
+- lucide-react/PanelBottom
+- lucide-react/PanelLeft
+- lucide-react/PanelRight
+- lucide-react/Settings
+- lucide-react/Star
+- react-i18next/useTranslation
+- react/useEffect
+- react/useRef
+- react/useState
 - _…and 17 more_
 
-### Community 40 — update_negative_conversion() (36 nodes, cohesion: 0.09)
+### Community 39 — update_negative_conversion() (36 nodes, cohesion: 0.09)
 
 - negative_conversion
 - analyze_bounds()
@@ -1035,55 +1011,31 @@
 - std::path::Path
 - _…and 16 more_
 
-### Community 41 — WindowState (35 nodes, cohesion: 0.06)
+### Community 40 — walsh_hadamard_1d() (35 nodes, cohesion: 0.08)
 
-- app_state
-- AiTaskGuard
-- AnalyticsConfig
-- AnalyticsJob
-- AppState
-- CachedPreview
-- GpuImageCache
-- GpuProcessorState
-- crate::ai_processing::AiState
-- crate::cache_utils::DecodedImageCache
-- crate::gpu_processing::GpuProcessor
-- crate::image_processing::GpuContext
-- crate::launch_request::ExternalEditSession
-- crate::lens_correction::LensDatabase
-- crate::lut_processing::Lut
-- crate::white_balance::WhiteBalance
-- image::{DynamicImage, GrayImage}
-- serde::{Deserialize, Serialize}
-- std::collections::{HashMap, HashSet, VecDeque}
-- std::path::PathBuf
+- denoising
+- block_matching_joint()
+- build_3d_group()
+- compute_ssd_flat()
+- dct_1d_8()
+- dct_2d_8x8()
+- DctTables
+- .new()
+- extract_patch()
+- idct_1d_8()
+- idct_2d_8x8()
+- base64::{Engine as _, engine::general_purpose}
+- crate::app_settings::load_settings
+- crate::app_state::AppState
+- crate::file_management::parse_virtual_path
+- crate::formats::is_raw_file
+- crate::image_loader::load_base_image_from_bytes
+- crate::image_processing::apply_cpu_default_raw_processing
+- image::{DynamicImage, GenericImageView, ImageFormat, Rgb, Rgb32FImage}
+- rayon::prelude::*
 - _…and 15 more_
 
-### Community 42 — x_bounds_at() (35 nodes, cohesion: 0.12)
-
-- guided_perspective
-- calculate_guided_perspective()
-- clip_poly_edge()
-- compute_guided_homography()
-- compute_max_inscribed_crop()
-- count_valid_lines()
-- cross()
-- det3()
-- filter_valid_lines()
-- finalize_h()
-- flatten_row_major()
-- GuidedResult
-- GuidedResultJson
-- GuideLine
-- GuideOrientation
-- GuidePoint
-- hom_mul()
-- serde::{Deserialize, Serialize}
-- is_line_valid()
-- line_centered()
-- _…and 15 more_
-
-### Community 43 — setConfigCurrent() (35 nodes, cohesion: 0.06)
+### Community 41 — setConfigCurrent() (35 nodes, cohesion: 0.06)
 
 - TetherMenu
 - ConfigSlider()
@@ -1107,7 +1059,7 @@
 - ../../../store/useLibraryStore/useLibraryStore
 - _…and 15 more_
 
-### Community 44 — ScannerPane() (35 nodes, cohesion: 0.06)
+### Community 42 — ScannerPane() (35 nodes, cohesion: 0.06)
 
 - ScannerPane
 - detectScanner()
@@ -1130,6 +1082,54 @@
 - ../../../store/useLibraryStore/useLibraryStore
 - ../../../store/useScannerStore/FilmType
 - _…and 15 more_
+
+### Community 43 — shuffleArray() (34 nodes, cohesion: 0.06)
+
+- CommunityPage
+- handleDownloadPreset()
+- framer-motion/AnimatePresence
+- framer-motion/motion
+- lucide-react/ArrowLeft
+- lucide-react/CheckCircle2
+- lucide-react/ChevronDown
+- lucide-react/Crop
+- lucide-react/Layers
+- lucide-react/Loader2
+- lucide-react/Search
+- lucide-react/Users
+- react-i18next/useTranslation
+- react/React
+- react/useCallback
+- react/useEffect
+- react/useMemo
+- react/useRef
+- react/useState
+- simple-icons/siGithub
+- _…and 14 more_
+
+### Community 44 — handleButtonKeyDown() (34 nodes, cohesion: 0.06)
+
+- EditorToolbar
+- handleButtonKeyDown()
+- clsx/clsx
+- ./ExifIcons/IconAperture
+- ./ExifIcons/IconCalendar
+- ./ExifIcons/IconClock
+- ./ExifIcons/IconFocalLength
+- ./ExifIcons/IconIso
+- ./ExifIcons/IconShutter
+- framer-motion/AnimatePresence
+- framer-motion/motion
+- lucide-react/ArrowLeft
+- lucide-react/Eye
+- lucide-react/EyeOff
+- lucide-react/Loader2
+- lucide-react/Maximize
+- lucide-react/Redo
+- lucide-react/Undo
+- react-i18next/useTranslation
+- react/memo
+- _…and 14 more_
 
 ### Community 45 — updateSnapshots() (34 nodes, cohesion: 0.08)
 
@@ -1155,79 +1155,31 @@
 - ../../../store/useEditorStore/useEditorStore
 - _…and 14 more_
 
-### Community 46 — writeCullingMetadata() (34 nodes, cohesion: 0.08)
+### Community 46 — WindowState (33 nodes, cohesion: 0.06)
 
-- useSdImportActions
-- computeDefaultKeepers()
-- filterState()
-- gapSeconds()
-- groupArgs()
-- groupSettings()
-- ../components/ui/AppProperties/CullingSuggestions
-- ../components/ui/AppProperties/Invokes
-- ../components/ui/AppProperties/SortDirection
-- ../components/views/import/importFilters/computeVisible
-- ../components/views/import/importFilters/computeVisibleSet
-- ../components/views/import/importFilters/FileTypeFilter
-- ../components/views/import/importFilters/ImportFilterState
-- react-toastify/toast
-- react/useCallback
-- ../store/useImportStore/DriveInfo
-- ../store/useImportStore/ImportSortKey
-- ../store/useImportStore/restoreSelection
-- ../store/useImportStore/useImportStore
-- ../store/useSettingsStore/useSettingsStore
-- _…and 14 more_
+- app_state
+- AiTaskGuard
+- AnalyticsConfig
+- AnalyticsJob
+- AppState
+- CachedPreview
+- GpuImageCache
+- GpuProcessorState
+- crate::ai_processing::AiState
+- crate::cache_utils::DecodedImageCache
+- crate::gpu_processing::GpuProcessor
+- crate::image_processing::GpuContext
+- crate::launch_request::ExternalEditSession
+- crate::lens_correction::LensDatabase
+- crate::lut_processing::Lut
+- crate::white_balance::WhiteBalance
+- image::{DynamicImage, GrayImage}
+- serde::{Deserialize, Serialize}
+- std::collections::{HashMap, HashSet, VecDeque}
+- std::path::PathBuf
+- _…and 13 more_
 
-### Community 47 — shuffleArray() (34 nodes, cohesion: 0.06)
-
-- CommunityPage
-- handleDownloadPreset()
-- framer-motion/AnimatePresence
-- framer-motion/motion
-- lucide-react/ArrowLeft
-- lucide-react/CheckCircle2
-- lucide-react/ChevronDown
-- lucide-react/Crop
-- lucide-react/Layers
-- lucide-react/Loader2
-- lucide-react/Search
-- lucide-react/Users
-- react-i18next/useTranslation
-- react/React
-- react/useCallback
-- react/useEffect
-- react/useMemo
-- react/useRef
-- react/useState
-- simple-icons/siGithub
-- _…and 14 more_
-
-### Community 48 — handleButtonKeyDown() (34 nodes, cohesion: 0.06)
-
-- EditorToolbar
-- handleButtonKeyDown()
-- clsx/clsx
-- ./ExifIcons/IconAperture
-- ./ExifIcons/IconCalendar
-- ./ExifIcons/IconClock
-- ./ExifIcons/IconFocalLength
-- ./ExifIcons/IconIso
-- ./ExifIcons/IconShutter
-- framer-motion/AnimatePresence
-- framer-motion/motion
-- lucide-react/ArrowLeft
-- lucide-react/Eye
-- lucide-react/EyeOff
-- lucide-react/Loader2
-- lucide-react/Maximize
-- lucide-react/Redo
-- lucide-react/Undo
-- react-i18next/useTranslation
-- react/memo
-- _…and 14 more_
-
-### Community 49 — StraightSource (33 nodes, cohesion: 0.08)
+### Community 47 — StraightSource (33 nodes, cohesion: 0.08)
 
 - panorama_stitching
 - crop_to_content()
@@ -1251,7 +1203,31 @@
 - std::time::Instant
 - _…and 13 more_
 
-### Community 50 — VisibilityToggle() (32 nodes, cohesion: 0.06)
+### Community 48 — WaveformData (33 nodes, cohesion: 0.12)
+
+- analysis
+- apply_gaussian_smoothing()
+- auto_white_balance_shift()
+- calculate_auto_adjustments()
+- calculate_histogram_from_image()
+- calculate_waveform_from_image()
+- detect_face_median_luma()
+- estimate_white_balance()
+- flat_gradient()
+- get_auto_learning()
+- HistogramData
+- crate::app_settings::AutoAdjustOptions
+- crate::app_settings::AutoProfile
+- super::*
+- kept_warmth_is_not_undone_by_auto_white_balance()
+- learn_auto_profile_from_folder()
+- learn_style()
+- learned_style_changes_what_auto_asks_for()
+- linear_pixels()
+- luma_median()
+- _…and 13 more_
+
+### Community 49 — VisibilityToggle() (32 nodes, cohesion: 0.06)
 
 - AdjustmentSectionsSubMenu
 - DragHandle()
@@ -1275,29 +1251,53 @@
 - ../../ui/AppProperties/AdjustmentLayout
 - _…and 12 more_
 
-### Community 51 — Vignetting (32 nodes, cohesion: 0.08)
+### Community 50 — useAppInitialization() (32 nodes, cohesion: 0.06)
 
-- lens_correction
-- any_name_matches()
-- Aperture
-- autodetect_lens()
-- Calibration
-- CalibrationElement
-- Camera
-- .get_maker()
-- .get_model()
-- Distortion
-- find_best_lens_match()
-- find_lens_by_camera_mount()
-- Focal
-- get_lensfun_lenses_for_maker()
-- crate::AppState
-- fuzzy_matcher::FuzzyMatcher
-- include_dir::{Dir, include_dir}
-- serde::{Deserialize, Serialize}
-- std::cmp::Ordering
-- std::fs
+- useAppInitialization
+- getDefaultLanguage()
+- ../components/ui/AppProperties/EditedStatus
+- ../components/ui/AppProperties/FilterCriteria
+- ../components/ui/AppProperties/FlagStatus
+- ../components/ui/AppProperties/Invokes
+- ../components/ui/AppProperties/LibraryViewMode
+- ../components/ui/AppProperties/NegativeStatus
+- ../components/ui/AppProperties/Panel
+- ../components/ui/AppProperties/PanelRegion
+- ../components/ui/AppProperties/RawStatus
+- ../components/ui/AppProperties/Theme
+- ../components/ui/AppProperties/ThumbnailAspectRatio
+- ../components/ui/AppProperties/ThumbnailSize
+- react-i18next/useTranslation
+- react-toastify/toast
+- react/useEffect
+- react/useRef
+- ../store/useEditorStore/useEditorStore
+- ../store/useLibraryStore/useLibraryStore
 - _…and 12 more_
+
+### Community 51 — ../../utils/adjustments/COLOR_LABELS (31 nodes, cohesion: 0.06)
+
+- Filmstrip
+- clsx/clsx
+- @dnd-kit/core/useDraggable
+- lucide-react/Image
+- lucide-react/SlidersHorizontal
+- lucide-react/Star
+- react-i18next/useTranslation
+- react/memo
+- react/React
+- react/useCallback
+- react/useEffect
+- react/useMemo
+- react/useRef
+- react/useState
+- react-window/Grid
+- react-window/useGridCallbackRef
+- ../../store/useLibraryStore/useLibraryStore
+- ../../store/useProcessStore/useProcessStore
+- ../../store/useSettingsStore/useSettingsStore
+- ../../types/typography/TextColors
+- _…and 11 more_
 
 ### Community 52 — upload_source() (31 nodes, cohesion: 0.06)
 
@@ -1323,7 +1323,7 @@
 - fastapi.UploadFile
 - _…and 11 more_
 
-### Community 53 — handleReset() (31 nodes, cohesion: 0.06)
+### Community 53 — handleReset() (53) (31 nodes, cohesion: 0.06)
 
 - Effects
 - handleReset()
@@ -1347,7 +1347,7 @@
 - ../../types/typography/TextVariants
 - _…and 11 more_
 
-### Community 54 — onDragMove() (31 nodes, cohesion: 0.06)
+### Community 54 — onDragMove() (54) (31 nodes, cohesion: 0.06)
 
 - PanelSwitcher
 - clsx()
@@ -1371,53 +1371,53 @@
 - lucide-react/SlidersHorizontal
 - _…and 11 more_
 
-### Community 55 — useAppInitialization() (31 nodes, cohesion: 0.07)
+### Community 55 — start_external_edit() (30 nodes, cohesion: 0.11)
 
-- useAppInitialization
-- getDefaultLanguage()
-- ../components/ui/AppProperties/EditedStatus
-- ../components/ui/AppProperties/FilterCriteria
-- ../components/ui/AppProperties/FlagStatus
-- ../components/ui/AppProperties/Invokes
-- ../components/ui/AppProperties/LibraryViewMode
-- ../components/ui/AppProperties/NegativeStatus
-- ../components/ui/AppProperties/Panel
-- ../components/ui/AppProperties/PanelRegion
-- ../components/ui/AppProperties/RawStatus
-- ../components/ui/AppProperties/Theme
-- ../components/ui/AppProperties/ThumbnailAspectRatio
-- ../components/ui/AppProperties/ThumbnailSize
-- react-i18next/useTranslation
-- react/useEffect
-- react/useRef
-- ../store/useEditorStore/useEditorStore
-- ../store/useLibraryStore/useLibraryStore
-- ../store/useProcessStore/useProcessStore
-- _…and 11 more_
+- build_single_mask_adjustments()
+- encode_grayscale_to_png()
+- encode_image_to_bytes()
+- ensure_export_not_cancelled()
+- estimate_export_sizes()
+- export_adjustments_as_lut()
+- export_images()
+- export_images_impl()
+- export_masks_for_image()
+- exported_jpegs_are_tagged_full_chroma_and_baseline()
+- ExportTaskGuard
+- .drop()
+- .new()
+- .with_app_handle()
+- finish_export_task()
+- launch_external_editor()
+- mime_type_for_extension()
+- process_image_for_export()
+- register_export_task()
+- relative_dir_is_safe()
+- _…and 10 more_
 
-### Community 56 — ../../utils/adjustments/COLOR_LABELS (31 nodes, cohesion: 0.06)
+### Community 56 — xyz_tag() (30 nodes, cohesion: 0.12)
 
-- Filmstrip
-- clsx/clsx
-- @dnd-kit/core/useDraggable
-- lucide-react/Image
-- lucide-react/SlidersHorizontal
-- lucide-react/Star
-- react-i18next/useTranslation
-- react/memo
-- react/React
-- react/useCallback
-- react/useEffect
-- react/useMemo
-- react/useRef
-- react/useState
-- react-window/Grid
-- react-window/useGridCallbackRef
-- ../../store/useLibraryStore/useLibraryStore
-- ../../store/useProcessStore/useProcessStore
-- ../../store/useSettingsStore/useSettingsStore
-- ../../types/typography/TextColors
-- _…and 11 more_
+- icc
+- adobe_rgb_patches_convert_to_the_lcms_reference_values()
+- build_srgb_profile()
+- cmyk_lut_maps_paper_white_and_full_ink_through_lab()
+- cmyk_parser_rejects_rgb_profiles_and_vice_versa()
+- CmykTransform
+- .to_srgb()
+- desc_tag()
+- find_tag()
+- std::sync::OnceLock
+- super::*
+- InputTransform
+- invert_3x3()
+- lab16()
+- lab_to_xyz_d50()
+- our_own_srgb_profile_parses_as_a_no_op()
+- parse_cmyk_profile()
+- parse_mft_lut()
+- read_u32()
+- s15_fixed16()
+- _…and 10 more_
 
 ### Community 57 — handleResize() (30 nodes, cohesion: 0.07)
 
@@ -1443,55 +1443,31 @@
 - ../../../types/typography/TextColors
 - _…and 10 more_
 
-### Community 58 — warp_or_copy() (30 nodes, cohesion: 0.07)
+### Community 58 — startEyedropper() (29 nodes, cohesion: 0.07)
 
-- focus_stacking
-- AlignConfig
-- .default()
-- AlignPyramids
-- DecisionMaps
-- erode_mask()
-- FramePose
-- FusionConfig
-- .default()
-- base64::{Engine as _, engine::general_purpose}
-- crate::app_settings::load_settings
-- crate::app_state::AppState
-- crate::file_management::parse_virtual_path
-- crate::formats::is_raw_file
-- crate::image_processing::apply_cpu_default_raw_processing
-- image::{DynamicImage, ImageFormat, Rgb32FImage}
-- nalgebra::{DMatrix, DVector}
-- rayon::prelude::*
-- std::fs
-- std::io::{Cursor, Read, Write}
-- _…and 10 more_
-
-### Community 59 — transform_to_srgb() (29 nodes, cohesion: 0.12)
-
-- icc
-- adobe_rgb_patches_convert_to_the_lcms_reference_values()
-- cmyk_lut_maps_paper_white_and_full_ink_through_lab()
-- cmyk_parser_rejects_rgb_profiles_and_vice_versa()
-- CmykTransform
-- .to_srgb()
-- every_tag_is_aligned_sorted_and_inside_the_profile()
-- find_tag()
-- header_declares_an_rgb_display_profile_sized_to_the_bytes()
-- std::sync::OnceLock
-- super::*
-- InputTransform
-- invert_3x3()
-- lab16()
-- lab_to_xyz_d50()
-- non_rgb_and_lut_profiles_are_skipped()
-- our_own_srgb_profile_parses_as_a_no_op()
-- parse_cmyk_profile()
-- parse_mft_lut()
-- read_u32()
+- FilmPanel
+- applyProfile()
+- deleteProfile()
+- lucide-react/Pipette
+- lucide-react/Plus
+- lucide-react/RotateCcw
+- lucide-react/Trash2
+- lucide-react/X
+- react-i18next/useTranslation
+- react/useCallback
+- react/useEffect
+- react/useRef
+- react/useState
+- ../../store/useEditorStore/useEditorStore
+- ../../store/useSettingsStore/useSettingsStore
+- @tauri-apps/api/core/invoke
+- ../ui/AppProperties/Invokes
+- ../ui/Dropdown/Dropdown
+- ../ui/Slider/Slider
+- ../ui/Switch/Switch
 - _…and 9 more_
 
-### Community 60 — score_for_import() (29 nodes, cohesion: 0.08)
+### Community 59 — score_for_import() (29 nodes, cohesion: 0.08)
 
 - sd_import
 - analyze_for_import()
@@ -1518,31 +1494,7 @@
 - std::sync::Mutex
 - _…and 9 more_
 
-### Community 61 — startEyedropper() (29 nodes, cohesion: 0.07)
-
-- FilmPanel
-- applyProfile()
-- deleteProfile()
-- lucide-react/Pipette
-- lucide-react/Plus
-- lucide-react/RotateCcw
-- lucide-react/Trash2
-- lucide-react/X
-- react-i18next/useTranslation
-- react/useCallback
-- react/useEffect
-- react/useRef
-- react/useState
-- ../../store/useEditorStore/useEditorStore
-- ../../store/useSettingsStore/useSettingsStore
-- @tauri-apps/api/core/invoke
-- ../ui/AppProperties/Invokes
-- ../ui/Dropdown/Dropdown
-- ../ui/Slider/Slider
-- ../ui/Switch/Switch
-- _…and 9 more_
-
-### Community 62 — closeConfirmModal() (29 nodes, cohesion: 0.07)
+### Community 60 — closeConfirmModal() (29 nodes, cohesion: 0.07)
 
 - AppModals
 - closeConfirmModal()
@@ -1566,55 +1518,7 @@
 - ../../store/useSettingsStore/useSettingsStore
 - _…and 9 more_
 
-### Community 63 — ImageThumbnail() (28 nodes, cohesion: 0.07)
-
-- CullingModal
-- ImageThumbnail()
-- framer-motion/AnimatePresence
-- framer-motion/motion
-- lucide-react/CheckCircle
-- lucide-react/Loader2
-- lucide-react/Star
-- lucide-react/Tag
-- lucide-react/Trash2
-- lucide-react/Users
-- lucide-react/XCircle
-- react-i18next/useTranslation
-- react/useCallback
-- react/useEffect
-- react/useMemo
-- react/useState
-- @tauri-apps/api/core/invoke
-- ../../types/typography/TextColors
-- ../../types/typography/TextVariants
-- ../ui/AppProperties/CullingSettings
-- _…and 8 more_
-
-### Community 64 — WorkspaceState (28 nodes, cohesion: 0.07)
-
-- app_settings
-- AdjustmentLayout
-- AutoAdjustOptionsWire
-- CustomAspectRatio
-- ExportPreset
-- FilterCriteria
-- .default()
-- FolderTreeSort
-- .default()
-- get_settings_path()
-- grouped_switches_from_the_first_version_still_apply()
-- crate::app_state::AppState
-- serde::{Deserialize, Serialize}
-- serde_json::Value
-- std::collections::{BTreeMap, HashMap, HashSet}
-- std::fs
-- std::path::PathBuf
-- super::*
-- tauri::{AppHandle, Manager}
-- is_tethering_supported()
-- _…and 8 more_
-
-### Community 65 — NewMaskDropZone() (28 nodes, cohesion: 0.08)
+### Community 61 — NewMaskDropZone() (28 nodes, cohesion: 0.08)
 
 - Masks
 - formatMaskTypeName()
@@ -1638,7 +1542,79 @@
 - lucide-react/SquareMousePointer
 - _…and 8 more_
 
-### Community 66 — write_preset_sidecar() (27 nodes, cohesion: 0.08)
+### Community 62 — Vignetting (28 nodes, cohesion: 0.08)
+
+- lens_correction
+- any_name_matches()
+- Aperture
+- autodetect_lens()
+- Calibration
+- CalibrationElement
+- Camera
+- .get_maker()
+- .get_model()
+- Distortion
+- find_best_lens_match()
+- find_lens_by_camera_mount()
+- Focal
+- crate::AppState
+- fuzzy_matcher::FuzzyMatcher
+- include_dir::{Dir, include_dir}
+- serde::{Deserialize, Serialize}
+- std::cmp::Ordering
+- std::fs
+- tauri::{Manager, State}
+- _…and 8 more_
+
+### Community 63 — WorkspaceState (28 nodes, cohesion: 0.07)
+
+- app_settings
+- AdjustmentLayout
+- AutoAdjustOptionsWire
+- CustomAspectRatio
+- ExportPreset
+- FilterCriteria
+- .default()
+- FolderTreeSort
+- .default()
+- get_settings_path()
+- grouped_switches_from_the_first_version_still_apply()
+- crate::app_state::AppState
+- serde::{Deserialize, Serialize}
+- serde_json::Value
+- std::collections::{BTreeMap, HashMap, HashSet}
+- std::fs
+- std::path::PathBuf
+- super::*
+- tauri::{AppHandle, Manager}
+- is_tethering_supported()
+- _…and 8 more_
+
+### Community 64 — ImageThumbnail() (28 nodes, cohesion: 0.07)
+
+- CullingModal
+- ImageThumbnail()
+- framer-motion/AnimatePresence
+- framer-motion/motion
+- lucide-react/CheckCircle
+- lucide-react/Loader2
+- lucide-react/Star
+- lucide-react/Tag
+- lucide-react/Trash2
+- lucide-react/Users
+- lucide-react/XCircle
+- react-i18next/useTranslation
+- react/useCallback
+- react/useEffect
+- react/useMemo
+- react/useState
+- @tauri-apps/api/core/invoke
+- ../../types/typography/TextColors
+- ../../types/typography/TextVariants
+- ../ui/AppProperties/CullingSettings
+- _…and 8 more_
+
+### Community 65 — write_preset_sidecar() (27 nodes, cohesion: 0.08)
 
 - mod
 - ActiveSession
@@ -1662,7 +1638,31 @@
 - tether_set_config()
 - _…and 7 more_
 
-### Community 67 — clsx() (27 nodes, cohesion: 0.07)
+### Community 66 — visibleNow() (27 nodes, cohesion: 0.08)
+
+- useSdImportActions
+- filterState()
+- ../components/ui/AppProperties/CullingSuggestions
+- ../components/ui/AppProperties/Invokes
+- ../components/ui/AppProperties/SortDirection
+- ../components/views/import/importFilters/computeVisible
+- ../components/views/import/importFilters/computeVisibleSet
+- ../components/views/import/importFilters/FileTypeFilter
+- ../components/views/import/importFilters/ImportFilterState
+- react-toastify/toast
+- react/useCallback
+- ../store/useImportStore/DriveInfo
+- ../store/useImportStore/ImportSortKey
+- ../store/useImportStore/restoreSelection
+- ../store/useImportStore/useImportStore
+- ../store/useSettingsStore/useSettingsStore
+- ../store/useUIStore/useUIStore
+- @tauri-apps/api/core/invoke
+- @tauri-apps/api/event/listen
+- @tauri-apps/plugin-dialog/open
+- _…and 7 more_
+
+### Community 67 — clsx() (67) (27 nodes, cohesion: 0.07)
 
 - widgets
 - clsx()
@@ -1686,31 +1686,7 @@
 - ../../../types/typography/TextColors
 - _…and 7 more_
 
-### Community 68 — save_inputs_for_debug() (26 nodes, cohesion: 0.08)
-
-- engine
-- build_workflow()
-- ImageProcessor
-- .crop_and_pack()
-- ._pack()
-- .process_mask_for_comfyui()
-- aiofiles
-- aiohttp
-- base64
-- collections.OrderedDict
-- io
-- json
-- logging
-- numpy
-- os
-- pathlib.Path
-- PIL.Image
-- pydantic_settings.BaseSettings
-- shutil
-- time
-- _…and 6 more_
-
-### Community 69 — render_depth_of_field() (26 nodes, cohesion: 0.15)
+### Community 68 — render_depth_of_field() (26 nodes, cohesion: 0.15)
 
 - lens_blur
 - apply_lens_blur()
@@ -1734,7 +1710,31 @@
 - dof_tent()
 - _…and 6 more_
 
-### Community 70 — handleSave() (70) (25 nodes, cohesion: 0.08)
+### Community 69 — save_inputs_for_debug() (26 nodes, cohesion: 0.08)
+
+- engine
+- build_workflow()
+- ImageProcessor
+- .crop_and_pack()
+- ._pack()
+- .process_mask_for_comfyui()
+- aiofiles
+- aiohttp
+- base64
+- collections.OrderedDict
+- io
+- json
+- logging
+- numpy
+- os
+- pathlib.Path
+- PIL.Image
+- pydantic_settings.BaseSettings
+- shutil
+- time
+- _…and 6 more_
+
+### Community 70 — handleSave() (25 nodes, cohesion: 0.08)
 
 - PanoramaModal
 - handleBackdropClick()
@@ -1784,28 +1784,28 @@
 - std::path::Path
 - _…and 4 more_
 
-### Community 72 — Cell() (24 nodes, cohesion: 0.08)
+### Community 72 — handleSave() (72) (24 nodes, cohesion: 0.08)
 
-- CullGroupsGrid
-- Cell()
-- ../../../components/ui/AppProperties/CullingSuggestions
-- ../../../components/ui/AppProperties/SortDirection
-- ../../../hooks/useSdImportActions/useSdImportActions
-- ./ImportFilterBar/ImportFilterBar
-- ./importFilters/computeVisible
-- ./ImportViewer/ImportViewer
-- ./LazyThumb/LazyThumb
-- lucide-react/Check
-- lucide-react/Droplet
-- lucide-react/Eye
-- lucide-react/Grid2x2
+- FocusStackModal
+- clsx()
+- handleBackdropClick()
+- handleBackdropMouseDown()
+- handleOpen()
+- handleSave()
+- clsx/clsx
+- framer-motion/AnimatePresence
+- framer-motion/motion
+- lucide-react/CheckCircle
 - lucide-react/Layers
-- lucide-react/Sparkles
-- ./RatingColor/RatingColor
+- lucide-react/Loader2
+- lucide-react/Map
+- lucide-react/Save
+- lucide-react/XCircle
+- react-i18next/useTranslation
 - react/useCallback
 - react/useEffect
-- react/useMemo
 - react/useRef
+- react/useState
 - _…and 4 more_
 
 ### Community 73 — withFlag() (24 nodes, cohesion: 0.10)
@@ -1832,79 +1832,7 @@
 - ../utils/imageGrouping/expandGroupedPaths
 - _…and 4 more_
 
-### Community 74 — Roi (24 nodes, cohesion: 0.09)
-
-- gpu_processing
-- BlurParams
-- DisplayTransform
-- FlareParams
-- GfParams
-- HighPrecisionPipeline
-- HighPrecisionTile
-- crate::{AppState, GpuImageCache}
-- crate::image_processing::{AllAdjustments, GpuContext, MAX_MASKS, MaskAdjustments}
-- crate::lut_processing::Lut
-- half::f16
-- image::{DynamicImage, GenericImageView, ImageBuffer, Luma, Rgba}
-- std::num::NonZero
-- std::sync::Arc
-- std::time::Instant
-- super::processor_side
-- tauri::Manager
-- wgpu::util::{DeviceExt, TextureDataOrder}
-- processor_reused_across_orientation()
-- processor_side()
-- _…and 4 more_
-
-### Community 75 — handleSave() (75) (24 nodes, cohesion: 0.08)
-
-- FocusStackModal
-- clsx()
-- handleBackdropClick()
-- handleBackdropMouseDown()
-- handleOpen()
-- handleSave()
-- clsx/clsx
-- framer-motion/AnimatePresence
-- framer-motion/motion
-- lucide-react/CheckCircle
-- lucide-react/Layers
-- lucide-react/Loader2
-- lucide-react/Map
-- lucide-react/Save
-- lucide-react/XCircle
-- react-i18next/useTranslation
-- react/useCallback
-- react/useEffect
-- react/useRef
-- react/useState
-- _…and 4 more_
-
-### Community 76 — prepare_source_image() (24 nodes, cohesion: 0.13)
-
-- inpainting
-- bilinear_sample()
-- calculate_mask_bounds()
-- draw_stroke_to_mask()
-- encode_patch_result()
-- generate_liquify_patch()
-- generate_manual_cleanup_patch()
-- generate_retouch_patch()
-- base64::{Engine as _, engine::general_purpose}
-- crate::ai_connector
-- crate::ai_processing
-- crate::app_settings::load_settings
-- crate::app_state::AppState
-- crate::image_loader::composite_patches_on_image
-- crate::image_processing::apply_linear_to_srgb
-- crate::mask_generation::{AiPatchDefinition, MaskDefinition, generate_mask_bitmap}
-- crate::resolve_warped_image_for_masks
-- image::{DynamicImage, GenericImageView, Rgb, RgbImage, RgbaImage}
-- rayon::prelude::*
-- serde_json::Value
-- _…and 4 more_
-
-### Community 77 — handleSwatchClick() (24 nodes, cohesion: 0.08)
+### Community 74 — handleSwatchClick() (24 nodes, cohesion: 0.08)
 
 - LUTControl
 - handleContextMenu()
@@ -1928,55 +1856,79 @@
 - ./Slider/Slider
 - _…and 4 more_
 
-### Community 78 — WaveformData (23 nodes, cohesion: 0.13)
+### Community 75 — Cell() (24 nodes, cohesion: 0.08)
 
-- analysis
-- apply_gaussian_smoothing()
-- auto_white_balance_shift()
-- calculate_auto_adjustments()
-- calculate_histogram_from_image()
-- calculate_waveform_from_image()
-- detect_face_median_luma()
-- estimate_white_balance()
-- get_auto_learning()
-- HistogramData
-- crate::app_settings::AutoAdjustOptions
-- crate::app_settings::AutoProfile
-- super::*
-- linear_pixels()
-- normalize_histogram_range()
-- old_profiles_load_with_stock_style()
-- OutputStyle
-- perform_auto_analysis()
-- render_for_analysis()
-- reset_auto_profile()
-- _…and 3 more_
-
-### Community 79 — hasFineAdjustmentModifier() (23 nodes, cohesion: 0.10)
-
-- Slider
-- getFraction()
-- getPositionFraction()
-- handleChange()
-- handleInputChange()
-- handleInputCommit()
-- handleInputKeyDown()
-- handleMouseDown()
-- handleRangeKeyDown()
-- handleReset()
-- handleTouchEnd()
-- handleTouchMove()
-- handleTouchStart()
-- handleValueClick()
-- hasFineAdjustmentModifier()
-- ./AppProperties/GLOBAL_KEYS
-- react-i18next/useTranslation
-- react/React
+- CullGroupsGrid
+- Cell()
+- ../../../components/ui/AppProperties/CullingSuggestions
+- ../../../components/ui/AppProperties/SortDirection
+- ../../../hooks/useSdImportActions/useSdImportActions
+- ./ImportFilterBar/ImportFilterBar
+- ./importFilters/computeVisible
+- ./ImportViewer/ImportViewer
+- ./LazyThumb/LazyThumb
+- lucide-react/Check
+- lucide-react/Droplet
+- lucide-react/Eye
+- lucide-react/Grid2x2
+- lucide-react/Layers
+- lucide-react/Sparkles
+- ./RatingColor/RatingColor
 - react/useCallback
 - react/useEffect
+- react/useMemo
+- react/useRef
+- _…and 4 more_
+
+### Community 76 — Roi (24 nodes, cohesion: 0.09)
+
+- gpu_processing
+- BlurParams
+- DisplayTransform
+- FlareParams
+- GfParams
+- HighPrecisionPipeline
+- HighPrecisionTile
+- crate::{AppState, GpuImageCache}
+- crate::image_processing::{AllAdjustments, GpuContext, MAX_MASKS, MaskAdjustments}
+- crate::lut_processing::Lut
+- half::f16
+- image::{DynamicImage, GenericImageView, ImageBuffer, Luma, Rgba}
+- std::num::NonZero
+- std::sync::Arc
+- std::time::Instant
+- super::processor_side
+- tauri::Manager
+- wgpu::util::{DeviceExt, TextureDataOrder}
+- processor_reused_across_orientation()
+- processor_side()
+- _…and 4 more_
+
+### Community 77 — x_bounds_at() (23 nodes, cohesion: 0.13)
+
+- guided_perspective
+- calculate_guided_perspective()
+- clip_poly_edge()
+- compute_max_inscribed_crop()
+- count_valid_lines()
+- cross()
+- det3()
+- filter_valid_lines()
+- finalize_h()
+- flatten_row_major()
+- GuidedResult
+- GuidedResultJson
+- GuideLine
+- GuideOrientation
+- GuidePoint
+- serde::{Deserialize, Serialize}
+- is_line_valid()
+- quad_ok()
+- slab_rect()
+- sutherland_hodgman_unit_square()
 - _…and 3 more_
 
-### Community 80 — upload_source_image() (23 nodes, cohesion: 0.11)
+### Community 78 — upload_source_image() (23 nodes, cohesion: 0.11)
 
 - ai_connector
 - check_status()
@@ -2002,7 +1954,7 @@
 - MiddlewareResponse
 - _…and 3 more_
 
-### Community 81 — useAppNavigation() (23 nodes, cohesion: 0.09)
+### Community 79 — useAppNavigation() (23 nodes, cohesion: 0.09)
 
 - useAppNavigation
 - ../components/ui/AppProperties/ImageFile
@@ -2025,6 +1977,54 @@
 - ../utils/adjustments/INITIAL_ADJUSTMENTS
 - ../utils/adjustments/normalizeLoadedAdjustments
 - _…and 3 more_
+
+### Community 80 — hasFineAdjustmentModifier() (23 nodes, cohesion: 0.10)
+
+- Slider
+- getFraction()
+- getPositionFraction()
+- handleChange()
+- handleInputChange()
+- handleInputCommit()
+- handleInputKeyDown()
+- handleMouseDown()
+- handleRangeKeyDown()
+- handleReset()
+- handleTouchEnd()
+- handleTouchMove()
+- handleTouchStart()
+- handleValueClick()
+- hasFineAdjustmentModifier()
+- ./AppProperties/GLOBAL_KEYS
+- react-i18next/useTranslation
+- react/React
+- react/useCallback
+- react/useEffect
+- _…and 3 more_
+
+### Community 81 — useKeyboardShortcuts() (22 nodes, cohesion: 0.09)
+
+- useKeyboardShortcuts
+- ../components/ui/AppProperties/ExifOverlay
+- ../components/ui/AppProperties/ImageFile
+- ../components/ui/AppProperties/ImageFlag
+- ../components/ui/AppProperties/Panel
+- react-toastify/toast
+- react/useCallback
+- react/useEffect
+- react/useRef
+- ../store/useEditorStore/useEditorStore
+- ../store/useLibraryStore/useLibraryStore
+- ../store/useProcessStore/useProcessStore
+- ../store/useSettingsStore/useSettingsStore
+- ../store/useUIStore/useUIStore
+- ./useEditorActions/useEditorActions
+- ./useLibraryActions/useLibraryActions
+- ../utils/keyboardUtils/ADJUSTMENT_NUDGES
+- ../utils/keyboardUtils/getDefaultCombo
+- ../utils/keyboardUtils/KEYBIND_DEFINITIONS
+- ../utils/keyboardUtils/normalizeCombo
+- _…and 2 more_
 
 ### Community 82 — sync_metadata_to_xmp() (22 nodes, cohesion: 0.29)
 
@@ -2074,55 +2074,7 @@
 - ../../utils/adjustments/COPYABLE_ADJUSTMENT_KEYS
 - _…and 2 more_
 
-### Community 84 — useKeyboardShortcuts() (22 nodes, cohesion: 0.09)
-
-- useKeyboardShortcuts
-- ../components/ui/AppProperties/ExifOverlay
-- ../components/ui/AppProperties/ImageFile
-- ../components/ui/AppProperties/ImageFlag
-- ../components/ui/AppProperties/Panel
-- react-toastify/toast
-- react/useCallback
-- react/useEffect
-- react/useRef
-- ../store/useEditorStore/useEditorStore
-- ../store/useLibraryStore/useLibraryStore
-- ../store/useProcessStore/useProcessStore
-- ../store/useSettingsStore/useSettingsStore
-- ../store/useUIStore/useUIStore
-- ./useEditorActions/useEditorActions
-- ./useLibraryActions/useLibraryActions
-- ../utils/keyboardUtils/ADJUSTMENT_NUDGES
-- ../utils/keyboardUtils/getDefaultCombo
-- ../utils/keyboardUtils/KEYBIND_DEFINITIONS
-- ../utils/keyboardUtils/normalizeCombo
-- _…and 2 more_
-
-### Community 85 — withAdjustmentLayout() (21 nodes, cohesion: 0.13)
-
-- adjustments
-- deepCloneCurves()
-- deepCloneParametric()
-- getAdjustmentSectionOrder()
-- getAdjustmentSectionToolIds()
-- getAdjustmentToolOrder()
-- getDefaultCurves()
-- getDefaultParametricCurve()
-- getHiddenAdjustmentTools()
-- getVisibleAdjustmentSections()
-- guideLabel()
-- ../components/panel/right/Masks/SubMask
-- ../components/panel/right/Masks/SubMaskMode
-- ../components/ui/AppProperties/AdjustmentLayout
-- ../components/ui/AppProperties/AppSettings
-- react-image-crop/Crop
-- uuid/v4
-- ./whiteBalance/WhiteBalance
-- normalizeLoadedAdjustments()
-- reconcileOrder()
-- _…and 1 more_
-
-### Community 86 — handleSave() (21 nodes, cohesion: 0.10)
+### Community 84 — handleSave() (84) (21 nodes, cohesion: 0.10)
 
 - HdrModal
 - handleBackdropClick()
@@ -2146,30 +2098,53 @@
 - ../ui/Button/Button
 - _…and 1 more_
 
-### Community 87 — useImageProcessing() (20 nodes, cohesion: 0.10)
+### Community 85 — normalize_grayscale() (20 nodes, cohesion: 0.13)
 
-- useImageProcessing
-- ../components/ui/AppProperties/Invokes
-- ../components/ui/AppProperties/Panel
-- lodash.debounce/debounce
-- lodash.throttle/throttle
-- react/React
+- processing
+- are_points_collinear()
+- build_integral_images()
+- calculate_downscale_dimensions()
+- calculate_downscale_dimensions_capped()
+- compute_homography()
+- find_homography_ransac()
+- generate_brief_pairs()
+- generate_low_detail_mask()
+- hamming_distance()
+- crate::panorama_stitching::{BRIEF_DESCRIPTOR_SIZE, Descriptor, Feature, KeyPoint, Match}
+- image::{GrayImage, ImageBuffer, Luma}
+- imageproc::corners::{Corner, corners_fast9}
+- imageproc::filter::gaussian_blur_f32
+- nalgebra::{Matrix3, Point2, SVD}
+- rand::prelude::*
+- rand::rng
+- rayon::prelude::*
+- match_features()
+- normalize_grayscale()
+
+### Community 86 — onDragMove() (20 nodes, cohesion: 0.10)
+
+- SidePanelArea
+- handleContentInteraction()
+- clsx/clsx
+- @dnd-kit/core/useDndMonitor
+- @dnd-kit/core/useDroppable
+- framer-motion/AnimatePresence
+- framer-motion/motion
+- ./PanelSwitcher/MobilePanelSwitcher
+- ./PanelSwitcher/PanelSwitcher
+- react-i18next/useTranslation
 - react/useCallback
-- react/useEffect
-- react/useMemo
 - react/useRef
-- ../store/useEditorStore/useEditorStore
-- ../store/useLibraryStore/useLibraryStore
-- ../store/useSettingsStore/useSettingsStore
-- ../store/useUIStore/useUIStore
-- @tauri-apps/api/core/invoke
-- ./useEditorActions/debouncedSave
-- ../utils/adjustments/Adjustments
-- ../utils/adjustments/COPYABLE_ADJUSTMENT_KEYS
-- ../utils/ImageLRUCache/globalImageCache
-- useImageProcessing()
+- react/useState
+- ../../store/useUIStore/DEFAULT_PANEL_SECTION_HEIGHT
+- ../../store/useUIStore/SwitcherPlacement
+- ../../store/useUIStore/useUIStore
+- ../ui/AppProperties/Panel
+- ../ui/AppProperties/PanelRegion
+- onDragEnd()
+- onDragMove()
 
-### Community 88 — zustand/react/shallow/useShallow (20 nodes, cohesion: 0.10)
+### Community 87 — zustand/react/shallow/useShallow (87) (20 nodes, cohesion: 0.10)
 
 - EditorView
 - clsx/clsx
@@ -2191,6 +2166,29 @@
 - ../ui/Resizer/Resizer
 - ../../utils/imageFlags/getImageFlag
 - zustand/react/shallow/useShallow
+
+### Community 88 — useEditorActions() (20 nodes, cohesion: 0.10)
+
+- useEditorActions
+- ../components/ui/AppProperties/Invokes
+- ../components/ui/AppProperties/resolveAutoAdjust
+- lodash.debounce/debounce
+- react-toastify/toast
+- react/useCallback
+- ../store/useEditorStore/useEditorStore
+- ../store/useLibraryStore/useLibraryStore
+- ../store/useProcessStore/useProcessStore
+- ../store/useSettingsStore/useSettingsStore
+- @tauri-apps/api/core/invoke
+- ../utils/adjustments/Adjustments
+- ../utils/adjustments/COPYABLE_ADJUSTMENT_KEYS
+- ../utils/adjustments/INITIAL_ADJUSTMENTS
+- ../utils/adjustments/LensAdjustment
+- ../utils/adjustments/normalizeLoadedAdjustments
+- ../utils/adjustments/PasteMode
+- ../utils/cropUtils/calculateCenteredCrop
+- ../utils/ImageLRUCache/globalImageCache
+- useEditorActions()
 
 ### Community 89 — renderBody() (20 nodes, cohesion: 0.10)
 
@@ -2215,76 +2213,30 @@
 - zustand/react/shallow/useShallow
 - renderBody()
 
-### Community 90 — normalize_grayscale() (20 nodes, cohesion: 0.13)
+### Community 90 — useImageProcessing() (20 nodes, cohesion: 0.10)
 
-- processing
-- are_points_collinear()
-- build_integral_images()
-- calculate_downscale_dimensions()
-- calculate_downscale_dimensions_capped()
-- compute_homography()
-- find_homography_ransac()
-- generate_brief_pairs()
-- generate_low_detail_mask()
-- hamming_distance()
-- crate::panorama_stitching::{BRIEF_DESCRIPTOR_SIZE, Descriptor, Feature, KeyPoint, Match}
-- image::{GrayImage, ImageBuffer, Luma}
-- imageproc::corners::{Corner, corners_fast9}
-- imageproc::filter::gaussian_blur_f32
-- nalgebra::{Matrix3, Point2, SVD}
-- rand::prelude::*
-- rand::rng
-- rayon::prelude::*
-- match_features()
-- normalize_grayscale()
-
-### Community 91 — useEditorActions() (20 nodes, cohesion: 0.10)
-
-- useEditorActions
+- useImageProcessing
 - ../components/ui/AppProperties/Invokes
-- ../components/ui/AppProperties/resolveAutoAdjust
+- ../components/ui/AppProperties/Panel
 - lodash.debounce/debounce
-- react-toastify/toast
+- lodash.throttle/throttle
+- react/React
 - react/useCallback
+- react/useEffect
+- react/useMemo
+- react/useRef
 - ../store/useEditorStore/useEditorStore
 - ../store/useLibraryStore/useLibraryStore
-- ../store/useProcessStore/useProcessStore
 - ../store/useSettingsStore/useSettingsStore
+- ../store/useUIStore/useUIStore
 - @tauri-apps/api/core/invoke
+- ./useEditorActions/debouncedSave
 - ../utils/adjustments/Adjustments
 - ../utils/adjustments/COPYABLE_ADJUSTMENT_KEYS
-- ../utils/adjustments/INITIAL_ADJUSTMENTS
-- ../utils/adjustments/LensAdjustment
-- ../utils/adjustments/normalizeLoadedAdjustments
-- ../utils/adjustments/PasteMode
-- ../utils/cropUtils/calculateCenteredCrop
 - ../utils/ImageLRUCache/globalImageCache
-- useEditorActions()
+- useImageProcessing()
 
-### Community 92 — onDragMove() (92) (20 nodes, cohesion: 0.10)
-
-- SidePanelArea
-- handleContentInteraction()
-- clsx/clsx
-- @dnd-kit/core/useDndMonitor
-- @dnd-kit/core/useDroppable
-- framer-motion/AnimatePresence
-- framer-motion/motion
-- ./PanelSwitcher/MobilePanelSwitcher
-- ./PanelSwitcher/PanelSwitcher
-- react-i18next/useTranslation
-- react/useCallback
-- react/useRef
-- react/useState
-- ../../store/useUIStore/DEFAULT_PANEL_SECTION_HEIGHT
-- ../../store/useUIStore/SwitcherPlacement
-- ../../store/useUIStore/useUIStore
-- ../ui/AppProperties/Panel
-- ../ui/AppProperties/PanelRegion
-- onDragEnd()
-- onDragMove()
-
-### Community 93 — handleRemoveTag() (19 nodes, cohesion: 0.12)
+### Community 91 — handleRemoveTag() (19 nodes, cohesion: 0.12)
 
 - TaggingSubMenu
 - getPathsToUpdate()
@@ -2306,73 +2258,29 @@
 - ../types/typography/TextVariants
 - ../utils/imageGrouping/expandGroupedPaths
 
-### Community 94 — viewPoint() (19 nodes, cohesion: 0.25)
+### Community 92 — v() (19 nodes, cohesion: 0.18)
 
-- applyLensBlur()
-- applyLut()
-- applyMaskUpdates()
-- applyPointColors()
-- applyVisualExtras()
-- brushLines()
-- buildMaskContainer()
-- buildRemovalPatch()
-- clampTo()
-- fillPolygon()
-- formatPatch()
-- mergeNested()
-- numberOr()
-- pointColorFields()
-- pointFrom()
-- sanitizeAdjustments()
-- sanitizeMaskAdjustments()
-- toNumber()
-- viewPoint()
+- manual_order
+- appends_files_added_since_the_order_was_saved()
+- apply_order()
+- cache_dir()
+- every_present_file_appears_exactly_once()
+- ignores_names_that_are_gone()
+- serde::{Deserialize, Serialize}
+- std::collections::HashMap
+- std::fs
+- std::path::PathBuf
+- super::*
+- tauri::{AppHandle, Manager}
+- keeps_the_saved_order()
+- load_manual_order()
+- no_saved_order_leaves_the_folder_untouched()
+- order_path()
+- OrderFile
+- save_manual_order()
+- v()
 
-### Community 95 — handleSelect() (19 nodes, cohesion: 0.11)
-
-- ExportPresetsList
-- handleDeletePreset()
-- handleOverwritePreset()
-- handleSavePreset()
-- handleSelect()
-- ./AppProperties/AppSettings
-- ./Dropdown/Dropdown
-- ./ExportImportProperties/ExportPreset
-- lucide-react/Check
-- lucide-react/Plus
-- lucide-react/Save
-- lucide-react/Trash2
-- lucide-react/X
-- react-i18next/useTranslation
-- react/React
-- react/useState
-- ./Text/Text
-- ../../types/typography/TextVariants
-- uuid/v4
-
-### Community 96 — stateOf() (19 nodes, cohesion: 0.15)
-
-- importAssistant
-- apply()
-- buildImportContext()
-- fileNameOf()
-- ./assistantCull/CullDecision
-- ./assistantCull/CullTarget
-- ./assistantCull/ShotGroups
-- ./assistantCull/ShotInfo
-- ../components/views/import/importFilters/computeVisible
-- ../store/useImportStore/useImportStore
-- ../store/useSettingsStore/useSettingsStore
-- importCullScope()
-- importQGrades()
-- importShotGroups()
-- importVisiblePaths()
-- isImportReviewActive()
-- isImportWindowBusy()
-- selectImportFiles()
-- stateOf()
-
-### Community 97 — clearAll() (19 nodes, cohesion: 0.11)
+### Community 93 — clearAll() (19 nodes, cohesion: 0.11)
 
 - ImportFilterBar
 - clearAll()
@@ -2394,7 +2302,7 @@
 - ../../../store/useImportStore/useImportStore
 - zustand/react/shallow/useShallow
 
-### Community 98 — Raw9Options (19 nodes, cohesion: 0.11)
+### Community 94 — Raw9Options (19 nodes, cohesion: 0.11)
 
 - apple_raw
 - denoise_raw9()
@@ -2418,29 +2326,7 @@
 - .for_denoise()
 - .for_loading()
 
-### Community 99 — rgb_to_lms() (19 nodes, cohesion: 0.13)
-
-- white_balance
-- adaptation_log_gains()
-- as_shot_cache()
-- as_shot_white_balance()
-- crate::file_management::{parse_virtual_path, read_file_mapped}
-- crate::formats::is_raw_file
-- crate::image_processing::{PRIMARIES_SRGB, WP_D65, primaries_to_xyz_matrix}
-- glam::{DMat3, DVec3, Mat3}
-- serde::{Deserialize, Serialize}
-- serde_json::Value
-- std::collections::HashMap
-- std::path::Path
-- std::sync::{Mutex, OnceLock}
-- super::*
-- pick_white_balance()
-- relative_shift()
-- relative_shift_inverts_shifted()
-- rgb_to_lms()
-- .lms()
-
-### Community 100 — useContextMenu() (19 nodes, cohesion: 0.11)
+### Community 95 — useContextMenu() (19 nodes, cohesion: 0.11)
 
 - ContextMenuContext
 - closeSubmenu()
@@ -2462,28 +2348,94 @@
 - react/useState
 - useContextMenu()
 
-### Community 101 — save_image_with_metadata() (18 nodes, cohesion: 0.19)
+### Community 96 — handleSelect() (19 nodes, cohesion: 0.11)
 
-- encode_image_to_bytes()
-- estimate_export_sizes()
-- export_images()
-- export_images_impl()
-- exported_jpegs_are_tagged_full_chroma_and_baseline()
-- ExportTaskGuard
-- .drop()
-- .new()
-- .with_app_handle()
-- finish_export_task()
-- mime_type_for_extension()
-- process_image_for_export()
-- register_export_task()
-- relative_dir_is_safe()
-- relative_export_dir_for_preserved_folders()
-- render_output_precision()
-- run_headless_export()
-- save_image_with_metadata()
+- ExportPresetsList
+- handleDeletePreset()
+- handleOverwritePreset()
+- handleSavePreset()
+- handleSelect()
+- ./AppProperties/AppSettings
+- ./Dropdown/Dropdown
+- ./ExportImportProperties/ExportPreset
+- lucide-react/Check
+- lucide-react/Plus
+- lucide-react/Save
+- lucide-react/Trash2
+- lucide-react/X
+- react-i18next/useTranslation
+- react/React
+- react/useState
+- ./Text/Text
+- ../../types/typography/TextVariants
+- uuid/v4
 
-### Community 102 — ../../../utils/adjustments/ADJUSTMENT_GROUPS (18 nodes, cohesion: 0.11)
+### Community 97 — viewPoint() (19 nodes, cohesion: 0.25)
+
+- applyLensBlur()
+- applyLut()
+- applyMaskUpdates()
+- applyPointColors()
+- applyVisualExtras()
+- brushLines()
+- buildMaskContainer()
+- buildRemovalPatch()
+- clampTo()
+- fillPolygon()
+- formatPatch()
+- mergeNested()
+- numberOr()
+- pointColorFields()
+- pointFrom()
+- sanitizeAdjustments()
+- sanitizeMaskAdjustments()
+- toNumber()
+- viewPoint()
+
+### Community 98 — stateOf() (19 nodes, cohesion: 0.15)
+
+- importAssistant
+- apply()
+- buildImportContext()
+- fileNameOf()
+- ./assistantCull/CullDecision
+- ./assistantCull/CullTarget
+- ./assistantCull/ShotGroups
+- ./assistantCull/ShotInfo
+- ../components/views/import/importFilters/computeVisible
+- ../store/useImportStore/useImportStore
+- ../store/useSettingsStore/useSettingsStore
+- importCullScope()
+- importQGrades()
+- importShotGroups()
+- importVisiblePaths()
+- isImportReviewActive()
+- isImportWindowBusy()
+- selectImportFiles()
+- stateOf()
+
+### Community 99 — ../../utils/adjustments/HueSatLum (18 nodes, cohesion: 0.11)
+
+- ColorWheel
+- framer-motion/AnimatePresence
+- framer-motion/motion
+- lucide-react/Sun
+- react-i18next/useTranslation
+- react/useEffect
+- react/useId
+- react/useRef
+- react/useState
+- ./Slider/Slider
+- ./Text/Text
+- ../../types/typography/TextColors
+- ../../types/typography/TextVariants
+- @uiw/color-convert/ColorResult
+- @uiw/color-convert/HsvaColor
+- @uiw/color-convert/hsvaToHex
+- @uiw/react-color-wheel/Wheel
+- ../../utils/adjustments/HueSatLum
+
+### Community 100 — ../../../utils/adjustments/ADJUSTMENT_GROUPS (18 nodes, cohesion: 0.11)
 
 - PresetItemDisplay
 - framer-motion/AnimatePresence
@@ -2503,6 +2455,48 @@
 - ../../ui/Slider/Slider
 - ../../ui/Text/Text
 - ../../../utils/adjustments/ADJUSTMENT_GROUPS
+
+### Community 101 — point_to_segment_dist_sq() (18 nodes, cohesion: 0.13)
+
+- inpainting
+- bilinear_sample()
+- draw_stroke_to_mask()
+- generate_liquify_patch()
+- base64::{Engine as _, engine::general_purpose}
+- crate::ai_connector
+- crate::ai_processing
+- crate::app_settings::load_settings
+- crate::app_state::AppState
+- crate::image_loader::composite_patches_on_image
+- crate::image_processing::apply_linear_to_srgb
+- crate::mask_generation::{AiPatchDefinition, MaskDefinition, generate_mask_bitmap}
+- crate::resolve_warped_image_for_masks
+- image::{DynamicImage, GenericImageView, Rgb, RgbImage, RgbaImage}
+- rayon::prelude::*
+- serde_json::Value
+- std::io::Cursor
+- point_to_segment_dist_sq()
+
+### Community 102 — strip_maker_prefix() (18 nodes, cohesion: 0.22)
+
+- extract_dist_params()
+- extract_tca_params()
+- extract_vig_params()
+- find_lens_by_fuzzy_model()
+- get_lens_distortion_params()
+- get_lensfun_lenses_for_maker()
+- get_lensfun_makers()
+- Lens
+- .get_canonical_model_name()
+- .get_display_name()
+- .get_distortion_params()
+- .get_full_model_name()
+- .get_maker()
+- .get_name()
+- lens_result()
+- lenses_for_maker()
+- resolve_lens_params()
+- strip_maker_prefix()
 
 ### Community 103 — srgb_to_linear() (18 nodes, cohesion: 0.16)
 
@@ -2536,28 +2530,7 @@
 - smoothstep()
 - srgb_to_linear()
 
-### Community 104 — react-i18next/initReactI18next (18 nodes, cohesion: 0.11)
-
-- index
-- i18next/i18n
-- ./locales/ca.json/ca
-- ./locales/cs.json/cs
-- ./locales/de.json/de
-- ./locales/en.json/en
-- ./locales/es.json/es
-- ./locales/fr.json/fr
-- ./locales/it.json/it
-- ./locales/ja.json/ja
-- ./locales/ko.json/ko
-- ./locales/nl.json/nl
-- ./locales/pl.json/pl
-- ./locales/pt.json/pt
-- ./locales/ru.json/ru
-- ./locales/zh-CN.json/zhCN
-- ./locales/zh-TW.json/zhTW
-- react-i18next/initReactI18next
-
-### Community 105 — useAiMasking() (18 nodes, cohesion: 0.12)
+### Community 104 — useAiMasking() (18 nodes, cohesion: 0.12)
 
 - useAiMasking
 - getTransformAdjustments()
@@ -2578,26 +2551,46 @@
 - ../utils/adjustments/MaskContainer
 - useAiMasking()
 
-### Community 106 — ../../utils/adjustments/HueSatLum (18 nodes, cohesion: 0.11)
+### Community 105 — react-i18next/initReactI18next (18 nodes, cohesion: 0.11)
 
-- ColorWheel
-- framer-motion/AnimatePresence
-- framer-motion/motion
-- lucide-react/Sun
-- react-i18next/useTranslation
-- react/useEffect
-- react/useId
-- react/useRef
-- react/useState
-- ./Slider/Slider
-- ./Text/Text
-- ../../types/typography/TextColors
-- ../../types/typography/TextVariants
-- @uiw/color-convert/ColorResult
-- @uiw/color-convert/HsvaColor
-- @uiw/color-convert/hsvaToHex
-- @uiw/react-color-wheel/Wheel
-- ../../utils/adjustments/HueSatLum
+- index
+- i18next/i18n
+- ./locales/ca.json/ca
+- ./locales/cs.json/cs
+- ./locales/de.json/de
+- ./locales/en.json/en
+- ./locales/es.json/es
+- ./locales/fr.json/fr
+- ./locales/it.json/it
+- ./locales/ja.json/ja
+- ./locales/ko.json/ko
+- ./locales/nl.json/nl
+- ./locales/pl.json/pl
+- ./locales/pt.json/pt
+- ./locales/ru.json/ru
+- ./locales/zh-CN.json/zhCN
+- ./locales/zh-TW.json/zhTW
+- react-i18next/initReactI18next
+
+### Community 106 — rgb_to_lms() (17 nodes, cohesion: 0.14)
+
+- white_balance
+- as_shot_cache()
+- as_shot_white_balance()
+- crate::file_management::{parse_virtual_path, read_file_mapped}
+- crate::formats::is_raw_file
+- crate::image_processing::{PRIMARIES_SRGB, WP_D65, primaries_to_xyz_matrix}
+- glam::{DMat3, DVec3, Mat3}
+- serde::{Deserialize, Serialize}
+- serde_json::Value
+- std::collections::HashMap
+- std::path::Path
+- std::sync::{Mutex, OnceLock}
+- super::*
+- pick_white_balance()
+- relative_shift()
+- relative_shift_inverts_shifted()
+- rgb_to_lms()
 
 ### Community 107 — ../../ui/AppProperties/Invokes (17 nodes, cohesion: 0.12)
 
@@ -2619,67 +2612,7 @@
 - @tauri-apps/api/core/invoke
 - ../../ui/AppProperties/Invokes
 
-### Community 108 — verticals_stay_vertical_at_any_strength() (17 nodes, cohesion: 0.18)
-
-- projection
-- cylindrical_warp()
-- estimate_focal()
-- focals_from_homography()
-- full_strength_is_rectilinear()
-- full_strength_straightens_a_wall_line()
-- image::{GrayImage, Rgb32FImage}
-- nalgebra::Matrix3
-- rayon::prelude::*
-- super::*
-- super::stitching::sample_bilinear
-- pannini_forward()
-- pannini_theta()
-- pannini_theta_inverts_forward()
-- remap_keeps_content_and_straightens_the_bow()
-- straighten_cylindrical()
-- verticals_stay_vertical_at_any_strength()
-
-### Community 109 — clsx() (109) (17 nodes, cohesion: 0.12)
-
-- Dropdown
-- clsx()
-- clsx/clsx
-- framer-motion/AnimatePresence
-- framer-motion/motion
-- ./Input/Input
-- lucide-react/Check
-- lucide-react/ChevronDown
-- react/useEffect
-- react/useMemo
-- react/useRef
-- react/useState
-- ./Text/Text
-- ../../types/typography/TEXT_COLOR_KEYS
-- ../../types/typography/TextColors
-- ../../types/typography/TextVariants
-- ../../types/typography/TextWeights
-
-### Community 110 — zustand/react/shallow/useShallow (110) (17 nodes, cohesion: 0.12)
-
-- LibraryView
-- ../panel/BottomBar/BottomBar
-- ../panel/CommunityPage/CommunityPage
-- ../panel/MainLibrary/MainLibrary
-- ../../store/useEditorStore/useEditorStore
-- ../../store/useLibraryStore/useLibraryStore
-- ../../store/useProcessStore/useProcessStore
-- ../../store/useSettingsStore/useSettingsStore
-- ../../store/useUIStore/useUIStore
-- ../ui/AppProperties/ImageFile
-- ../ui/AppProperties/LibraryViewMode
-- ../ui/AppProperties/ThumbnailAspectRatio
-- ../ui/AppProperties/ThumbnailSize
-- ../../utils/imageFlags/getImageFlag
-- ../../utils/imageGrouping/GroupBadgeInfo
-- ../../utils/imageGrouping/GroupId
-- zustand/react/shallow/useShallow
-
-### Community 111 — test_ai_connector_connection() (17 nodes, cohesion: 0.12)
+### Community 108 — test_ai_connector_connection() (17 nodes, cohesion: 0.12)
 
 - ai_commands
 - cancel_ai_task()
@@ -2704,26 +2637,67 @@
 - precompute_ai_subject_mask()
 - test_ai_connector_connection()
 
-### Community 112 — score() (16 nodes, cohesion: 0.25)
+### Community 109 — clsx() (17 nodes, cohesion: 0.12)
 
-- label_detect
-- Component
-- detect_label_region()
-- fill_rect()
-- finds_a_bright_card_on_dark_fabric()
-- frame()
-- ignores_a_small_stray_thread()
-- ignores_the_steel_ruler_and_picks_the_card()
-- image::{DynamicImage, GenericImageView}
-- image::{Rgb, RgbImage}
+- Dropdown
+- clsx()
+- clsx/clsx
+- framer-motion/AnimatePresence
+- framer-motion/motion
+- ./Input/Input
+- lucide-react/Check
+- lucide-react/ChevronDown
+- react/useEffect
+- react/useMemo
+- react/useRef
+- react/useState
+- ./Text/Text
+- ../../types/typography/TEXT_COLOR_KEYS
+- ../../types/typography/TextColors
+- ../../types/typography/TextVariants
+- ../../types/typography/TextWeights
+
+### Community 110 — verticals_stay_vertical_at_any_strength() (17 nodes, cohesion: 0.18)
+
+- projection
+- cylindrical_warp()
+- estimate_focal()
+- focals_from_homography()
+- full_strength_is_rectilinear()
+- full_strength_straightens_a_wall_line()
+- image::{GrayImage, Rgb32FImage}
+- nalgebra::Matrix3
+- rayon::prelude::*
 - super::*
-- never_reports_a_box_outside_the_image()
-- Rect
-- returns_none_when_nothing_is_card_like()
-- scale_and_pad()
-- score()
+- super::stitching::sample_bilinear
+- pannini_forward()
+- pannini_theta()
+- pannini_theta_inverts_forward()
+- remap_keeps_content_and_straightens_the_bow()
+- straighten_cylindrical()
+- verticals_stay_vertical_at_any_strength()
 
-### Community 113 — PresetTypeSwitch() (16 nodes, cohesion: 0.13)
+### Community 111 — zustand/react/shallow/useShallow (17 nodes, cohesion: 0.12)
+
+- LibraryView
+- ../panel/BottomBar/BottomBar
+- ../panel/CommunityPage/CommunityPage
+- ../panel/MainLibrary/MainLibrary
+- ../../store/useEditorStore/useEditorStore
+- ../../store/useLibraryStore/useLibraryStore
+- ../../store/useProcessStore/useProcessStore
+- ../../store/useSettingsStore/useSettingsStore
+- ../../store/useUIStore/useUIStore
+- ../ui/AppProperties/ImageFile
+- ../ui/AppProperties/LibraryViewMode
+- ../ui/AppProperties/ThumbnailAspectRatio
+- ../ui/AppProperties/ThumbnailSize
+- ../../utils/imageFlags/getImageFlag
+- ../../utils/imageGrouping/GroupBadgeInfo
+- ../../utils/imageGrouping/GroupId
+- zustand/react/shallow/useShallow
+
+### Community 112 — PresetTypeSwitch() (16 nodes, cohesion: 0.13)
 
 - ConfigurePresetModal
 - ConfigurePresetModal()
@@ -2742,61 +2716,45 @@
 - ../../utils/adjustments/ADJUSTMENT_GROUPS
 - PresetTypeSwitch()
 
-### Community 114 — async() (15 nodes, cohesion: 0.13)
+### Community 113 — withAdjustmentLayout() (16 nodes, cohesion: 0.16)
 
-- ImportReviewBar
-- async()
-- ../../../hooks/useSdImportActions/useSdImportActions
-- lucide-react/ArrowRight
-- lucide-react/FolderInput
-- lucide-react/Settings2
-- react/useEffect
-- react/useState
-- ../../../store/useImportStore/useImportStore
-- ../../ui/Button/Button
-- ../../ui/Switch/Switch
-- ../../../utils/importLearning/CullLearning
-- ../../../utils/importLearning/describeLearning
-- ../../../utils/importLearning/loadCullLearning
-- zustand/react/shallow/useShallow
+- adjustments
+- getAdjustmentSectionOrder()
+- getAdjustmentSectionToolIds()
+- getAdjustmentToolOrder()
+- getHiddenAdjustmentTools()
+- getVisibleAdjustmentSections()
+- guideLabel()
+- ../components/panel/right/Masks/SubMask
+- ../components/panel/right/Masks/SubMaskMode
+- ../components/ui/AppProperties/AdjustmentLayout
+- ../components/ui/AppProperties/AppSettings
+- react-image-crop/Crop
+- uuid/v4
+- ./whiteBalance/WhiteBalance
+- reconcileOrder()
+- withAdjustmentLayout()
 
-### Community 115 — handleClose() (15 nodes, cohesion: 0.13)
+### Community 114 — zoomCrop() (16 nodes, cohesion: 0.24)
 
-- LiveViewOverlay
-- handleClose()
-- lucide-react/Loader2
-- lucide-react/X
-- react-i18next/useTranslation
-- react/useEffect
-- react/useState
-- ../../../store/useTetherStore/useTetherStore
-- @tauri-apps/api/core/invoke
-- @tauri-apps/api/event/listen
-- ./TetherMenu/CameraSection
-- ../../../types/typography/TextColors
-- ../../../types/typography/TextVariants
-- ../../ui/AppProperties/Invokes
-- ../../ui/Text/Text
+- cropUtils
+- calculateAreaPreservingCrop()
+- calculateAutoCropForRotation()
+- calculateCenteredCrop()
+- calculateStraightenAngle()
+- fitCropTowards()
+- forceCropInBounds()
+- getOrientedDimensions()
+- guidedRectToCrop()
+- react-image-crop/Crop
+- isCropWithinBounds()
+- moveCropInsideBounds()
+- orientPoint()
+- rotateCropCenter()
+- unorientPoint()
+- zoomCrop()
 
-### Community 116 — handleVisibilityClick() (15 nodes, cohesion: 0.13)
-
-- CollapsibleSection
-- handleMouseEnter()
-- handleMouseLeave()
-- handleVisibilityClick()
-- clsx/clsx
-- ../../hooks/useCollapsibleHeight/useCollapsibleHeight
-- lucide-react/ChevronDown
-- lucide-react/Eye
-- lucide-react/EyeOff
-- react-i18next/useTranslation
-- react/useRef
-- react/useState
-- ./Text/Text
-- ../../types/typography/TextVariants
-- ../../types/typography/TextWeights
-
-### Community 117 — usePresets() (15 nodes, cohesion: 0.14)
+### Community 115 — usePresets() (15 nodes, cohesion: 0.14)
 
 - usePresets
 - arrayMove()
@@ -2814,43 +2772,7 @@
 - ../utils/adjustments/INITIAL_ADJUSTMENTS
 - usePresets()
 
-### Community 118 — GlobalTooltip() (15 nodes, cohesion: 0.14)
-
-- GlobalTooltip
-- clamp()
-- GlobalTooltip()
-- clsx/clsx
-- framer-motion/AnimatePresence
-- framer-motion/motion
-- react-dom/createPortal
-- react/useEffect
-- react/useLayoutEffect
-- react/useRef
-- react/useState
-- ./Text/Text
-- ../../types/typography/TextColors
-- ../../types/typography/TextVariants
-- ../../types/typography/TextWeights
-
-### Community 119 — stringifyArg() (15 nodes, cohesion: 0.27)
-
-- frontendLogBridge
-- extractViteDetails()
-- formatLogMessage()
-- formatViteErrorDetails()
-- getRecordField()
-- ../components/ui/AppProperties/Invokes
-- @tauri-apps/api/core/invoke
-- installFrontendLogBridge()
-- isPlainRecord()
-- isViteLikeError()
-- sendToBackend()
-- serializeValue()
-- shouldDropDuplicate()
-- shouldIgnoreMessage()
-- stringifyArg()
-
-### Community 120 — useFileOperations() (15 nodes, cohesion: 0.13)
+### Community 116 — useFileOperations() (15 nodes, cohesion: 0.13)
 
 - useFileOperations
 - ../components/ui/AppProperties/ImageFlag
@@ -2868,7 +2790,7 @@
 - @tauri-apps/plugin-dialog/open
 - useFileOperations()
 
-### Community 121 — ../utils/imageGrouping/GroupId (15 nodes, cohesion: 0.13)
+### Community 117 — ../utils/imageGrouping/GroupId (15 nodes, cohesion: 0.13)
 
 - useSortedLibrary
 - ../components/ui/AppProperties/EditedStatus
@@ -2886,41 +2808,97 @@
 - ../utils/imageGrouping/GroupBadgeInfo
 - ../utils/imageGrouping/GroupId
 
-### Community 122 — rankedGroups() (14 nodes, cohesion: 0.18)
+### Community 118 — handleClose() (15 nodes, cohesion: 0.13)
 
-- importLearning
-- assistantFeedback()
-- describeLearning()
-- fileNameOf()
-- ../components/ui/AppProperties/CullingSuggestions
-- ../components/ui/AppProperties/Invokes
-- ../components/views/import/importFilters/computeVisibleSet
-- ../store/useImportStore/useImportStore
-- ../store/useSettingsStore/useSettingsStore
-- @tauri-apps/api/core/invoke
-- keepersOf()
-- learnFromImport()
-- loadCullLearning()
-- rankedGroups()
-
-### Community 123 — useExternalEditSession() (14 nodes, cohesion: 0.14)
-
-- useExternalEditSession
-- ../components/ui/AppProperties/Invokes
-- ../components/ui/ExportImportProperties/ExportSettings
-- ../components/ui/ExportImportProperties/Status
-- react/useCallback
+- LiveViewOverlay
+- handleClose()
+- lucide-react/Loader2
+- lucide-react/X
+- react-i18next/useTranslation
 - react/useEffect
+- react/useState
+- ../../../store/useTetherStore/useTetherStore
+- @tauri-apps/api/core/invoke
+- @tauri-apps/api/event/listen
+- ./TetherMenu/CameraSection
+- ../../../types/typography/TextColors
+- ../../../types/typography/TextVariants
+- ../../ui/AppProperties/Invokes
+- ../../ui/Text/Text
+
+### Community 119 — async() (15 nodes, cohesion: 0.13)
+
+- ImportReviewBar
+- async()
+- ../../../hooks/useSdImportActions/useSdImportActions
+- lucide-react/ArrowRight
+- lucide-react/FolderInput
+- lucide-react/Settings2
+- react/useEffect
+- react/useState
+- ../../../store/useImportStore/useImportStore
+- ../../ui/Button/Button
+- ../../ui/Switch/Switch
+- ../../../utils/importLearning/CullLearning
+- ../../../utils/importLearning/describeLearning
+- ../../../utils/importLearning/loadCullLearning
+- zustand/react/shallow/useShallow
+
+### Community 120 — stringifyArg() (15 nodes, cohesion: 0.27)
+
+- frontendLogBridge
+- extractViteDetails()
+- formatLogMessage()
+- formatViteErrorDetails()
+- getRecordField()
+- ../components/ui/AppProperties/Invokes
+- @tauri-apps/api/core/invoke
+- installFrontendLogBridge()
+- isPlainRecord()
+- isViteLikeError()
+- sendToBackend()
+- serializeValue()
+- shouldDropDuplicate()
+- shouldIgnoreMessage()
+- stringifyArg()
+
+### Community 121 — GlobalTooltip() (15 nodes, cohesion: 0.14)
+
+- GlobalTooltip
+- clamp()
+- GlobalTooltip()
+- clsx/clsx
+- framer-motion/AnimatePresence
+- framer-motion/motion
+- react-dom/createPortal
+- react/useEffect
+- react/useLayoutEffect
 - react/useRef
 - react/useState
-- ../store/useEditorStore/useEditorStore
-- ../store/useProcessStore/useProcessStore
-- @tauri-apps/api/core/invoke
-- @tauri-apps/plugin-process/exit
-- ./useEditorActions/debouncedSave
-- useExternalEditSession()
+- ./Text/Text
+- ../../types/typography/TextColors
+- ../../types/typography/TextVariants
+- ../../types/typography/TextWeights
 
-### Community 124 — withdrawAutoCrop() (14 nodes, cohesion: 0.23)
+### Community 122 — handleVisibilityClick() (15 nodes, cohesion: 0.13)
+
+- CollapsibleSection
+- handleMouseEnter()
+- handleMouseLeave()
+- handleVisibilityClick()
+- clsx/clsx
+- ../../hooks/useCollapsibleHeight/useCollapsibleHeight
+- lucide-react/ChevronDown
+- lucide-react/Eye
+- lucide-react/EyeOff
+- react-i18next/useTranslation
+- react/useRef
+- react/useState
+- ./Text/Text
+- ../../types/typography/TextVariants
+- ../../types/typography/TextWeights
+
+### Community 123 — withdrawAutoCrop() (14 nodes, cohesion: 0.23)
 
 - guidedPerspective
 - applyGuidedAutoCrop()
@@ -2937,103 +2915,92 @@
 - setGuidedAutoCrop()
 - withdrawAutoCrop()
 
-### Community 125 — DecodedImageCache (13 nodes, cohesion: 0.18)
+### Community 124 — useExternalEditSession() (14 nodes, cohesion: 0.14)
 
-- cache_utils
-- clear_image_caches()
-- clear_session_caches()
-- DecodedImageCache
-- .clear()
-- .insert()
-- .set_capacity()
-- crate::AppState
-- image::DynamicImage
-- std::collections::hash_map::DefaultHasher
-- std::collections::HashMap
-- std::hash::{Hash, Hasher}
-- std::sync::Arc
-
-### Community 126 — onWebViewCreate (13 nodes, cohesion: 0.15)
-
-- MainActivity
-- handleOnBackPressed
-- android.graphics.Color
-- android.os.Bundle
-- android.view.View
-- android.webkit.WebView
-- androidx.activity.enableEdgeToEdge
-- androidx.activity.OnBackPressedCallback
-- androidx.core.view.ViewCompat
-- androidx.core.view.WindowInsetsCompat
-- MainActivity
-- onCreate
-- onWebViewCreate
-
-### Community 127 — getLine() (13 nodes, cohesion: 0.15)
-
-- Waveform
-- getFill()
-- getLine()
-- framer-motion/AnimatePresence
-- framer-motion/LayoutGroup
-- framer-motion/motion
-- lucide-react/AlertOctagon
-- react-i18next/useTranslation
+- useExternalEditSession
+- ../components/ui/AppProperties/Invokes
+- ../components/ui/ExportImportProperties/ExportSettings
+- ../components/ui/ExportImportProperties/Status
+- react/useCallback
 - react/useEffect
 - react/useRef
 - react/useState
-- ../../ui/AppProperties/WaveformData
-- ../../../utils/adjustments/DisplayMode
+- ../store/useEditorStore/useEditorStore
+- ../store/useProcessStore/useProcessStore
+- @tauri-apps/api/core/invoke
+- @tauri-apps/plugin-process/exit
+- ./useEditorActions/debouncedSave
+- useExternalEditSession()
 
-### Community 128 — formatBytes() (13 nodes, cohesion: 0.15)
+### Community 125 — wait() (14 nodes, cohesion: 0.25)
 
-- SourcePicker
-- formatBytes()
-- ../../../hooks/useSdImportActions/useSdImportActions
-- lucide-react/Film
-- lucide-react/FolderOpen
-- lucide-react/HardDrive
-- lucide-react/Loader2
-- lucide-react/RefreshCw
-- react/useEffect
-- ./ScannerPane/detectScanner
-- ../../../store/useImportStore/useImportStore
-- ../../../store/useScannerStore/useScannerStore
-- ../../ui/Button/Button
+- replay
+- backToLibrary()
+- dispatchMouse()
+- dragSlider()
+- durationsInWindow()
+- editTwoSliders()
+- frameTick()
+- openFirstImage()
+- scrollLibrary()
+- startMeasuring()
+- stopMeasuring()
+- summarizeWindow()
+- undoSliderEdits()
+- wait()
 
-### Community 129 — handleToggle() (13 nodes, cohesion: 0.15)
+### Community 126 — WhiteBalance (14 nodes, cohesion: 0.23)
 
-- AdjustmentSubSection
-- handleToggle()
-- clsx/clsx
-- ../../hooks/useCollapsibleHeight/useCollapsibleHeight
-- lucide-react/ChevronDown
-- react/ReactNode
-- ../../store/useSettingsStore/useSettingsStore
-- ../../types/typography/TextVariants
-- ../ui/Text/Text
-- ../../utils/adjustments/ADJUSTMENT_SECTION_TOOLS
-- ../../utils/adjustments/getAdjustmentSectionToolIds
-- ../../utils/adjustments/withAdjustmentLayout
-- zustand/react/shallow/useShallow
+- adaptation_log_gains()
+- from_adjustments()
+- isotherm_direction()
+- WhiteBalance
+- .chromaticity_lms()
+- .clamped()
+- .from_camera_neutral()
+- .from_dual_illuminant_camera_neutral()
+- .from_xy()
+- .from_xyz()
+- .lms()
+- .reference()
+- .shifted()
+- .to_xy()
 
-### Community 130 — handleReset() (130) (13 nodes, cohesion: 0.18)
+### Community 127 — rankedGroups() (14 nodes, cohesion: 0.18)
 
-- DepthRangePicker
-- beginDrag()
-- compute()
-- getVal()
-- handleColor()
-- handleReset()
-- react-i18next/useTranslation
-- react/PointerEvent
-- react/useEffect
-- react/useRef
-- react/useState
-- ./Text/Text
-- ../../types/typography/TextVariants
+- importLearning
+- assistantFeedback()
+- describeLearning()
+- fileNameOf()
+- ../components/ui/AppProperties/CullingSuggestions
+- ../components/ui/AppProperties/Invokes
+- ../components/views/import/importFilters/computeVisibleSet
+- ../store/useImportStore/useImportStore
+- ../store/useSettingsStore/useSettingsStore
+- @tauri-apps/api/core/invoke
+- keepersOf()
+- learnFromImport()
+- loadCullLearning()
+- rankedGroups()
 
-### Community 131 — SeamInfo (13 nodes, cohesion: 0.15)
+### Community 128 — verify_sha256() (14 nodes, cohesion: 0.26)
+
+- download_and_verify_model()
+- download_model()
+- get_models_dir()
+- get_or_init_ai_models()
+- get_or_init_clip_models()
+- get_or_init_denoise_model()
+- get_or_init_face_model()
+- get_or_init_lama_model()
+- persist_downloaded_asset()
+- promote_legacy_model_filename()
+- run_lama_inpainting()
+- TileParams
+- .new()
+- verify_sha256()
+
+### Community 129 — warp_image_homography() (13 nodes, cohesion: 0.15)
 
 - stitching
 - crate::panorama_stitching::ImageInfo
@@ -3044,12 +3011,12 @@
 - std::path::Path
 - tauri::{AppHandle, Emitter}
 - largest_content_rect()
-- sample_bilinear()
 - SeamContext
 - SeamInfo
 - SeamOrientation
+- warp_image_homography()
 
-### Community 132 — zustand/create (132) (13 nodes, cohesion: 0.15)
+### Community 130 — zustand/create (130) (13 nodes, cohesion: 0.15)
 
 - useEditorStore
 - ../components/adjustments/Curves/ChannelConfig
@@ -3065,23 +3032,118 @@
 - ../utils/adjustments/MaskContainer
 - zustand/create
 
-### Community 133 — outcome() (13 nodes, cohesion: 0.18)
+### Community 131 — onWebViewCreate (13 nodes, cohesion: 0.15)
 
-- cull_model
-- CueKind
-- .default_weights()
-- default_weights_sum_to_one()
-- GroupOutcome
-- serde::{Deserialize, Serialize}
+- MainActivity
+- handleOnBackPressed
+- android.graphics.Color
+- android.os.Bundle
+- android.view.View
+- android.webkit.WebView
+- androidx.activity.enableEdgeToEdge
+- androidx.activity.OnBackPressedCallback
+- androidx.core.view.ViewCompat
+- androidx.core.view.WindowInsetsCompat
+- MainActivity
+- onCreate
+- onWebViewCreate
+
+### Community 132 — getLine() (13 nodes, cohesion: 0.15)
+
+- Waveform
+- getFill()
+- getLine()
+- framer-motion/AnimatePresence
+- framer-motion/LayoutGroup
+- framer-motion/motion
+- lucide-react/AlertOctagon
+- react-i18next/useTranslation
+- react/useEffect
+- react/useRef
+- react/useState
+- ../../ui/AppProperties/WaveformData
+- ../../../utils/adjustments/DisplayMode
+
+### Community 133 — formatBytes() (13 nodes, cohesion: 0.15)
+
+- SourcePicker
+- formatBytes()
+- ../../../hooks/useSdImportActions/useSdImportActions
+- lucide-react/Film
+- lucide-react/FolderOpen
+- lucide-react/HardDrive
+- lucide-react/Loader2
+- lucide-react/RefreshCw
+- react/useEffect
+- ./ScannerPane/detectScanner
+- ../../../store/useImportStore/useImportStore
+- ../../../store/useScannerStore/useScannerStore
+- ../../ui/Button/Button
+
+### Community 134 — handleReset() (13 nodes, cohesion: 0.18)
+
+- DepthRangePicker
+- beginDrag()
+- compute()
+- getVal()
+- handleColor()
+- handleReset()
+- react-i18next/useTranslation
+- react/PointerEvent
+- react/useEffect
+- react/useRef
+- react/useState
+- ./Text/Text
+- ../../types/typography/TextVariants
+
+### Community 135 — DecodedImageCache (13 nodes, cohesion: 0.18)
+
+- cache_utils
+- clear_image_caches()
+- clear_session_caches()
+- DecodedImageCache
+- .clear()
+- .insert()
+- .set_capacity()
+- crate::AppState
+- image::DynamicImage
+- std::collections::hash_map::DefaultHasher
 - std::collections::HashMap
-- std::path::PathBuf
-- super::*
-- tauri::Manager
-- LearningSummary
-- mixed_kinds_in_a_burst_are_not_compared()
-- outcome()
+- std::hash::{Hash, Hasher}
+- std::sync::Arc
 
-### Community 134 — RestoreDownIcon() (12 nodes, cohesion: 0.17)
+### Community 136 — handleToggle() (13 nodes, cohesion: 0.15)
+
+- AdjustmentSubSection
+- handleToggle()
+- clsx/clsx
+- ../../hooks/useCollapsibleHeight/useCollapsibleHeight
+- lucide-react/ChevronDown
+- react/ReactNode
+- ../../store/useSettingsStore/useSettingsStore
+- ../../types/typography/TextVariants
+- ../ui/Text/Text
+- ../../utils/adjustments/ADJUSTMENT_SECTION_TOOLS
+- ../../utils/adjustments/getAdjustmentSectionToolIds
+- ../../utils/adjustments/withAdjustmentLayout
+- zustand/react/shallow/useShallow
+
+### Community 137 — write_rrexif_sidecar() (12 nodes, cohesion: 0.32)
+
+- get_exif_from_rrcache()
+- get_file_stamp()
+- get_rrexif_path()
+- load_primary_metadata()
+- load_sidecar()
+- load_sidecar_with_exif()
+- persist_exif_if_missing()
+- read_exif_data()
+- read_rrexif_sidecar()
+- save_exif_to_rrcache()
+- save_primary_metadata()
+- write_rrexif_sidecar()
+
+### Community 138 — RestoreDownIcon() (12 nodes, cohesion: 0.17)
 
 - TitleBar
 - handleClose()
@@ -3096,52 +3158,7 @@
 - @tauri-apps/plugin-os/platform
 - RestoreDownIcon()
 
-### Community 135 — useTauriListeners() (12 nodes, cohesion: 0.17)
-
-- useTauriListeners
-- ../components/ui/ExportImportProperties/Status
-- react-toastify/toast
-- react/useEffect
-- react/useRef
-- ../store/useEditorStore/useEditorStore
-- ../store/useLibraryStore/useLibraryStore
-- ../store/useProcessStore/useProcessStore
-- ../store/useUIStore/useUIStore
-- @tauri-apps/api/core/convertFileSrc
-- @tauri-apps/api/event/listen
-- useTauriListeners()
-
-### Community 136 — WhiteBalance (12 nodes, cohesion: 0.27)
-
-- from_adjustments()
-- isotherm_direction()
-- WhiteBalance
-- .chromaticity_lms()
-- .clamped()
-- .from_camera_neutral()
-- .from_dual_illuminant_camera_neutral()
-- .from_xy()
-- .from_xyz()
-- .reference()
-- .shifted()
-- .to_xy()
-
-### Community 137 — save_manual_order() (12 nodes, cohesion: 0.21)
-
-- manual_order
-- cache_dir()
-- serde::{Deserialize, Serialize}
-- std::collections::HashMap
-- std::fs
-- std::path::PathBuf
-- super::*
-- tauri::{AppHandle, Manager}
-- load_manual_order()
-- order_path()
-- OrderFile
-- save_manual_order()
-
-### Community 138 — parse_launch_args() (12 nodes, cohesion: 0.18)
+### Community 139 — parse_launch_args() (12 nodes, cohesion: 0.18)
 
 - launch_request
 - emit_launch_request()
@@ -3155,21 +3172,6 @@
 - LaunchPayload
 - LaunchRequest
 - parse_launch_args()
-
-### Community 139 — handleReset() (139) (12 nodes, cohesion: 0.17)
-
-- Basic
-- handleReset()
-- clsx/clsx
-- framer-motion/motion
-- react-i18next/useTranslation
-- react/useEffect
-- react/useMemo
-- react/useRef
-- react/useState
-- ../ui/Slider/Slider
-- ../../utils/adjustments/Adjustments
-- ../../utils/adjustments/BasicAdjustment
 
 ### Community 140 — parse_point_colors() (12 nodes, cohesion: 0.35)
 
@@ -3186,61 +3188,64 @@
 - parse_hsl_adjustments()
 - parse_point_colors()
 
-### Community 141 — regularize_poses() (11 nodes, cohesion: 0.27)
+### Community 141 — handleReset() (141) (12 nodes, cohesion: 0.17)
 
-- LensWarp
-- .apply()
-- .identity()
-- .is_plausible()
-- .jacobian()
-- .max_displacement()
-- .predistort()
-- .to_vector()
-- .with_vector()
-- poly_basis()
-- regularize_poses()
+- Basic
+- handleReset()
+- clsx/clsx
+- framer-motion/motion
+- react-i18next/useTranslation
+- react/useEffect
+- react/useMemo
+- react/useRef
+- react/useState
+- ../ui/Slider/Slider
+- ../../utils/adjustments/Adjustments
+- ../../utils/adjustments/BasicAdjustment
 
-### Community 142 — summarizeWindow() (11 nodes, cohesion: 0.27)
+### Community 142 — WgpuDisplay (12 nodes, cohesion: 0.20)
 
-- replay
-- durationsInWindow()
-- frameTick()
-- median()
-- p95()
-- startMeasuring()
-- statOf()
-- stdev()
-- stopMeasuring()
-- summarizePhaseAcrossIterations()
-- summarizeWindow()
+- get_or_init_gpu_context()
+- .build_guided_coeffs()
+- .new()
+- process_and_get_dynamic_image()
+- process_and_get_dynamic_image_inner()
+- process_and_get_dynamic_image_with_analytics()
+- process_and_get_dynamic_image_with_precision()
+- schedule_redraw_retry()
+- to_rgba_f16()
+- WgpuDisplay
+- .apply_pending_size()
+- .render()
 
-### Community 143 — unorientPoint() (11 nodes, cohesion: 0.31)
+### Community 143 — useTauriListeners() (12 nodes, cohesion: 0.17)
 
-- cropUtils
-- calculateAutoCropForRotation()
-- calculateCenteredCrop()
-- calculateStraightenAngle()
-- fitCropTowards()
-- getOrientedDimensions()
-- guidedRectToCrop()
-- react-image-crop/Crop
-- orientPoint()
-- rotateCropCenter()
-- unorientPoint()
-
-### Community 144 — useImageLoader() (11 nodes, cohesion: 0.18)
-
-- useImageLoader
-- ../components/ui/AppProperties/Invokes
+- useTauriListeners
+- ../components/ui/ExportImportProperties/Status
 - react-toastify/toast
 - react/useEffect
+- react/useRef
 - ../store/useEditorStore/useEditorStore
 - ../store/useLibraryStore/useLibraryStore
-- ../store/useSettingsStore/useSettingsStore
-- @tauri-apps/api/core/invoke
-- ../utils/adjustments/INITIAL_ADJUSTMENTS
-- ../utils/adjustments/normalizeLoadedAdjustments
-- useImageLoader()
+- ../store/useProcessStore/useProcessStore
+- ../store/useUIStore/useUIStore
+- @tauri-apps/api/core/convertFileSrc
+- @tauri-apps/api/event/listen
+- useTauriListeners()
+
+### Community 144 — handleVariableClick() (11 nodes, cohesion: 0.18)
+
+- ImportSettingsModal
+- handleVariableClick()
+- react-i18next/useTranslation
+- react/useCallback
+- react/useEffect
+- react/useRef
+- react/useState
+- ../../types/typography/TextVariants
+- ../ui/ExportImportProperties/FILENAME_VARIABLES
+- ../ui/Switch/Switch
+- ../ui/Text/Text
 
 ### Community 145 — reconcileWorkspace() (11 nodes, cohesion: 0.18)
 
@@ -3256,7 +3261,35 @@
 - zustand/create
 - reconcileWorkspace()
 
-### Community 146 — stitch_images() (11 nodes, cohesion: 0.33)
+### Community 146 — poly_basis() (11 nodes, cohesion: 0.24)
+
+- LensWarp
+- .apply()
+- .fold_radial_into_poly()
+- .identity()
+- .jacobian()
+- .max_displacement()
+- .predistort()
+- .to_vector()
+- .update()
+- .with_vector()
+- poly_basis()
+
+### Community 147 — useImageLoader() (11 nodes, cohesion: 0.18)
+
+- useImageLoader
+- ../components/ui/AppProperties/Invokes
+- react-toastify/toast
+- react/useEffect
+- ../store/useEditorStore/useEditorStore
+- ../store/useLibraryStore/useLibraryStore
+- ../store/useSettingsStore/useSettingsStore
+- @tauri-apps/api/core/invoke
+- ../utils/adjustments/INITIAL_ADJUSTMENTS
+- ../utils/adjustments/normalizeLoadedAdjustments
+- useImageLoader()
+
+### Community 148 — stitch_images() (11 nodes, cohesion: 0.33)
 
 - build_stitching_order()
 - compute_gain_compensation()
@@ -3270,105 +3303,7 @@
 - prepare_image_info()
 - stitch_images()
 
-### Community 147 — runTauriCli (11 nodes, cohesion: 0.20)
-
-- BuildTask
-- assemble
-- BuildTask
-- java.io.File
-- org.apache.tools.ant.taskdefs.condition.Os
-- org.gradle.api.DefaultTask
-- org.gradle.api.GradleException
-- org.gradle.api.logging.LogLevel
-- org.gradle.api.tasks.Input
-- org.gradle.api.tasks.TaskAction
-- runTauriCli
-
-### Community 148 — withRelativeWhiteBalance() (11 nodes, cohesion: 0.31)
-
-- whiteBalance
-- clamp()
-- getRelativeWhiteBalance()
-- getWhiteBalanceMode()
-- ../components/ui/AppProperties/AppSettings
-- resolveWhiteBalance()
-- toMired()
-- toRelativeUnits()
-- toRelativeWhiteBalance()
-- withKelvinWhiteBalance()
-- withRelativeWhiteBalance()
-
-### Community 149 — load_frames() (11 nodes, cohesion: 0.27)
-
-- as_bytes()
-- as_bytes_mut()
-- check_dims()
-- DiskSource
-- .create()
-- .dims()
-- .drop()
-- .get()
-- .path()
-- .write()
-- load_frames()
-
-### Community 150 — zustand/create (150) (11 nodes, cohesion: 0.18)
-
-- useLibraryStore
-- ../components/panel/MainLibrary/ColumnWidths
-- ../components/ui/AppProperties/AlbumItem
-- ../components/ui/AppProperties/FilterCriteria
-- ../components/ui/AppProperties/ImageFile
-- ../components/ui/AppProperties/RawStatus
-- ../components/ui/AppProperties/SortCriteria
-- ../components/ui/AppProperties/SortDirection
-- ../utils/adjustments/Adjustments
-- ../utils/adjustments/INITIAL_ADJUSTMENTS
-- zustand/create
-
-### Community 151 — handleVariableClick() (11 nodes, cohesion: 0.18)
-
-- ImportSettingsModal
-- handleVariableClick()
-- react-i18next/useTranslation
-- react/useCallback
-- react/useEffect
-- react/useRef
-- react/useState
-- ../../types/typography/TextVariants
-- ../ui/ExportImportProperties/FILENAME_VARIABLES
-- ../ui/Switch/Switch
-- ../ui/Text/Text
-
-### Community 152 — ImageLRUCache (11 nodes, cohesion: 0.36)
-
-- ImageLRUCache
-- ImageLRUCache
-- .cleanupEntry()
-- .clear()
-- .constructor()
-- .delete()
-- .deleteByPrefix()
-- .get()
-- .isProtected()
-- .set()
-- ./adjustments/Adjustments
-
-### Community 153 — useExportSettings() (11 nodes, cohesion: 0.18)
-
-- useExportSettings
-- ../components/ui/ExportImportProperties/BorderBasis
-- ../components/ui/ExportImportProperties/DEFAULT_FILENAME_TEMPLATE
-- ../components/ui/ExportImportProperties/ExportPreset
-- ../components/ui/ExportImportProperties/sanitizeFilenameTemplate
-- ../components/ui/ExportImportProperties/TiffBitDepth
-- ../components/ui/ExportImportProperties/WatermarkAnchor
-- react/useCallback
-- react/useMemo
-- react/useState
-- useExportSettings()
-
-### Community 154 — is_android_content_uri() (11 nodes, cohesion: 0.18)
+### Community 149 — is_android_content_uri() (11 nodes, cohesion: 0.18)
 
 - android_integration
 - get_android_cached_lut_path()
@@ -3382,112 +3317,118 @@
 - initialize_android()
 - is_android_content_uri()
 
-### Community 155 — KeepPolicy (11 nodes, cohesion: 0.29)
+### Community 150 — CullModel (11 nodes, cohesion: 0.31)
 
-- .summary()
-- defaults_reproduce_the_old_behaviour()
-- keeping_two_per_burst_is_learned()
-- keeping_weak_bursts_lowers_the_grade_threshold()
-- KeepPolicy
-- .grade_prior()
-- .groups()
-- .keep_grade()
-- .keep_rank()
-- .rank_prior()
-- .typical_keep()
-
-### Community 156 — update_auto_profile_from_image() (10 nodes, cohesion: 0.33)
-
-- flat_gradient()
-- kept_warmth_is_not_undone_by_auto_white_balance()
-- learn_auto_profile_from_folder()
-- learn_style()
-- learned_style_changes_what_auto_asks_for()
-- luma_median()
-- measure_output_style()
-- median_f64()
-- style_measures_contrast_and_kept_warmth()
-- update_auto_profile_from_image()
-
-### Community 157 — resolve_xmp_path() (10 nodes, cohesion: 0.31)
-
-- adjustments_is_negative()
-- assign_group_ids()
-- enqueue_metadata()
-- generate_thumbnail_data()
-- is_cloud_placeholder()
-- list_images_in_dir()
-- list_images_recursive()
-- make_group_key()
-- resolve_image_metadata()
-- resolve_xmp_path()
-
-### Community 158 — ConfirmModal() (10 nodes, cohesion: 0.20)
-
-- ConfirmModal
-- ConfirmModal()
-- react-dom/createPortal
-- react-i18next/useTranslation
-- react/useCallback
-- react/useEffect
-- react/useState
-- ../../types/typography/TextVariants
-- ../ui/Button/Button
-- ../ui/Text/Text
-
-### Community 159 — ../../types/typography/VariantConfig (10 nodes, cohesion: 0.20)
-
-- Text
-- clsx/clsx
-- react/forwardRef
-- react/React
-- ../../types/typography/TEXT_COLOR_KEYS
-- ../../types/typography/TEXT_WEIGHT_KEYS
-- ../../types/typography/TextColor
-- ../../types/typography/TextVariants
-- ../../types/typography/TextWeight
-- ../../types/typography/VariantConfig
-
-### Community 160 — v1_model_files_migrate_into_people() (10 nodes, cohesion: 0.27)
-
-- a_changed_cue_set_starts_that_kind_over()
 - cue_preferences_learn_per_kind_within_a_burst()
-- .default()
+- CullModel
+- .file_path()
+- .from_json()
+- .load()
 - .preference()
+- .preference_mut()
+- .record_import()
+- .reset()
+- .save()
 - .score()
-- Preference
-- .add()
-- .effective_weights()
-- .record()
-- v1_model_files_migrate_into_people()
 
-### Community 161 — default_tagging_shortcuts_option() (10 nodes, cohesion: 0.20)
+### Community 151 — ImageLRUCache (11 nodes, cohesion: 0.36)
 
-- AppSettings
+- ImageLRUCache
+- ImageLRUCache
+- .cleanupEntry()
+- .clear()
+- .constructor()
+- .delete()
+- .deleteByPrefix()
+- .get()
+- .isProtected()
+- .set()
+- ./adjustments/Adjustments
+
+### Community 152 — useExportSettings() (11 nodes, cohesion: 0.18)
+
+- useExportSettings
+- ../components/ui/ExportImportProperties/BorderBasis
+- ../components/ui/ExportImportProperties/DEFAULT_FILENAME_TEMPLATE
+- ../components/ui/ExportImportProperties/ExportPreset
+- ../components/ui/ExportImportProperties/sanitizeFilenameTemplate
+- ../components/ui/ExportImportProperties/TiffBitDepth
+- ../components/ui/ExportImportProperties/WatermarkAnchor
+- react/useCallback
+- react/useMemo
+- react/useState
+- useExportSettings()
+
+### Community 153 — ThumbnailManager (11 nodes, cohesion: 0.22)
+
+- .new()
+- AiTaskToken
+- .cancel()
 - .default()
-- AutoAdjustOptions
-- .default()
-- .deserialize()
-- default_adjustment_visibility()
-- default_export_presets()
-- default_linear_raw_mode()
-- default_open_tree_sections()
-- default_tagging_shortcuts_option()
+- .is_cancelled()
+- .new()
+- .wait_for_cancel()
+- MetadataManager
+- .new()
+- ThumbnailManager
+- .new()
 
-### Community 162 — handleAdjustmentChange() (10 nodes, cohesion: 0.20)
+### Community 154 — withRelativeWhiteBalance() (11 nodes, cohesion: 0.31)
 
-- Details
-- handleAdjustmentChange()
-- ./AdjustmentSubSection/AdjustmentSubSection
-- react-i18next/useTranslation
-- ../ui/AppProperties/AppSettings
-- ../ui/Slider/Slider
-- ../../utils/adjustments/Adjustments
-- ../../utils/adjustments/DetailsAdjustment
-- ../../utils/adjustments/getAdjustmentToolOrder
-- ../../utils/adjustments/getHiddenAdjustmentTools
+- whiteBalance
+- clamp()
+- getRelativeWhiteBalance()
+- getWhiteBalanceMode()
+- ../components/ui/AppProperties/AppSettings
+- resolveWhiteBalance()
+- toMired()
+- toRelativeUnits()
+- toRelativeWhiteBalance()
+- withKelvinWhiteBalance()
+- withRelativeWhiteBalance()
 
-### Community 163 — RenameFileModal() (10 nodes, cohesion: 0.20)
+### Community 155 — zustand/create (11 nodes, cohesion: 0.18)
+
+- useLibraryStore
+- ../components/panel/MainLibrary/ColumnWidths
+- ../components/ui/AppProperties/AlbumItem
+- ../components/ui/AppProperties/FilterCriteria
+- ../components/ui/AppProperties/ImageFile
+- ../components/ui/AppProperties/RawStatus
+- ../components/ui/AppProperties/SortCriteria
+- ../components/ui/AppProperties/SortDirection
+- ../utils/adjustments/Adjustments
+- ../utils/adjustments/INITIAL_ADJUSTMENTS
+- zustand/create
+
+### Community 156 — runTauriCli (11 nodes, cohesion: 0.20)
+
+- BuildTask
+- assemble
+- BuildTask
+- java.io.File
+- org.apache.tools.ant.taskdefs.condition.Os
+- org.gradle.api.DefaultTask
+- org.gradle.api.GradleException
+- org.gradle.api.logging.LogLevel
+- org.gradle.api.tasks.Input
+- org.gradle.api.tasks.TaskAction
+- runTauriCli
+
+### Community 157 — RustPlugin (10 nodes, cohesion: 0.20)
+
+- RustPlugin
+- apply
+- Config
+- com.android.build.api.dsl.ApplicationExtension
+- org.gradle.api.DefaultTask
+- org.gradle.api.Plugin
+- org.gradle.api.Project
+- org.gradle.kotlin.dsl.configure
+- org.gradle.kotlin.dsl.get
+- RustPlugin
+
+### Community 158 — RenameFileModal() (10 nodes, cohesion: 0.20)
 
 - RenameFileModal
 - react-i18next/useTranslation
@@ -3500,7 +3441,111 @@
 - ../ui/Text/Text
 - RenameFileModal()
 
-### Community 164 — hydrate_sub_masks() (10 nodes, cohesion: 0.24)
+### Community 159 — Plane (10 nodes, cohesion: 0.29)
+
+- catmull_weights()
+- collect_samples()
+- Plane
+- .at()
+- .clamped()
+- .filled()
+- .gradients()
+- .new()
+- .sample_bilinear()
+- .sample_catmull_rom()
+
+### Community 160 — resolve_xmp_path() (10 nodes, cohesion: 0.31)
+
+- adjustments_is_negative()
+- assign_group_ids()
+- enqueue_metadata()
+- generate_thumbnail_data()
+- is_cloud_placeholder()
+- list_images_in_dir()
+- list_images_recursive()
+- make_group_key()
+- resolve_image_metadata()
+- resolve_xmp_path()
+
+### Community 161 — outcome() (10 nodes, cohesion: 0.22)
+
+- cull_model
+- GroupOutcome
+- serde::{Deserialize, Serialize}
+- std::collections::HashMap
+- std::path::PathBuf
+- super::*
+- tauri::Manager
+- LearningSummary
+- mixed_kinds_in_a_burst_are_not_compared()
+- outcome()
+
+### Community 162 — default_tagging_shortcuts_option() (10 nodes, cohesion: 0.20)
+
+- AppSettings
+- .default()
+- AutoAdjustOptions
+- .default()
+- .deserialize()
+- default_adjustment_visibility()
+- default_export_presets()
+- default_linear_raw_mode()
+- default_open_tree_sections()
+- default_tagging_shortcuts_option()
+
+### Community 163 — pickPrimary() (10 nodes, cohesion: 0.29)
+
+- imageGrouping
+- buildImageGroups()
+- expandGroupedPaths()
+- findGroupVariants()
+- getFileExtension()
+- getVariantLabel()
+- ../components/ui/AppProperties/GroupingMode
+- ../components/ui/AppProperties/GroupPreference
+- ../components/ui/AppProperties/ImageFile
+- pickPrimary()
+
+### Community 164 — sync_album_path_changes() (10 nodes, cohesion: 0.38)
+
+- albums
+- add_to_album()
+- AlbumItem
+- get_album_images()
+- get_albums()
+- get_albums_path()
+- super::*
+- save_albums()
+- sort_album_tree()
+- sync_album_path_changes()
+
+### Community 165 — uniqueNames() (10 nodes, cohesion: 0.33)
+
+- assistantCull
+- decisionLine()
+- fileNameOf()
+- ../components/ui/AppProperties/Invokes
+- @tauri-apps/api/core/invoke
+- matchDecision()
+- planCullChunks()
+- prepareAll()
+- runAssistantCull()
+- uniqueNames()
+
+### Community 166 — score() (10 nodes, cohesion: 0.33)
+
+- detect_label_region()
+- fill_rect()
+- finds_a_bright_card_on_dark_fabric()
+- frame()
+- ignores_a_small_stray_thread()
+- ignores_the_steel_ruler_and_picks_the_card()
+- never_reports_a_box_outside_the_image()
+- returns_none_when_nothing_is_card_like()
+- scale_and_pad()
+- score()
+
+### Community 167 — hydrate_sub_masks() (10 nodes, cohesion: 0.24)
 
 - adjustment_utils
 - apply_all_transformations()
@@ -3516,133 +3561,46 @@
 - std::borrow::Cow
 - std::collections::HashMap
 
-### Community 165 — ycbcr_to_rgb() (10 nodes, cohesion: 0.27)
+### Community 168 — handleAdjustmentChange() (10 nodes, cohesion: 0.20)
 
-- apply_denoising()
-- .new()
-- batch_denoise_images()
-- denoise_image()
-- gaussian_blur_1ch()
-- merge_channels()
-- rgb_to_ycbcr()
-- run_bm3d()
-- split_channels()
-- ycbcr_to_rgb()
+- Details
+- handleAdjustmentChange()
+- ./AdjustmentSubSection/AdjustmentSubSection
+- react-i18next/useTranslation
+- ../ui/AppProperties/AppSettings
+- ../ui/Slider/Slider
+- ../../utils/adjustments/Adjustments
+- ../../utils/adjustments/DetailsAdjustment
+- ../../utils/adjustments/getAdjustmentToolOrder
+- ../../utils/adjustments/getHiddenAdjustmentTools
 
-### Community 166 — uniqueNames() (10 nodes, cohesion: 0.33)
+### Community 169 — ConfirmModal() (10 nodes, cohesion: 0.20)
 
-- assistantCull
-- decisionLine()
-- fileNameOf()
-- ../components/ui/AppProperties/Invokes
-- @tauri-apps/api/core/invoke
-- matchDecision()
-- planCullChunks()
-- prepareAll()
-- runAssistantCull()
-- uniqueNames()
+- ConfirmModal
+- ConfirmModal()
+- react-dom/createPortal
+- react-i18next/useTranslation
+- react/useCallback
+- react/useEffect
+- react/useState
+- ../../types/typography/TextVariants
+- ../ui/Button/Button
+- ../ui/Text/Text
 
-### Community 167 — RustPlugin (10 nodes, cohesion: 0.20)
+### Community 170 — ../../types/typography/VariantConfig (10 nodes, cohesion: 0.20)
 
-- RustPlugin
-- apply
-- Config
-- com.android.build.api.dsl.ApplicationExtension
-- org.gradle.api.DefaultTask
-- org.gradle.api.Plugin
-- org.gradle.api.Project
-- org.gradle.kotlin.dsl.configure
-- org.gradle.kotlin.dsl.get
-- RustPlugin
+- Text
+- clsx/clsx
+- react/forwardRef
+- react/React
+- ../../types/typography/TEXT_COLOR_KEYS
+- ../../types/typography/TEXT_WEIGHT_KEYS
+- ../../types/typography/TextColor
+- ../../types/typography/TextVariants
+- ../../types/typography/TextWeight
+- ../../types/typography/VariantConfig
 
-### Community 168 — sync_album_path_changes() (10 nodes, cohesion: 0.38)
-
-- albums
-- add_to_album()
-- AlbumItem
-- get_album_images()
-- get_albums()
-- get_albums_path()
-- super::*
-- save_albums()
-- sort_album_tree()
-- sync_album_path_changes()
-
-### Community 169 — pickPrimary() (10 nodes, cohesion: 0.29)
-
-- imageGrouping
-- buildImageGroups()
-- expandGroupedPaths()
-- findGroupVariants()
-- getFileExtension()
-- getVariantLabel()
-- ../components/ui/AppProperties/GroupingMode
-- ../components/ui/AppProperties/GroupPreference
-- ../components/ui/AppProperties/ImageFile
-- pickPrimary()
-
-### Community 170 — write_rrexif_sidecar() (10 nodes, cohesion: 0.40)
-
-- get_rrexif_path()
-- load_primary_metadata()
-- load_sidecar()
-- load_sidecar_with_exif()
-- persist_exif_if_missing()
-- read_exif_data()
-- read_rrexif_sidecar()
-- save_exif_to_rrcache()
-- save_primary_metadata()
-- write_rrexif_sidecar()
-
-### Community 171 — restoreSelection() (9 nodes, cohesion: 0.22)
-
-- useImportStore
-- ../components/ui/AppProperties/CullingSettings
-- ../components/ui/AppProperties/CullingSuggestions
-- ../components/ui/AppProperties/SortDirection
-- ../components/views/import/importFilters/FileTypeFilter
-- ../utils/importLearning/AiDecision
-- zustand/create
-- zustand/middleware/persist
-- restoreSelection()
-
-### Community 172 — truncate_large_exif() (9 nodes, cohesion: 0.42)
-
-- clean_ascii_value()
-- extract_metadata()
-- format_lens_spec()
-- format_lens_specification()
-- insert_missing_lens_fields()
-- rational_to_f32_checked()
-- rawler_rational_to_f32_checked()
-- read_exif_data_from_bytes()
-- truncate_large_exif()
-
-### Community 173 — verify_sha256() (9 nodes, cohesion: 0.31)
-
-- build
-- download_and_verify()
-- sha2::{Digest, Sha256}
-- std::env
-- std::fs
-- std::io::{self, Read}
-- std::path::{Path, PathBuf}
-- main()
-- verify_sha256()
-
-### Community 174 — strip_maker_prefix() (9 nodes, cohesion: 0.44)
-
-- find_lens_by_fuzzy_model()
-- get_lensfun_makers()
-- Lens
-- .get_canonical_model_name()
-- .get_display_name()
-- .get_full_model_name()
-- .get_maker()
-- .get_name()
-- strip_maker_prefix()
-
-### Community 175 — render_rgba_f32() (9 nodes, cohesion: 0.31)
+### Community 171 — render_rgba_f32() (9 nodes, cohesion: 0.31)
 
 - configure()
 - core_image_raw_available()
@@ -3654,31 +3612,55 @@
 - pick_raw9_version()
 - render_rgba_f32()
 
-### Community 176 — MetadataManager (9 nodes, cohesion: 0.28)
+### Community 172 — xmp_packet_for_source() (9 nodes, cohesion: 0.36)
 
-- .new()
-- AiTaskToken
-- .cancel()
-- .default()
-- .is_cancelled()
-- .new()
-- .wait_for_cancel()
-- MetadataManager
-- .new()
+- build_xmp_packet()
+- encode_tiff()
+- insert_xmp_into_tiff()
+- round_trips_through_the_apps_own_tag_parser()
+- tiff_ifd_stays_sorted_and_gains_exactly_one_entry()
+- tiff_is_not_double_tagged_on_re_export()
+- tiff_keywords_embed_and_the_image_still_decodes()
+- write_xmp_only()
+- xmp_packet_for_source()
 
-### Community 177 — scan_dir_lazy() (9 nodes, cohesion: 0.36)
+### Community 173 — verify_sha256() (173) (9 nodes, cohesion: 0.31)
 
-- folder_tree
-- FolderNode
-- get_folder_children()
-- get_folder_tree()
-- get_folder_tree_sync()
-- get_pinned_folder_trees()
-- has_subdirs()
-- super::*
-- scan_dir_lazy()
+- build
+- download_and_verify()
+- sha2::{Digest, Sha256}
+- std::env
+- std::fs
+- std::io::{self, Read}
+- std::path::{Path, PathBuf}
+- main()
+- verify_sha256()
 
-### Community 178 — vanishingPoint() (9 nodes, cohesion: 0.44)
+### Community 174 — KeepPolicy (9 nodes, cohesion: 0.36)
+
+- .summary()
+- keeping_weak_bursts_lowers_the_grade_threshold()
+- KeepPolicy
+- .grade_prior()
+- .groups()
+- .keep_grade()
+- .keep_rank()
+- .rank_prior()
+- .typical_keep()
+
+### Community 175 — truncate_large_exif() (9 nodes, cohesion: 0.42)
+
+- clean_ascii_value()
+- extract_metadata()
+- format_lens_spec()
+- format_lens_specification()
+- insert_missing_lens_fields()
+- rational_to_f32_checked()
+- rawler_rational_to_f32_checked()
+- read_exif_data_from_bytes()
+- truncate_large_exif()
+
+### Community 176 — vanishingPoint() (9 nodes, cohesion: 0.44)
 
 - keystone
 - autoFitScale()
@@ -3690,19 +3672,31 @@
 - solveKeystone()
 - vanishingPoint()
 
-### Community 179 — Plane (9 nodes, cohesion: 0.33)
+### Community 177 — restoreSelection() (9 nodes, cohesion: 0.22)
 
-- catmull_weights()
-- collect_samples()
-- Plane
-- .at()
-- .clamped()
-- .gradients()
-- .new()
-- .sample_bilinear()
-- .sample_catmull_rom()
+- useImportStore
+- ../components/ui/AppProperties/CullingSettings
+- ../components/ui/AppProperties/CullingSuggestions
+- ../components/ui/AppProperties/SortDirection
+- ../components/views/import/importFilters/FileTypeFilter
+- ../utils/importLearning/AiDecision
+- zustand/create
+- zustand/middleware/persist
+- restoreSelection()
 
-### Community 180 — zustand/create (8 nodes, cohesion: 0.25)
+### Community 178 — scan_dir_lazy() (9 nodes, cohesion: 0.36)
+
+- folder_tree
+- FolderNode
+- get_folder_children()
+- get_folder_tree()
+- get_folder_tree_sync()
+- get_pinned_folder_trees()
+- has_subdirs()
+- super::*
+- scan_dir_lazy()
+
+### Community 179 — zustand/create (179) (8 nodes, cohesion: 0.25)
 
 - useSettingsStore
 - ../components/ui/AppProperties/AppSettings
@@ -3712,6 +3706,17 @@
 - @tauri-apps/plugin-os/platform
 - ../utils/themes/DEFAULT_THEME_ID
 - zustand/create
+
+### Community 180 — Num (8 nodes, cohesion: 0.25)
+
+- preset_converter
+- crate::file_management::Preset
+- crate::white_balance::{MIRED_PER_RELATIVE_UNIT, TINT_PER_RELATIVE_UNIT}
+- regex::Regex
+- serde_json::{Map, Value, json}
+- std::collections::HashMap
+- uuid::Uuid
+- Num
 
 ### Community 181 — ComfyClient (8 nodes, cohesion: 0.43)
 
@@ -3724,16 +3729,16 @@
 - ._queue_prompt()
 - .get()
 
-### Community 182 — wait() (8 nodes, cohesion: 0.32)
+### Community 182 — source_valid() (8 nodes, cohesion: 0.43)
 
-- backToLibrary()
-- dispatchMouse()
-- dragSlider()
-- editTwoSliders()
-- openFirstImage()
-- scrollLibrary()
-- undoSliderEdits()
-- wait()
+- canvas_bounds()
+- find_adaptive_seam()
+- find_pairwise_seam_dp_horizontal()
+- find_pairwise_seam_dp_vertical()
+- get_interpolated_pixel()
+- progressive_seam_stitcher()
+- sample_bilinear()
+- source_valid()
 
 ### Community 183 — calculate_visual_hash() (8 nodes, cohesion: 0.43)
 
@@ -3746,73 +3751,7 @@
 - .get()
 - .new()
 
-### Community 184 — verify_sha256() (184) (8 nodes, cohesion: 0.39)
-
-- download_and_verify_model()
-- get_models_dir()
-- get_or_init_ai_models()
-- get_or_init_denoise_model()
-- get_or_init_face_model()
-- get_or_init_lama_model()
-- promote_legacy_model_filename()
-- verify_sha256()
-
-### Community 185 — warp_image_homography() (8 nodes, cohesion: 0.43)
-
-- canvas_bounds()
-- find_adaptive_seam()
-- find_pairwise_seam_dp_horizontal()
-- find_pairwise_seam_dp_vertical()
-- get_interpolated_pixel()
-- progressive_seam_stitcher()
-- source_valid()
-- warp_image_homography()
-
-### Community 186 — resolveAutoAdjust() (8 nodes, cohesion: 0.25)
-
-- AppProperties
-- ./ExportImportProperties/ExportPreset
-- ../panel/right/Masks/ToolType
-- ../../utils/adjustments/Adjustments
-- ../../utils/adjustments/CopyPasteSettings
-- ../../utils/whiteBalance/WhiteBalance
-- ../../utils/whiteBalance/WhiteBalanceMode
-- resolveAutoAdjust()
-
-### Community 187 — useThumbnails() (8 nodes, cohesion: 0.25)
-
-- useThumbnails
-- lodash.debounce/debounce
-- react/useCallback
-- react/useEffect
-- react/useMemo
-- react/useRef
-- @tauri-apps/api/core/invoke
-- useThumbnails()
-
-### Community 188 — CullModel (8 nodes, cohesion: 0.43)
-
-- CullModel
-- .file_path()
-- .from_json()
-- .load()
-- .preference_mut()
-- .record_import()
-- .reset()
-- .save()
-
-### Community 189 — Num (8 nodes, cohesion: 0.25)
-
-- preset_converter
-- crate::file_management::Preset
-- crate::white_balance::{MIRED_PER_RELATIVE_UNIT, TINT_PER_RELATIVE_UNIT}
-- regex::Regex
-- serde_json::{Map, Value, json}
-- std::collections::HashMap
-- uuid::Uuid
-- Num
-
-### Community 190 — reset_cull_feedback() (8 nodes, cohesion: 0.39)
+### Community 184 — reset_cull_feedback() (8 nodes, cohesion: 0.39)
 
 - CullFeedback
 - .add()
@@ -3823,27 +3762,40 @@
 - record_assistant_cull_feedback()
 - reset_cull_feedback()
 
-### Community 191 — nextMessageId() (7 nodes, cohesion: 0.33)
+### Community 185 — useThumbnails() (8 nodes, cohesion: 0.25)
 
-- useAssistantStore
-- deriveTitle()
-- zustand/create
-- zustand/middleware/persist
-- makeConversation()
-- nextConversationId()
-- nextMessageId()
+- useThumbnails
+- lodash.debounce/debounce
+- react/useCallback
+- react/useEffect
+- react/useMemo
+- react/useRef
+- @tauri-apps/api/core/invoke
+- useThumbnails()
 
-### Community 192 — resolve_android_content_uri_name() (7 nodes, cohesion: 0.57)
+### Community 186 — DiskSource (8 nodes, cohesion: 0.36)
 
-- clear_pending_android_exception()
-- close_android_closeable()
-- get_android_content_resolver()
-- map_android_jni_error()
-- parse_android_uri()
-- read_android_content_uri()
-- resolve_android_content_uri_name()
+- as_bytes()
+- as_bytes_mut()
+- DiskSource
+- .create()
+- .dims()
+- .get()
+- .path()
+- .write()
 
-### Community 193 — resolveNudgeStep() (7 nodes, cohesion: 0.38)
+### Community 187 — resolveAutoAdjust() (8 nodes, cohesion: 0.25)
+
+- AppProperties
+- ./ExportImportProperties/ExportPreset
+- ../panel/right/Masks/ToolType
+- ../../utils/adjustments/Adjustments
+- ../../utils/adjustments/CopyPasteSettings
+- ../../utils/whiteBalance/WhiteBalance
+- ../../utils/whiteBalance/WhiteBalanceMode
+- resolveAutoAdjust()
+
+### Community 188 — resolveNudgeStep() (7 nodes, cohesion: 0.38)
 
 - keyboardUtils
 - codeToDisplayLabel()
@@ -3853,97 +3805,7 @@
 - normalizeCombo()
 - resolveNudgeStep()
 
-### Community 194 — update_json_file() (7 nodes, cohesion: 0.43)
-
-- update_translations
-- deep_merge()
-- json
-- pathlib.Path
-- main()
-- sort_dict_recursively()
-- update_json_file()
-
-### Community 195 — useWaveformControls() (7 nodes, cohesion: 0.29)
-
-- useWaveformControls
-- react/PointerEvent
-- react/useCallback
-- react/useState
-- ../store/useEditorStore/useEditorStore
-- ../store/useSettingsStore/useSettingsStore
-- useWaveformControls()
-
-### Community 196 — v() (7 nodes, cohesion: 0.43)
-
-- appends_files_added_since_the_order_was_saved()
-- apply_order()
-- every_present_file_appears_exactly_once()
-- ignores_names_that_are_gone()
-- keeps_the_saved_order()
-- no_saved_order_leaves_the_folder_untouched()
-- v()
-
-### Community 197 — xmp_packet_for_source() (7 nodes, cohesion: 0.33)
-
-- apply_gps_from_kamadak()
-- apply_gps_from_rawler()
-- apply_sidecar_field_overrides()
-- copy_full_exif_from_source()
-- write_image_with_metadata()
-- write_xmp_only()
-- xmp_packet_for_source()
-
-### Community 198 — wiener_filter() (7 nodes, cohesion: 0.33)
-
-- AtomicAccumulator
-- .add()
-- .to_vec()
-- bm3d_process_joint()
-- hard_threshold()
-- run_bm3d_step_joint()
-- wiener_filter()
-
-### Community 199 — TileParams (7 nodes, cohesion: 0.38)
-
-- face_area()
-- face_iou()
-- generate_face_region_mask()
-- run_face_detection()
-- run_lama_inpainting()
-- TileParams
-- .new()
-
-### Community 200 — ../ui/Text/Text (7 nodes, cohesion: 0.29)
-
-- RenameFolderModal
-- react-i18next/useTranslation
-- react/useCallback
-- react/useEffect
-- react/useState
-- ../../types/typography/TextVariants
-- ../ui/Text/Text
-
-### Community 201 — useProductivityActions() (7 nodes, cohesion: 0.29)
-
-- useProductivityActions
-- ../components/modals/DenoiseModal/DenoiseMethod
-- ../components/ui/AppProperties/Invokes
-- react/useCallback
-- ../store/useUIStore/useUIStore
-- @tauri-apps/api/core/invoke
-- useProductivityActions()
-
-### Community 202 — ../ui/Text/Text (202) (7 nodes, cohesion: 0.29)
-
-- CreateFolderModal
-- react-i18next/useTranslation
-- react/useCallback
-- react/useEffect
-- react/useState
-- ../../types/typography/TextVariants
-- ../ui/Text/Text
-
-### Community 203 — createSubMask() (7 nodes, cohesion: 0.29)
+### Community 189 — createSubMask() (7 nodes, cohesion: 0.29)
 
 - maskUtils
 - createSubMask()
@@ -3953,7 +3815,37 @@
 - ../hooks/useImageRenderSize/ImageDimensions
 - uuid/v4
 
-### Community 204 — handleSelectFile() (7 nodes, cohesion: 0.29)
+### Community 190 — scan_start() (7 nodes, cohesion: 0.38)
+
+- auto_tone_for()
+- rotate_rect()
+- run_scanimage()
+- run_scanimage_retry()
+- scan_mode()
+- scan_preview()
+- scan_start()
+
+### Community 191 — wiener_filter() (7 nodes, cohesion: 0.33)
+
+- AtomicAccumulator
+- .add()
+- .to_vec()
+- bm3d_process_joint()
+- hard_threshold()
+- run_bm3d_step_joint()
+- wiener_filter()
+
+### Community 192 — useProductivityActions() (7 nodes, cohesion: 0.29)
+
+- useProductivityActions
+- ../components/modals/DenoiseModal/DenoiseMethod
+- ../components/ui/AppProperties/Invokes
+- react/useCallback
+- ../store/useUIStore/useUIStore
+- @tauri-apps/api/core/invoke
+- useProductivityActions()
+
+### Community 193 — handleSelectFile() (7 nodes, cohesion: 0.29)
 
 - ImagePicker
 - handleSelectFile()
@@ -3963,7 +3855,27 @@
 - ./Text/Text
 - ../../types/typography/TextVariants
 
-### Community 205 — PinchZoomDisablePlugin (7 nodes, cohesion: 0.33)
+### Community 194 — resolve_android_content_uri_name() (7 nodes, cohesion: 0.57)
+
+- clear_pending_android_exception()
+- close_android_closeable()
+- get_android_content_resolver()
+- map_android_jni_error()
+- parse_android_uri()
+- read_android_content_uri()
+- resolve_android_content_uri_name()
+
+### Community 195 — ../ui/Text/Text (7 nodes, cohesion: 0.29)
+
+- CreateFolderModal
+- react-i18next/useTranslation
+- react/useCallback
+- react/useEffect
+- react/useState
+- ../../types/typography/TextVariants
+- ../ui/Text/Text
+
+### Community 196 — PinchZoomDisablePlugin (7 nodes, cohesion: 0.33)
 
 - window_customizer
 - apply_macos_window_rounding()
@@ -3973,89 +3885,86 @@
 - .name()
 - .webview_created()
 
-### Community 206 — tiff_keywords_embed_and_the_image_still_decodes() (7 nodes, cohesion: 0.48)
+### Community 197 — ../ui/Text/Text (197) (7 nodes, cohesion: 0.29)
 
-- build_xmp_packet()
-- encode_tiff()
-- insert_xmp_into_tiff()
-- round_trips_through_the_apps_own_tag_parser()
-- tiff_ifd_stays_sorted_and_gains_exactly_one_entry()
-- tiff_is_not_double_tagged_on_re_export()
-- tiff_keywords_embed_and_the_image_still_decodes()
-
-### Community 207 — save_image_bytes_to_android_gallery() (6 nodes, cohesion: 0.33)
-
-- delete_android_media_store_item()
-- put_android_content_value_int()
-- put_android_content_value_string()
-- save_bytes_to_android_media_store()
-- save_file_bytes_to_android_downloads()
-- save_image_bytes_to_android_gallery()
-
-### Community 208 — to_rgba_f16() (6 nodes, cohesion: 0.33)
-
-- .build_guided_coeffs()
-- process_and_get_dynamic_image()
-- process_and_get_dynamic_image_inner()
-- process_and_get_dynamic_image_with_analytics()
-- process_and_get_dynamic_image_with_precision()
-- to_rgba_f16()
-
-### Community 209 — solve_level() (6 nodes, cohesion: 0.40)
-
-- .update()
-- .mean()
-- solve_level()
-- WarpModel
-- .n_params()
-- .prior()
-
-### Community 210 — zustand/create (210) (6 nodes, cohesion: 0.33)
-
-- useCloudStore
-- @clerk/clerk-js/Clerk
-- @tauri-apps/plugin-http/fetch
-- @tauri-apps/plugin-os/platform
-- tauri-plugin-clerk/initClerk
-- zustand/create
-
-### Community 211 — useCloudUsage() (6 nodes, cohesion: 0.33)
-
-- useCloudUsage
+- RenameFolderModal
+- react-i18next/useTranslation
 - react/useCallback
 - react/useEffect
-- ../store/useCloudStore/useCloudStore
-- ../store/useSettingsStore/useSettingsStore
-- useCloudUsage()
-
-### Community 212 — ./utils/frontendLogBridge/installFrontendLogBridge (6 nodes, cohesion: 0.33)
-
-- main
-- ./App/App
-- react-dom/client/createRoot
-- react/React
-- ./styles.css
-- ./utils/frontendLogBridge/installFrontendLogBridge
-
-### Community 213 — ../../types/typography/TextVariants (6 nodes, cohesion: 0.33)
-
-- Switch
-- clsx/clsx
-- framer-motion/motion
-- react/React
-- ./Text/Text
+- react/useState
 - ../../types/typography/TextVariants
+- ../ui/Text/Text
 
-### Community 214 — parse_num() (6 nodes, cohesion: 0.33)
+### Community 198 — writeCullingMetadata() (7 nodes, cohesion: 0.38)
 
-- convert_xmp_to_preset()
-- extract_tone_curve_points()
-- extract_xmp_name()
-- get_attr_as_f64()
-- num_to_json()
-- parse_num()
+- computeDefaultKeepers()
+- gapSeconds()
+- groupArgs()
+- groupSettings()
+- refreshAlreadyImportedNow()
+- useSdImportActions()
+- writeCullingMetadata()
 
-### Community 215 — zustand/create (215) (6 nodes, cohesion: 0.33)
+### Community 199 — Preference (7 nodes, cohesion: 0.38)
+
+- a_changed_cue_set_starts_that_kind_over()
+- .default()
+- defaults_reproduce_the_old_behaviour()
+- keeping_two_per_burst_is_learned()
+- Preference
+- .add()
+- .record()
+
+### Community 200 — update_json_file() (7 nodes, cohesion: 0.43)
+
+- update_translations
+- deep_merge()
+- json
+- pathlib.Path
+- main()
+- sort_dict_recursively()
+- update_json_file()
+
+### Community 201 — nextMessageId() (7 nodes, cohesion: 0.33)
+
+- useAssistantStore
+- deriveTitle()
+- zustand/create
+- zustand/middleware/persist
+- makeConversation()
+- nextConversationId()
+- nextMessageId()
+
+### Community 202 — ycbcr_to_rgb() (7 nodes, cohesion: 0.29)
+
+- Bm3dParams
+- .from_intensity()
+- gaussian_blur_1ch()
+- rgb_to_ycbcr()
+- run_bm3d()
+- split_channels()
+- ycbcr_to_rgb()
+
+### Community 203 — useWaveformControls() (7 nodes, cohesion: 0.29)
+
+- useWaveformControls
+- react/PointerEvent
+- react/useCallback
+- react/useState
+- ../store/useEditorStore/useEditorStore
+- ../store/useSettingsStore/useSettingsStore
+- useWaveformControls()
+
+### Community 204 — sanitize_filename_component() (6 nodes, cohesion: 0.33)
+
+- apply_auto_lens_correction()
+- generate_export_filename()
+- generate_filename_from_template()
+- import_files()
+- parse_sequence_start_token()
+- sanitize_filename_component()
+
+### Community 205 — zustand/create (205) (6 nodes, cohesion: 0.33)
 
 - useProcessStore
 - ../components/ui/AppProperties/Progress
@@ -4064,25 +3973,16 @@
 - ../components/ui/ExportImportProperties/Status
 - zustand/create
 
-### Community 216 — default_shadow_mass() (6 nodes, cohesion: 0.33)
+### Community 206 — useCloudUsage() (6 nodes, cohesion: 0.33)
 
-- AutoProfile
-- .default()
-- default_highlight_mass()
-- default_range_target()
-- default_saturation_target()
-- default_shadow_mass()
+- useCloudUsage
+- react/useCallback
+- react/useEffect
+- ../store/useCloudStore/useCloudStore
+- ../store/useSettingsStore/useSettingsStore
+- useCloudUsage()
 
-### Community 217 — ../../store/useProcessStore/ExternalEditSession (6 nodes, cohesion: 0.33)
-
-- ExternalEditBar 2
-- ./Button/Button
-- lucide-react/Check
-- lucide-react/Loader
-- react-i18next/useTranslation
-- ../../store/useProcessStore/ExternalEditSession
-
-### Community 218 — inverse_transform_mask() (6 nodes, cohesion: 0.47)
+### Community 207 — inverse_transform_mask() (6 nodes, cohesion: 0.47)
 
 - .into_cow()
 - apply_coarse_rotation()
@@ -4091,52 +3991,16 @@
 - apply_rotation()
 - inverse_transform_mask()
 
-### Community 219 — read_texture_data_roi() (6 nodes, cohesion: 0.47)
+### Community 208 — uv_to_centered() (6 nodes, cohesion: 0.47)
 
-- GpuProcessor
-- .high_precision_pipeline()
-- .high_precision_tile()
-- .run()
-- high_precision_shader_source()
-- read_texture_data_roi()
+- compute_guided_homography()
+- line_centered()
+- project_h()
+- secondary_one_line()
+- solve_1v1h()
+- uv_to_centered()
 
-### Community 220 — generate_ai_subject_mask() (6 nodes, cohesion: 0.33)
-
-- encode_to_base64_png()
-- generate_ai_depth_mask()
-- generate_ai_face_region_mask()
-- generate_ai_foreground_mask()
-- generate_ai_sky_mask()
-- generate_ai_subject_mask()
-
-### Community 221 — SourceCache (6 nodes, cohesion: 0.53)
-
-- SourceCache
-- .add()
-- ._delete()
-- ._enforce_limits()
-- .__init__()
-- ._sync()
-
-### Community 222 — Settings (6 nodes, cohesion: 0.33)
-
-- Settings
-- .comfy_url()
-- .http_url()
-- .sent_cache_dir()
-- .source_cache_dir()
-- .ws_url()
-
-### Community 223 — start_analytics_worker() (6 nodes, cohesion: 0.33)
-
-- available_monitor_bounds()
-- register_exit_handler()
-- run()
-- saved_window_state_is_usable()
-- setup_logging()
-- start_analytics_worker()
-
-### Community 224 — getImageFlag() (6 nodes, cohesion: 0.33)
+### Community 209 — getImageFlag() (6 nodes, cohesion: 0.33)
 
 - imageFlags
 - getImageFlag()
@@ -4145,16 +4009,160 @@
 - lucide-react/Ban
 - lucide-react/Flag
 
-### Community 225 — xyz_tag() (6 nodes, cohesion: 0.40)
+### Community 210 — start_analytics_worker() (6 nodes, cohesion: 0.33)
 
-- build_srgb_profile()
-- desc_tag()
-- s15_fixed16()
-- text_tag()
-- trc_tag()
-- xyz_tag()
+- available_monitor_bounds()
+- register_exit_handler()
+- run()
+- saved_window_state_is_usable()
+- setup_logging()
+- start_analytics_worker()
 
-### Community 226 — useSortedLibrary() (6 nodes, cohesion: 0.33)
+### Community 211 — parse_num() (6 nodes, cohesion: 0.33)
+
+- convert_xmp_to_preset()
+- extract_tone_curve_points()
+- extract_xmp_name()
+- get_attr_as_f64()
+- num_to_json()
+- parse_num()
+
+### Community 212 — zustand/create (212) (6 nodes, cohesion: 0.33)
+
+- useCloudStore
+- @clerk/clerk-js/Clerk
+- @tauri-apps/plugin-http/fetch
+- @tauri-apps/plugin-os/platform
+- tauri-plugin-clerk/initClerk
+- zustand/create
+
+### Community 213 — default_shadow_mass() (6 nodes, cohesion: 0.33)
+
+- AutoProfile
+- .default()
+- default_highlight_mass()
+- default_range_target()
+- default_saturation_target()
+- default_shadow_mass()
+
+### Community 214 — Rect (6 nodes, cohesion: 0.33)
+
+- label_detect
+- Component
+- image::{DynamicImage, GenericImageView}
+- image::{Rgb, RgbImage}
+- super::*
+- Rect
+
+### Community 215 — ../../store/useProcessStore/ExternalEditSession (6 nodes, cohesion: 0.33)
+
+- ExternalEditBar 2
+- ./Button/Button
+- lucide-react/Check
+- lucide-react/Loader
+- react-i18next/useTranslation
+- ../../store/useProcessStore/ExternalEditSession
+
+### Community 216 — read_texture_data_roi() (6 nodes, cohesion: 0.47)
+
+- GpuProcessor
+- .high_precision_pipeline()
+- .high_precision_tile()
+- .run()
+- high_precision_shader_source()
+- read_texture_data_roi()
+
+### Community 217 — ../../types/typography/TextVariants (6 nodes, cohesion: 0.33)
+
+- Switch
+- clsx/clsx
+- framer-motion/motion
+- react/React
+- ./Text/Text
+- ../../types/typography/TextVariants
+
+### Community 218 — save_image_bytes_to_android_gallery() (6 nodes, cohesion: 0.33)
+
+- delete_android_media_store_item()
+- put_android_content_value_int()
+- put_android_content_value_string()
+- save_bytes_to_android_media_store()
+- save_file_bytes_to_android_downloads()
+- save_image_bytes_to_android_gallery()
+
+### Community 219 — provider_error() (6 nodes, cohesion: 0.47)
+
+- build_cli_prompt()
+- build_url()
+- call_anthropic()
+- call_openai_compatible()
+- normalize_role()
+- provider_error()
+
+### Community 220 — prepare_source_image() (6 nodes, cohesion: 0.53)
+
+- calculate_mask_bounds()
+- encode_patch_result()
+- generate_manual_cleanup_patch()
+- generate_retouch_patch()
+- invoke_generative_replace_with_mask_def()
+- prepare_source_image()
+
+### Community 221 — Settings (6 nodes, cohesion: 0.33)
+
+- Settings
+- .comfy_url()
+- .http_url()
+- .sent_cache_dir()
+- .source_cache_dir()
+- .ws_url()
+
+### Community 222 — secondary_two_horizontal() (6 nodes, cohesion: 0.53)
+
+- hom_mul()
+- matmul()
+- primary_horizontal()
+- primary_vertical()
+- rotation()
+- secondary_two_horizontal()
+
+### Community 223 — generate_ai_subject_mask() (6 nodes, cohesion: 0.33)
+
+- encode_to_base64_png()
+- generate_ai_depth_mask()
+- generate_ai_face_region_mask()
+- generate_ai_foreground_mask()
+- generate_ai_sky_mask()
+- generate_ai_subject_mask()
+
+### Community 224 — place_photo_on_canvas() (6 nodes, cohesion: 0.33)
+
+- compose_image_on_canvas()
+- .from_u8()
+- fill_border_frame()
+- .from_rgb8()
+- .from_rgb8()
+- place_photo_on_canvas()
+
+### Community 225 — SourceCache (6 nodes, cohesion: 0.53)
+
+- SourceCache
+- .add()
+- ._delete()
+- ._enforce_limits()
+- .__init__()
+- ._sync()
+
+### Community 226 — ./utils/frontendLogBridge/installFrontendLogBridge (6 nodes, cohesion: 0.33)
+
+- main
+- ./App/App
+- react-dom/client/createRoot
+- react/React
+- ./styles.css
+- ./utils/frontendLogBridge/installFrontendLogBridge
+
+### Community 227 — useSortedLibrary() (6 nodes, cohesion: 0.33)
 
 - computeGroupedLibrary()
 - computeSortedLibrary()
@@ -4163,199 +4171,7 @@
 - parseShutter()
 - useSortedLibrary()
 
-### Community 227 — ir_defect_mask() (5 nodes, cohesion: 0.50)
-
-- box_blur()
-- dilate()
-- downsample2()
-- ir_clean_scan()
-- ir_defect_mask()
-
-### Community 228 — is_image_edited() (5 nodes, cohesion: 0.60)
-
-- apply_geometry_warp()
-- apply_unwarp_geometry()
-- get_geometry_params_from_json()
-- is_geometry_identity()
-- is_image_edited()
-
-### Community 229 — generate_ai_subject_bitmap() (5 nodes, cohesion: 0.40)
-
-- generate_ai_bitmap_from_base64()
-- generate_ai_bitmap_from_full_mask()
-- generate_ai_depth_bitmap()
-- generate_ai_foreground_bitmap()
-- generate_ai_subject_bitmap()
-
-### Community 230 — sidecar_tags_reach_the_exported_jpeg() (5 nodes, cohesion: 0.40)
-
-- a_format_we_cannot_embed_leaves_the_bytes_untouched()
-- get_primary_sidecar_path()
-- keep_metadata_off_writes_no_keywords()
-- png_keywords_land_in_an_itxt_chunk_before_iend()
-- sidecar_tags_reach_the_exported_jpeg()
-
-### Community 231 — load_settings() (5 nodes, cohesion: 0.60)
-
-- all_available_adjustments()
-- CopyPasteSettings
-- .default()
-- default_included_adjustments()
-- load_settings()
-
-### Community 232 — MemorySource (5 nodes, cohesion: 0.40)
-
-- FrameSource
-- MemorySource
-- .dims()
-- .get()
-- .len()
-
-### Community 233 — ScanLook (5 nodes, cohesion: 0.50)
-
-- compress_embeds_film_metadata()
-- compress_scan()
-- compress_scan_quantizes_shrinks_and_round_trips()
-- ScanLook
-- .default()
-
-### Community 234 — ../../../store/useProcessStore/useProcessStore (5 nodes, cohesion: 0.40)
-
-- LazyThumb
-- ../../../hooks/useThumbnails/useThumbnails
-- react/useEffect
-- react/useRef
-- ../../../store/useProcessStore/useProcessStore
-
-### Community 235 — Button() (5 nodes, cohesion: 0.40)
-
-- Button
-- Button()
-- clsx/clsx
-- react/ButtonHTMLAttributes
-- react/ReactNode
-
-### Community 236 — non_maximal_suppression() (5 nodes, cohesion: 0.40)
-
-- compute_brief_descriptor()
-- convert_gray_u8_to_f32()
-- find_features()
-- find_features_tuned()
-- non_maximal_suppression()
-
-### Community 237 — generate_sub_mask_bitmap() (5 nodes, cohesion: 0.40)
-
-- generate_ai_sky_bitmap()
-- generate_all_bitmap()
-- generate_linear_bitmap()
-- generate_radial_bitmap()
-- generate_sub_mask_bitmap()
-
-### Community 238 — parse_lut_file() (5 nodes, cohesion: 0.40)
-
-- load_and_parse_lut()
-- parse_3dl()
-- parse_cube()
-- parse_hald()
-- parse_lut_file()
-
-### Community 239 — useAndroidBackHandler() (5 nodes, cohesion: 0.40)
-
-- useAndroidBackHandler 2
-- react/useEffect
-- ../store/useSettingsStore/useSettingsStore
-- ../store/useUIStore/useUIStore
-- useAndroidBackHandler()
-
-### Community 240 — srgb_linearize() (5 nodes, cohesion: 0.50)
-
-- parse_input_profile()
-- parse_trc_tag()
-- parse_xyz_tag()
-- read_s15_fixed16()
-- srgb_linearize()
-
-### Community 241 — get_lens_distortion_params() (5 nodes, cohesion: 0.40)
-
-- extract_dist_params()
-- extract_tca_params()
-- extract_vig_params()
-- get_lens_distortion_params()
-- .get_distortion_params()
-
-### Community 242 — white_balance_and_effects_when_enabled() (5 nodes, cohesion: 0.60)
-
-- auto_results_to_json()
-- each_slider_switch_is_independent()
-- only_enabled_tools_are_written()
-- results()
-- white_balance_and_effects_when_enabled()
-
-### Community 243 — stemKey() (5 nodes, cohesion: 0.70)
-
-- importFilters
-- computeVisible()
-- computeVisibleSet()
-- extOf()
-- stemKey()
-
-### Community 244 — is_supported_image_file() (5 nodes, cohesion: 0.40)
-
-- formats
-- std::convert::AsRef
-- std::path::Path
-- is_raw_file()
-- is_supported_image_file()
-
-### Community 245 — zoomCrop() (5 nodes, cohesion: 0.50)
-
-- calculateAreaPreservingCrop()
-- forceCropInBounds()
-- isCropWithinBounds()
-- moveCropInsideBounds()
-- zoomCrop()
-
-### Community 246 — WgpuDisplay (5 nodes, cohesion: 0.40)
-
-- get_or_init_gpu_context()
-- .new()
-- WgpuDisplay
-- .apply_pending_size()
-- .render()
-
-### Community 247 — run() (5 nodes, cohesion: 0.40)
-
-- handleCapture()
-- handleDetect()
-- handleDisconnect()
-- handleLiveView()
-- run()
-
-### Community 248 — grayscale_erode() (5 nodes, cohesion: 0.40)
-
-- apply_grow_and_feather()
-- generate_color_bitmap()
-- generate_luminance_bitmap()
-- grayscale_dilate()
-- grayscale_erode()
-
-### Community 249 — identical_frames_shot_far_apart_stay_separate() (5 nodes, cohesion: 0.40)
-
-- a_borderline_match_needs_the_frames_to_be_close_in_time()
-- a_matching_hash_links_frames_whose_palettes_differ()
-- a_stray_frame_between_two_takes_does_not_split_them()
-- frame()
-- identical_frames_shot_far_apart_stay_separate()
-
-### Community 250 — ../../utils/imageFlags/FLAG_ICONS (5 nodes, cohesion: 0.40)
-
-- FlagToggles
-- ./AppProperties/ImageFlag
-- clsx/clsx
-- react-i18next/useTranslation
-- ../../utils/imageFlags/FLAG_ICONS
-
-### Community 251 — react/PointerEventHandler (5 nodes, cohesion: 0.40)
+### Community 228 — react/PointerEventHandler (5 nodes, cohesion: 0.40)
 
 - Resizer
 - ./AppProperties/Orientation
@@ -4363,211 +4179,451 @@
 - react/MouseEventHandler
 - react/PointerEventHandler
 
-### Community 252 — neutralize_wb_if_multiexposure() (4 nodes, cohesion: 0.83)
+### Community 229 — load_settings() (5 nodes, cohesion: 0.60)
 
-- multi_exposure 2
-- _find_ifd_entry()
-- is_incamera_multiexposure_canon()
-- neutralize_wb_if_multiexposure()
+- all_available_adjustments()
+- CopyPasteSettings
+- .default()
+- default_included_adjustments()
+- load_settings()
 
-### Community 253 — useCollapsibleHeight() (4 nodes, cohesion: 0.50)
+### Community 230 — ../../../store/useProcessStore/useProcessStore (5 nodes, cohesion: 0.40)
 
-- useCollapsibleHeight
+- LazyThumb
+- ../../../hooks/useThumbnails/useThumbnails
 - react/useEffect
 - react/useRef
-- useCollapsibleHeight()
+- ../../../store/useProcessStore/useProcessStore
 
-### Community 254 — useImportKeyboard() (4 nodes, cohesion: 0.50)
+### Community 231 — sidecar_tags_reach_the_exported_jpeg() (5 nodes, cohesion: 0.40)
 
-- useImportKeyboard
+- a_format_we_cannot_embed_leaves_the_bytes_untouched()
+- get_primary_sidecar_path()
+- keep_metadata_off_writes_no_keywords()
+- png_keywords_land_in_an_itxt_chunk_before_iend()
+- sidecar_tags_reach_the_exported_jpeg()
+
+### Community 232 — ../../utils/imageFlags/FLAG_ICONS (5 nodes, cohesion: 0.40)
+
+- FlagToggles
+- ./AppProperties/ImageFlag
+- clsx/clsx
+- react-i18next/useTranslation
+- ../../utils/imageFlags/FLAG_ICONS
+
+### Community 233 — white_balance_and_effects_when_enabled() (5 nodes, cohesion: 0.60)
+
+- auto_results_to_json()
+- each_slider_switch_is_independent()
+- only_enabled_tools_are_written()
+- results()
+- white_balance_and_effects_when_enabled()
+
+### Community 234 — Button() (5 nodes, cohesion: 0.40)
+
+- Button
+- Button()
+- clsx/clsx
+- react/ButtonHTMLAttributes
+- react/ReactNode
+
+### Community 235 — is_image_edited() (5 nodes, cohesion: 0.60)
+
+- apply_geometry_warp()
+- apply_unwarp_geometry()
+- get_geometry_params_from_json()
+- is_geometry_identity()
+- is_image_edited()
+
+### Community 236 — read_raw_metadata() (5 nodes, cohesion: 0.60)
+
+- get_creation_date_from_bytes()
+- read_exif()
+- read_exposure_time_secs()
+- read_iso()
+- read_raw_metadata()
+
+### Community 237 — parse_lut_file() (5 nodes, cohesion: 0.40)
+
+- load_and_parse_lut()
+- parse_3dl()
+- parse_cube()
+- parse_hald()
+- parse_lut_file()
+
+### Community 238 — is_supported_image_file() (5 nodes, cohesion: 0.40)
+
+- formats
+- std::convert::AsRef
+- std::path::Path
+- is_raw_file()
+- is_supported_image_file()
+
+### Community 239 — grayscale_erode() (5 nodes, cohesion: 0.40)
+
+- apply_grow_and_feather()
+- generate_ai_sky_bitmap()
+- generate_color_bitmap()
+- grayscale_dilate()
+- grayscale_erode()
+
+### Community 240 — ScanLook (5 nodes, cohesion: 0.50)
+
+- compress_embeds_film_metadata()
+- compress_scan()
+- compress_scan_quantizes_shrinks_and_round_trips()
+- ScanLook
+- .default()
+
+### Community 241 — normalizeLoadedAdjustments() (5 nodes, cohesion: 0.40)
+
+- deepCloneCurves()
+- deepCloneParametric()
+- getDefaultCurves()
+- getDefaultParametricCurve()
+- normalizeLoadedAdjustments()
+
+### Community 242 — generate_ai_subject_bitmap() (5 nodes, cohesion: 0.40)
+
+- generate_ai_bitmap_from_base64()
+- generate_ai_bitmap_from_full_mask()
+- generate_ai_depth_bitmap()
+- generate_ai_foreground_bitmap()
+- generate_ai_subject_bitmap()
+
+### Community 243 — ir_defect_mask() (5 nodes, cohesion: 0.50)
+
+- box_blur()
+- dilate()
+- downsample2()
+- ir_clean_scan()
+- ir_defect_mask()
+
+### Community 244 — v1_model_files_migrate_into_people() (5 nodes, cohesion: 0.40)
+
+- CueKind
+- .default_weights()
+- default_weights_sum_to_one()
+- .effective_weights()
+- v1_model_files_migrate_into_people()
+
+### Community 245 — generate_sub_mask_bitmap() (5 nodes, cohesion: 0.40)
+
+- generate_all_bitmap()
+- generate_linear_bitmap()
+- generate_luminance_bitmap()
+- generate_radial_bitmap()
+- generate_sub_mask_bitmap()
+
+### Community 246 — identical_frames_shot_far_apart_stay_separate() (5 nodes, cohesion: 0.40)
+
+- a_borderline_match_needs_the_frames_to_be_close_in_time()
+- a_matching_hash_links_frames_whose_palettes_differ()
+- a_stray_frame_between_two_takes_does_not_split_them()
+- frame()
+- identical_frames_shot_far_apart_stay_separate()
+
+### Community 247 — non_maximal_suppression() (5 nodes, cohesion: 0.40)
+
+- compute_brief_descriptor()
+- convert_gray_u8_to_f32()
+- find_features()
+- find_features_tuned()
+- non_maximal_suppression()
+
+### Community 248 — summarizePhaseAcrossIterations() (5 nodes, cohesion: 0.40)
+
+- median()
+- p95()
+- statOf()
+- stdev()
+- summarizePhaseAcrossIterations()
+
+### Community 249 — render_preview() (5 nodes, cohesion: 0.50)
+
+- detect_frame_crop()
+- detect_frame_rect()
+- frame_crop_trims_holder_bars_and_lamp_area()
+- preview_histogram()
+- render_preview()
+
+### Community 250 — run() (5 nodes, cohesion: 0.40)
+
+- handleCapture()
+- handleDetect()
+- handleDisconnect()
+- handleLiveView()
+- run()
+
+### Community 251 — merge_channels() (5 nodes, cohesion: 0.50)
+
+- apply_denoising()
+- .new()
+- batch_denoise_images()
+- denoise_image()
+- merge_channels()
+
+### Community 252 — stemKey() (5 nodes, cohesion: 0.70)
+
+- importFilters
+- computeVisible()
+- computeVisibleSet()
+- extOf()
+- stemKey()
+
+### Community 253 — MemorySource (5 nodes, cohesion: 0.40)
+
+- FrameSource
+- MemorySource
+- .dims()
+- .get()
+- .len()
+
+### Community 254 — write_image_with_metadata() (5 nodes, cohesion: 0.40)
+
+- apply_gps_from_kamadak()
+- apply_gps_from_rawler()
+- apply_sidecar_field_overrides()
+- copy_full_exif_from_source()
+- write_image_with_metadata()
+
+### Community 255 — the_tone_curve_matches_the_srgb_transfer_function() (5 nodes, cohesion: 0.40)
+
+- every_tag_is_aligned_sorted_and_inside_the_profile()
+- header_declares_an_rgb_display_profile_sized_to_the_bytes()
+- non_rgb_and_lut_profiles_are_skipped()
+- srgb_profile()
+- the_tone_curve_matches_the_srgb_transfer_function()
+
+### Community 256 — useAndroidBackHandler() (5 nodes, cohesion: 0.40)
+
+- useAndroidBackHandler 2
 - react/useEffect
-- ./useSdImportActions/useSdImportActions
-- useImportKeyboard()
+- ../store/useSettingsStore/useSettingsStore
+- ../store/useUIStore/useUIStore
+- useAndroidBackHandler()
 
-### Community 255 — node:assert/assert (4 nodes, cohesion: 0.50)
+### Community 257 — srgb_linearize() (5 nodes, cohesion: 0.50)
 
-- keystone.test
-- ./keystone/solveKeystone
-- ./keystone/vanishingPoint
-- node:assert/assert
+- parse_input_profile()
+- parse_trc_tag()
+- parse_xyz_tag()
+- read_s15_fixed16()
+- srgb_linearize()
 
-### Community 256 — useImageRenderSize() (4 nodes, cohesion: 0.50)
+### Community 258 — parse_creation_field() (5 nodes, cohesion: 0.50)
 
-- useImageRenderSize
-- react/useLayoutEffect
-- react/useState
-- useImageRenderSize()
+- clean_creation_datetime_str()
+- fmt_date_str()
+- normalize_creation_datetime()
+- parse_creation_datetime()
+- parse_creation_field()
 
-### Community 257 — ../../utils/imageFlags/FLAG_ICONS (257) (4 nodes, cohesion: 0.50)
+### Community 259 — ../../utils/imageFlags/FLAG_ICONS (259) (4 nodes, cohesion: 0.50)
 
 - FlagBadges
 - ./AppProperties/ImageFlag
 - clsx/clsx
 - ../../utils/imageFlags/FLAG_ICONS
 
-### Community 258 — suggestProfile() (4 nodes, cohesion: 0.50)
+### Community 260 — suggestProfile() (4 nodes, cohesion: 0.50)
 
 - filmProfiles
 - allProfiles()
 - p()
 - suggestProfile()
 
-### Community 259 — useOsPlatform() (4 nodes, cohesion: 0.50)
+### Community 261 — useImageRenderSize() (4 nodes, cohesion: 0.50)
+
+- useImageRenderSize
+- react/useLayoutEffect
+- react/useState
+- useImageRenderSize()
+
+### Community 262 — useCollapsibleHeight() (4 nodes, cohesion: 0.50)
+
+- useCollapsibleHeight
+- react/useEffect
+- react/useRef
+- useCollapsibleHeight()
+
+### Community 263 — useImportKeyboard() (4 nodes, cohesion: 0.50)
+
+- useImportKeyboard
+- react/useEffect
+- ./useSdImportActions/useSdImportActions
+- useImportKeyboard()
+
+### Community 264 — neutralize_wb_if_multiexposure() (4 nodes, cohesion: 0.83)
+
+- multi_exposure 2
+- _find_ifd_entry()
+- is_incamera_multiexposure_canon()
+- neutralize_wb_if_multiexposure()
+
+### Community 265 — useOsPlatform() (4 nodes, cohesion: 0.50)
 
 - useOsPlatform
 - react/useMemo
 - @tauri-apps/plugin-os/platform
 - useOsPlatform()
 
-### Community 260 — ImageLoaderManager() (3 nodes, cohesion: 0.67)
+### Community 266 — node:assert/assert (4 nodes, cohesion: 0.50)
 
-- ImageLoaderManager
-- ImageLoaderManager()
-- ../../hooks/useImageLoader/useImageLoader
+- keystone.test
+- ./keystone/solveKeystone
+- ./keystone/vanishingPoint
+- node:assert/assert
 
-### Community 261 — java.io.ByteArrayOutputStream (3 nodes, cohesion: 0.67)
-
-- build.gradle
-- groovy.json.JsonSlurper
-- java.io.ByteArrayOutputStream
-
-### Community 262 — react/SVGProps (3 nodes, cohesion: 0.67)
-
-- ExifIcons
-- react/React
-- react/SVGProps
-
-### Community 263 — ImageProcessingManager() (3 nodes, cohesion: 0.67)
-
-- ImageProcessingManager
-- ImageProcessingManager()
-- ../../hooks/useImageProcessing/useImageProcessing
-
-### Community 264 — editorCanvasRgb() (3 nodes, cohesion: 0.67)
-
-- themes
-- editorCanvasRgb()
-- ../components/ui/AppProperties/Theme
-
-### Community 265 — hierarchy (3 nodes, cohesion: 0.67)
-
-- hierarchy
-- once_cell::sync::Lazy
-- std::collections::HashMap
-
-### Community 266 — sanitizeFilenameTemplate() (3 nodes, cohesion: 0.67)
-
-- ExportImportProperties
-- ./AppProperties/Progress
-- sanitizeFilenameTemplate()
-
-### Community 267 — i18next (3 nodes, cohesion: 0.67)
-
-- i18next.d
-- ../i18n/locales/en.json/en
-- i18next
-
-### Community 268 — react/React (3 nodes, cohesion: 0.67)
-
-- Input
-- clsx/clsx
-- react/React
-
-### Community 269 — zustand/middleware/persist (3 nodes, cohesion: 0.67)
-
-- useScannerStore
-- zustand/create
-- zustand/middleware/persist
-
-### Community 270 — lucide-react/Star (3 nodes, cohesion: 0.67)
+### Community 267 — lucide-react/Star (3 nodes, cohesion: 0.67)
 
 - RatingColor
 - ./importFilters/COLOR_HEX
 - lucide-react/Star
 
-### Community 271 — ../../right/CropPanel/OverlayMode (3 nodes, cohesion: 0.67)
+### Community 268 — editorCanvasRgb() (3 nodes, cohesion: 0.67)
+
+- themes
+- editorCanvasRgb()
+- ../components/ui/AppProperties/Theme
+
+### Community 269 — java.io.ByteArrayOutputStream (3 nodes, cohesion: 0.67)
+
+- build.gradle
+- groovy.json.JsonSlurper
+- java.io.ByteArrayOutputStream
+
+### Community 270 — hierarchy (3 nodes, cohesion: 0.67)
+
+- hierarchy
+- once_cell::sync::Lazy
+- std::collections::HashMap
+
+### Community 271 — react/SVGProps (3 nodes, cohesion: 0.67)
+
+- ExifIcons
+- react/React
+- react/SVGProps
+
+### Community 272 — i18next (3 nodes, cohesion: 0.67)
+
+- i18next.d
+- ../i18n/locales/en.json/en
+- i18next
+
+### Community 273 — react/React (3 nodes, cohesion: 0.67)
+
+- Input
+- clsx/clsx
+- react/React
+
+### Community 274 — ImageProcessingManager() (3 nodes, cohesion: 0.67)
+
+- ImageProcessingManager
+- ImageProcessingManager()
+- ../../hooks/useImageProcessing/useImageProcessing
+
+### Community 275 — sanitizeFilenameTemplate() (3 nodes, cohesion: 0.67)
+
+- ExportImportProperties
+- ./AppProperties/Progress
+- sanitizeFilenameTemplate()
+
+### Community 276 — ../../right/CropPanel/OverlayMode (3 nodes, cohesion: 0.67)
 
 - CompositionOverlays
 - react/React
 - ../../right/CropPanel/OverlayMode
 
-### Community 272 — zustand/create (272) (2 nodes, cohesion: 1.00)
+### Community 277 — ImageLoaderManager() (3 nodes, cohesion: 0.67)
 
-- useTetherStore
+- ImageLoaderManager
+- ImageLoaderManager()
+- ../../hooks/useImageLoader/useImageLoader
+
+### Community 278 — zustand/middleware/persist (3 nodes, cohesion: 0.67)
+
+- useScannerStore
 - zustand/create
+- zustand/middleware/persist
 
-### Community 273 — i18next-cli/defineConfig (2 nodes, cohesion: 1.00)
-
-- i18next.config
-- i18next-cli/defineConfig
-
-### Community 274 — main() (2 nodes, cohesion: 1.00)
-
-- main
-- main()
-
-### Community 275 — react/JSX (2 nodes, cohesion: 1.00)
-
-- CollageVariants
-- react/JSX
-
-### Community 276 — java.util.Properties (2 nodes, cohesion: 1.00)
+### Community 279 — java.util.Properties (2 nodes, cohesion: 1.00)
 
 - build.gradle
 - java.util.Properties
 
-### Community 277 — zustand/create (277) (2 nodes, cohesion: 1.00)
+### Community 280 — main() (2 nodes, cohesion: 1.00)
+
+- main
+- main()
+
+### Community 281 — i18next-cli/defineConfig (2 nodes, cohesion: 1.00)
+
+- i18next.config
+- i18next-cli/defineConfig
+
+### Community 282 — zustand/create (282) (2 nodes, cohesion: 1.00)
+
+- useTetherStore
+- zustand/create
+
+### Community 283 — zustand/create (283) (2 nodes, cohesion: 1.00)
 
 - useTetheringStore
 - zustand/create
 
-### Community 278 — typography (1 nodes, cohesion: 1.00)
+### Community 284 — react/JSX (2 nodes, cohesion: 1.00)
+
+- CollageVariants
+- react/JSX
+
+### Community 285 — .into_cow() (285) (1 nodes, cohesion: 1.00)
+
+- .into_cow()
+
+### Community 286 — typography (1 nodes, cohesion: 1.00)
 
 - typography
 
-### Community 279 — .into_cow() (279) (1 nodes, cohesion: 1.00)
-
-- .into_cow()
-
-### Community 280 — .into_cow() (1 nodes, cohesion: 1.00)
-
-- .into_cow()
-
-### Community 281 — build.gradle (1 nodes, cohesion: 1.00)
-
-- build.gradle
-
-### Community 282 — .drop() (1 nodes, cohesion: 1.00)
-
-- .drop()
-
-### Community 283 — .into_cow() (283) (1 nodes, cohesion: 1.00)
-
-- .into_cow()
-
-### Community 284 — .from_u8() (1 nodes, cohesion: 1.00)
-
-- .from_u8()
-
-### Community 285 — .from_u8() (285) (1 nodes, cohesion: 1.00)
-
-- .from_u8()
-
-### Community 286 — mod (286) (1 nodes, cohesion: 1.00)
-
-- mod
-
-### Community 287 — candidates (1 nodes, cohesion: 1.00)
-
-- candidates
-
-### Community 288 — eslint.config (1 nodes, cohesion: 1.00)
+### Community 287 — eslint.config (1 nodes, cohesion: 1.00)
 
 - eslint.config
 
-### Community 289 — mod (1 nodes, cohesion: 1.00)
+### Community 288 — build.gradle (1 nodes, cohesion: 1.00)
+
+- build.gradle
+
+### Community 289 — mod (289) (1 nodes, cohesion: 1.00)
 
 - mod
+
+### Community 290 — .drop() (1 nodes, cohesion: 1.00)
+
+- .drop()
+
+### Community 291 — .from_u8() (1 nodes, cohesion: 1.00)
+
+- .from_u8()
+
+### Community 292 — .into_cow() (292) (1 nodes, cohesion: 1.00)
+
+- .into_cow()
+
+### Community 293 — candidates (1 nodes, cohesion: 1.00)
+
+- candidates
+
+### Community 294 — mod (1 nodes, cohesion: 1.00)
+
+- mod
+
+### Community 295 — .into_cow() (1 nodes, cohesion: 1.00)
+
+- .into_cow()
+
+### Community 296 — .from_u8() (296) (1 nodes, cohesion: 1.00)
+
+- .from_u8()
 
 ## 🕳️ Knowledge Gaps
 
@@ -4591,19 +4647,19 @@
 
 | File | Tokens |
 |------|--------|
-| input | 0 |
 | output | 0 |
+| input | 0 |
 | **Total** | **0** |
 
 ## ❓ Suggested Questions
 
-1. How does 'src_tauri_src_focus_stacking_rs_erode_mask' relate to 3 different communities (warp_or_copy(), Plane, weighted_median_labels())?
-1. How does 'src_tauri_src_ai_processing_rs_get_or_init_ai_models' relate to 3 different communities (transpose(), TileParams, verify_sha256() (184))?
-1. How does 'src_tauri_src_focus_stacking_rs_load_frames' relate to 3 different communities (weighted_median_labels(), load_frames(), warp_or_copy())?
-1. How does 'src_tauri_src_scanning_rs' relate to 3 different communities (write_scan_sidecar(), ir_defect_mask(), ScanLook)?
-1. How does 'src_tauri_src_exif_processing_rs_build_xmp_packet' relate to 3 different communities (tiff_keywords_embed_and_the_image_still_decodes(), xmp_packet_for_source(), try_get_exif_creation_date())?
-1. How does 'src_tauri_src_exif_processing_rs_a_format_we_cannot_embed_leaves_the_bytes_untouched' relate to 3 different communities (sidecar_tags_reach_the_exported_jpeg(), xmp_packet_for_source(), try_get_exif_creation_date())?
-1. How does 'src_tauri_src_mask_generation_rs_generate_color_bitmap' relate to 3 different communities (TransformParams, grayscale_erode(), generate_sub_mask_bitmap())?
+1. How does 'src_tauri_src_exif_processing_rs_read_iso' relate to 3 different communities (read_raw_metadata(), write_rrexif_sidecar(), try_get_exif_creation_date())?
+1. How does 'src_tauri_src_export_processing_rs_export_masks_for_image' relate to 3 different communities (start_external_edit(), WatermarkSettings, place_photo_on_canvas())?
+1. How does 'src_tauri_src_mask_generation_rs_generate_ai_bitmap_from_base64' relate to 3 different communities (generate_ai_subject_bitmap(), TransformParams, grayscale_erode())?
+1. How does 'src_tauri_src_android_integration_rs_put_android_content_value_int' relate to 3 different communities (is_android_content_uri(), save_image_bytes_to_android_gallery(), resolve_android_content_uri_name())?
+1. How does 'src_tauri_src_focus_stacking_rs_disksource_len' relate to 3 different communities (weighted_median_labels(), MemorySource, DiskSource)?
+1. How does 'src_tauri_src_exif_processing_rs_a_format_we_cannot_embed_leaves_the_bytes_untouched' relate to 3 different communities (try_get_exif_creation_date(), write_image_with_metadata(), sidecar_tags_reach_the_exported_jpeg())?
+1. How does 'src_tauri_src_scanning_rs_detect_frame_rect' relate to 3 different communities (write_scan_sidecar(), scan_start(), render_preview())?
 
 ---
 _Generated by graphify-rs_
