@@ -2414,6 +2414,14 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
   // frame), so the canvas doesn't flash the theme colour on load.
   const canvasPresetRgb = editorCanvasRgb(appSettings?.editorCanvasColor);
   const canvasPresetCss = canvasPresetRgb ? `rgb(${canvasPresetRgb.join(',')})` : null;
+  // The canvas colour is normally painted by the native layer, under a
+  // transparent webview. While the uncropped crop-editing layer shows, that
+  // layer only holds a background (the photo is hidden) and nothing redraws it
+  // as crop handles move — once Windows discards its contents (another window
+  // covering this one) the canvas showed straight through to the desktop. The
+  // native photo is hidden there anyway, so paint the canvas in CSS instead.
+  const cropViewVisible = isCropping && uncroppedLayerActive && !!uncroppedAdjustedPreviewUrl;
+  const paintCanvasInCss = !isWgpuActive || cropViewVisible;
   // Same preset for the CSS paths (WebGL renderer, before the first native
   // frame), so the canvas doesn't flash the theme colour on load.
   const hasRenderedAnyPreview = hasRenderedFirstFrame || !!finalPreviewUrl;
@@ -2463,13 +2471,13 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
           'flex-1 relative overflow-hidden touch-none',
           isFullScreen ? 'rounded-none' : 'rounded-lg',
           appSettings?.useWgpuRenderer !== false && !isFullScreen && 'ring-[9999px] ring-bg-secondary',
-          !isWgpuActive &&
+          paintCanvasInCss &&
             !canvasPresetCss &&
             (appSettings?.editorNeutralGreyBg ? 'bg-[#808080]' : 'bg-bg-secondary'),
         )}
         style={{
           cursor: cursorStyle,
-          ...(!isWgpuActive && canvasPresetCss ? { backgroundColor: canvasPresetCss } : {}),
+          ...(paintCanvasInCss && canvasPresetCss ? { backgroundColor: canvasPresetCss } : {}),
         }}
         onContextMenu={onContextMenu}
         ref={imageContainerRef}
