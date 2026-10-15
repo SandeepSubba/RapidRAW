@@ -404,7 +404,9 @@ async fn update_wgpu_transform(
                 0,
                 bytemuck::bytes_of(&display.latest_transform),
             );
-            display.render(&context.device, &context.queue);
+            if !display.render(&context.device, &context.queue) {
+                crate::gpu_processing::schedule_redraw_retry(context.clone());
+            }
         }
     })
     .await
@@ -1645,6 +1647,13 @@ fn get_log_file_path(app_handle: tauri::AppHandle) -> Result<String, String> {
     Ok(log_file_path.to_string_lossy().to_string())
 }
 
+/// The startup notice that the backend was switched to OpenGL, handed out
+/// once so the frontend shows it a single time.
+#[tauri::command]
+fn take_gpu_fallback_notice(state: tauri::State<AppState>) -> Option<String> {
+    state.gpu_fallback_notice.lock().unwrap().take()
+}
+
 #[tauri::command]
 fn frontend_log(level: String, message: String) -> Result<(), String> {
     let trimmed = message.trim();
@@ -1907,7 +1916,9 @@ pub fn run() {
                 if let Ok(mut display_lock) = ctx.display.try_lock()
                     && let Some(display) = display_lock.as_mut() {
                         display.apply_pending_size(ctx);
-                        display.render(&ctx.device, &ctx.queue);
+                        if !display.render(&ctx.device, &ctx.queue) {
+                            crate::gpu_processing::schedule_redraw_retry(ctx.clone());
+                        }
                     }
             }
         })
@@ -1986,8 +1997,21 @@ pub fn run() {
                 state.decoded_image_cache.lock().unwrap().set_capacity(cache_size);
             }
 
+            // The fallback used to be announced with log::warn! here, before
+            // setup_logging() — so it never reached app.log, and the switch to
+            // OpenGL happened silently. A forced close during the ~1 s GPU init
+            // leaves the flag behind too, and OpenGL can leave the native layer
+            // blank in a maximized window (the "see-through canvas"). Keep the
+            // reason until logging is up, then log it and tell the user.
+            let mut gpu_fallback_notice: Option<String> = None;
             if crash_flag_path.exists() {
-                log::warn!("GPU Driver crash detected on last run! Falling back to OpenGL backend.");
+                gpu_fallback_notice = Some(
+                    "GPU setup didn't finish the last time RapidRAW ran (a crash or a forced close), so the \
+                     processing backend was switched to OpenGL for safety. OpenGL can leave the image display \
+                     blank or see-through, especially in a maximized window. If that happens, set Settings > \
+                     Processing Backend back to Auto."
+                        .to_string(),
+                );
                 settings.processing_backend = Some("gl".to_string());
                 let _ = crate::save_settings(settings.clone(), app_handle.clone());
                 let _ = std::fs::remove_file(&crash_flag_path);
@@ -2038,6 +2062,11 @@ pub fn run() {
             }
 
             setup_logging(&app_handle);
+
+            if let Some(notice) = gpu_fallback_notice {
+                log::warn!("{}", notice);
+                *app.state::<AppState>().gpu_fallback_notice.lock().unwrap() = Some(notice);
+            }
 
             if let Some(backend) = &settings.processing_backend
                 && backend != "auto" {
@@ -2284,6 +2313,7 @@ pub fn run() {
         .manage(AppState {
             window_setup_complete: AtomicBool::new(false),
             gpu_crash_flag_path: Mutex::new(None),
+            gpu_fallback_notice: Mutex::new(None),
             original_image: Mutex::new(None),
             cached_preview: Mutex::new(None),
             gpu_context: Mutex::new(None),
@@ -2331,6 +2361,7 @@ pub fn run() {
             generate_preset_preview,
             generate_uncropped_preview,
             get_log_file_path,
+            take_gpu_fallback_notice,
             frontend_log,
             save_collage,
             merge_hdr,

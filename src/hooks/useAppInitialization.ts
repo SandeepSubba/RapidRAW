@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { toast } from 'react-toastify';
 import { useShallow } from 'zustand/react/shallow';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { useUIStore, reconcileWorkspace } from '../store/useUIStore';
@@ -142,6 +143,17 @@ export const useAppInitialization = ({
   useEffect(() => {
     initPlatform();
   }, [initPlatform]);
+
+  // A crash or forced close during GPU setup switches the backend to OpenGL,
+  // which can leave the image display see-through when maximized. Say so once:
+  // the switch is otherwise silent and survives every later launch.
+  useEffect(() => {
+    invoke<string | null>(Invokes.TakeGpuFallbackNotice)
+      .then((notice) => {
+        if (notice) toast.warning(notice, { autoClose: false });
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     invoke(Invokes.GetSupportedFileTypes)

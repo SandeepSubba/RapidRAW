@@ -94,6 +94,7 @@ export enum Invokes {
   GetFolderTree = 'get_folder_tree',
   GetFolderChildren = 'get_folder_children',
   GetLogFilePath = 'get_log_file_path',
+  TakeGpuFallbackNotice = 'take_gpu_fallback_notice',
   GetOrCreateInternalLibraryRoot = 'get_or_create_internal_library_root',
   GetPinnedFolderTrees = 'get_pinned_folder_trees',
   GetSupportedFileTypes = 'get_supported_file_types',

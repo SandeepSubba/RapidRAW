@@ -77,7 +77,11 @@ impl WgpuDisplay {
         self.surface.configure(&context.device, &self.config);
     }
 
-    pub fn render(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
+    /// Draw the current frame. Returns false when nothing could be presented
+    /// (window occluded, acquire timed out, surface unavailable) — the caller
+    /// should then `schedule_redraw_retry`, since nothing else redraws a
+    /// skipped frame.
+    pub fn render(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) -> bool {
         if let Some(bind_group) = &self.current_bind_group {
             let output = match self.surface.get_current_texture() {
                 wgpu::CurrentSurfaceTexture::Success(tex)
@@ -95,11 +99,13 @@ impl WgpuDisplay {
                         // runs on the main thread, so it took the app down.
                         _ => {
                             log::warn!("Display surface unavailable after reconfigure; skipping this frame");
-                            return;
+                            return false;
                         }
                     }
                 }
-                _ => return,
+                // Occluded (another window over this one), Timeout, or a
+                // validation error: wgpu says skip and try again later.
+                _ => return false,
             };
             let view = output
                 .texture
@@ -163,8 +169,68 @@ impl WgpuDisplay {
             }
             queue.submit(Some(encoder.finish()));
             output.present();
+            true
+        } else {
+            // Nothing loaded yet: there's no frame to miss.
+            true
         }
     }
+}
+
+static REDRAW_RETRY_PENDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Retry a frame that couldn't present until it does.
+///
+/// With another window over RapidRAW, Windows reports the surface `Occluded`,
+/// and wgpu's contract is "skip the frame and try again once the window is no
+/// longer occluded". Nothing else retried: the transform doesn't change while
+/// the user is just looking, so one skipped frame left the whole native layer
+/// blank — the canvas, the photo and the gaps between panels all showing the
+/// window behind — until something moved. Reproduced by covering the window
+/// and bringing it back (the crop view was only where it was noticed).
+///
+/// One retry loop at a time; it backs off from 100 ms to 1 s and gives up after
+/// a minute, after which the focus-regain repaint starts a new round.
+pub fn schedule_redraw_retry(ctx: GpuContext) {
+    use std::sync::atomic::Ordering;
+    use std::time::{Duration, Instant};
+    if REDRAW_RETRY_PENDING.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    std::thread::spawn(move || {
+        let started = Instant::now();
+        let mut delay = 100u64;
+        let mut attempts = 0u32;
+        let mut presented = false;
+        while started.elapsed() < Duration::from_secs(60) {
+            std::thread::sleep(Duration::from_millis(delay));
+            attempts += 1;
+            {
+                let mut lock = ctx.display.lock().unwrap_or_else(|e| e.into_inner());
+                presented = match lock.as_mut() {
+                    Some(display) => {
+                        display.apply_pending_size(&ctx);
+                        display.render(&ctx.device, &ctx.queue)
+                    }
+                    None => true,
+                };
+            }
+            if presented {
+                break;
+            }
+            delay = (delay * 3 / 2).min(1000);
+        }
+        if presented {
+            log::info!(
+                "Display redrawn after {} retr{} (the window was covered)",
+                attempts,
+                if attempts == 1 { "y" } else { "ies" }
+            );
+        } else {
+            log::info!("Display still can't present after 60 s; the next update or focus will retry");
+        }
+        REDRAW_RETRY_PENDING.store(false, Ordering::Release);
+    });
 }
 
 pub fn get_or_init_gpu_context(

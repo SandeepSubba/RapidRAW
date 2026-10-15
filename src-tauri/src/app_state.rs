@@ -217,6 +217,9 @@ pub type TransformedImageCache = (u64, Arc<DynamicImage>, (f32, f32));
 pub struct AppState {
     pub window_setup_complete: AtomicBool,
     pub gpu_crash_flag_path: Mutex<Option<PathBuf>>,
+    /// Set when startup switched the backend to OpenGL after an unfinished GPU
+    /// init; the frontend takes it once and shows it.
+    pub gpu_fallback_notice: Mutex<Option<String>>,
     pub original_image: Mutex<Option<LoadedImage>>,
     pub cached_preview: Mutex<Option<CachedPreview>>,
     pub gpu_context: Mutex<Option<GpuContext>>,
