@@ -52,7 +52,13 @@ import {
   selectImportFiles,
 } from '../../../utils/importAssistant';
 import { getTransformAdjustments } from '../../../hooks/useAiMasking';
-import { INITIAL_MASK_ADJUSTMENTS, INITIAL_MASK_CONTAINER, MAX_POINT_COLORS } from '../../../utils/adjustments';
+import {
+  INITIAL_MASK_ADJUSTMENTS,
+  INITIAL_MASK_CONTAINER,
+  MAX_POINT_COLORS,
+  getActiveTools,
+  setToolActive,
+} from '../../../utils/adjustments';
 import { useAuth } from '@clerk/react';
 import { createSubMask } from '../../../utils/maskUtils';
 import { Mask, SubMaskMode } from './Masks';
@@ -1146,7 +1152,7 @@ async function applyLut(spec: any, current: any): Promise<{ patch: any; label: s
       lutSize: result.size,
       lutIntensity: intensity ?? 100,
       lutIsSceneReferred: entry.isBuiltIn,
-      sectionVisibility: { ...(current.sectionVisibility || {}), effects: true },
+      activeTools: setToolActive(getActiveTools(current), 'lut', true),
     },
     label: `LUT ${entry.name}${intensity !== null ? ` at ${intensity}%` : ''}`,
   };

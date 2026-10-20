@@ -96,6 +96,8 @@
       "resetPoint": "Reset {{channel}} Point Curve"
     },
     "details": {
+      "aiDenoise": "AI Denoise",
+      "aiDenoiseDetail": "Detail",
       "blueYellow": "Blue/Yellow",
       "centre": "Centré",
       "chromaticAberration": "Chromatic Aberration",
@@ -123,6 +125,11 @@
       "bokehShape": "Bokeh Shape",
       "creative": "Creative",
       "feather": "Feather",
+      "fog": "Fog",
+      "fogDensity": "Density",
+      "fogHeight": "Ground Fog",
+      "fogStart": "Start",
+      "fogVariation": "Variation",
       "glow": "Glow",
       "grain": "Grain",
       "halation": "Halation",
@@ -131,9 +138,34 @@
       "lightFlares": "Light Flares",
       "lut": "LUT",
       "midpoint": "Midpoint",
+      "relight": "Relight",
+      "relightAddLight": "Add Light",
+      "relightAmbient": "Ambient",
+      "relightAngle": "Angle",
+      "relightColor": "Light Color",
+      "relightCone": "Cone",
+      "relightDepth": "Depth",
+      "relightDuplicateLight": "Duplicate Light",
+      "relightElevation": "Elevation",
+      "relightFalloff": "Falloff",
+      "relightHint": "Add or select a light, then click or drag on the image to position it.",
+      "relightIntensity": "Intensity",
+      "relightLight": "Light {{index}}",
+      "relightRemoveLight": "Remove Light",
+      "relightShadowSoftness": "Shadow Softness",
+      "relightShadows": "Shadows",
+      "relightShine": "Shine",
+      "relightSoftness": "Softness",
+      "relightType": "Light Type",
+      "relightTypes": {
+        "directional": "Directional",
+        "point": "Point",
+        "spot": "Spot"
+      },
       "roughness": "Roughness",
       "roundness": "Roundness",
       "size": "Size",
+      "spatial": "Spatial",
       "vignette": "Vignette"
     }
   },
@@ -183,6 +215,7 @@
     "editor": {
       "autoAdjust": "Auto Adjust Image",
       "autoLensCorrection": "Auto Lens Correction",
+      "autoStraighten": "Auto Straighten",
       "cancel": "Cancel",
       "colorLabel": "Color Label",
       "confirmReset": "Confirm Reset",
@@ -255,6 +288,8 @@
       "autoAdjust_other": "Auto Adjust Images",
       "autoLensCorrection_one": "Auto Lens Correction",
       "autoLensCorrection_other": "Auto Lens Correction",
+      "autoStraighten_one": "Auto Straighten Image",
+      "autoStraighten_other": "Auto Straighten Images",
       "collage_one": "Frame Image",
       "collage_other": "Create Collage",
       "confirmDelete": "Confirm Delete",
@@ -427,10 +462,12 @@
       },
       "createNewTitle": "Create New Generative Edit",
       "createNewTooltip": "Create New {{name}} Edit",
+      "denoising": "Running AI Denoise...",
       "dropzoneText": "Drop here to create a new edit",
       "editSettingsTitle": "Edit Settings",
       "editsTitle": "Edits",
       "generatingDepthMap": "Calculating AI Depth Map...",
+      "generatingNormalMap": "Calculating AI Normal Map...",
       "generativeEditTitle": "Generative Edit",
       "inpaintingTitle": "Inpainting",
       "liquify": {
@@ -498,6 +535,8 @@
       "aspectRatioHeading": "Aspect Ratio",
       "cropping": "Cropping",
       "deactivateTooltip": "Deactivate crop tool",
+      "autoStraightenFailed": "Auto straighten failed: {{error}}",
+      "autoStraightenNoLines": "No straight lines found to level from",
       "custom": {
         "hPlaceholder": "H",
         "hTooltip": "Height",
@@ -604,6 +643,7 @@
       "rotationHeading": "Rotation",
       "title": "Crop & Transform",
       "tooltips": {
+        "autoStraighten": "Auto Straighten (Shift+S)",
         "compositionOverlay": "Composition Overlay",
         "flipHoriz": "Flip image horizontally",
         "flipVert": "Flip image vertically",
@@ -965,8 +1005,10 @@
       "selectFolderTitle_other": "Select Folder to Export {{count}} Images"
     },
     "file": {
+      "dpi": "DPI",
       "quality": "Quality",
       "qualityLossless": "Quality (Lossless)",
+      "resolution": "Resolution",
       "tiffBitDepth": "TIFF bit depth",
       "tiffBitDepth16": "16-bit",
       "tiffBitDepth8": "8-bit"
@@ -1172,6 +1214,8 @@
       }
     },
     "header": {
+      "cancel": "Cancel",
+      "deselectAll": "Deselect All",
       "search": {
         "addFilterOrSearch": "Add filter or search...",
         "indexingImages": "Indexing Images...",
@@ -1183,6 +1227,8 @@
         "tooltipClearSearch": "Clear search",
         "tooltipSearchFilter": "Search or Filter"
       },
+      "selectAll": "Select All",
+      "selectItems": "Select items",
       "title": "Library",
       "viewOptions": {
         "currentFolder": "Current Folder",
@@ -1304,7 +1350,8 @@
     "tooltips": {
       "communityPresets": "Community Presets",
       "goHome": "Go to Home",
-      "importImages": "Import Images"
+      "importImages": "Import Images",
+      "select": "Select"
     }
   },
   "masks": {
@@ -1537,6 +1584,7 @@
       "deleteWarning": "Files will be moved to the system trash.",
       "fileNaming": "File Naming",
       "folderOrganization": "Folder Organization",
+      "notUniqueWarning": "Without {original_filename}, {original_filename_number} or {sequence}, files may get the same name. Those files are not imported.",
       "organizeByDate": "Organize into subfolders by date",
       "sourceFiles": "Source Files",
       "startImport": "Start Import",
@@ -1632,6 +1680,7 @@
       "cancel": "Cancel",
       "fileNamingTemplate": "File Naming Template",
       "newName": "New Name",
+      "notUniqueWarning": "Without {original_filename}, {original_filename_number} or {sequence}, files may get the same name. Then nothing is renamed.",
       "save": "Save",
       "titleMultiple": "Rename {{count}} Images",
       "titleMultiple_one": "Rename {{count}} Image",
@@ -1703,6 +1752,9 @@
       "zoomDesc": "Adjust how fast the canvas zooms in and out when using the scroll wheel or pinch gesture."
     },
     "data": {
+      "clearAiDenoise": "Clear AI Denoise Cache",
+      "clearAiDenoiseButton": "Clear",
+      "clearAiDenoiseDesc": "Deletes the cached AI Denoise results ({{size}}). Images with AI Denoise enabled recalculate it the next time they are opened.",
       "clearSidecars": "Clear All Sidecar Files",
       "clearSidecarsButton": "Clear",
       "clearSidecarsDesc": "This will delete all .rrdata files (containing your edits) within your root folders:",
@@ -1714,6 +1766,7 @@
       "logsButton": "Open",
       "logsDesc": "View the application's log file for troubleshooting. The log is located at:",
       "modals": {
+        "aiDenoiseMessage": "Are you sure you want to clear the AI Denoise cache?\n\nImages with AI Denoise enabled will need to be denoised again, which can take several minutes per image.",
         "aiMessage": "Are you sure you want to remove all AI-generated tags from all images in all active root folders?\n\nThis will not affect user-added tags. This action cannot be undone.",
         "allMessage": "Are you sure you want to remove all AI-generated and user-added tags from all images in all active root folders?\n\nThis action cannot be undone.",
         "cacheMessage": "Are you sure you want to clear the thumbnail cache?\n\nAll thumbnails will need to be regenerated, which may be slow for large folders.",
@@ -1736,6 +1789,7 @@
       "resetLayoutDesc": "Restore panel docks, side splitters, heights, and panel switchers to the default layout.",
       "resetLayoutTitle": "Reset Workspace Layout",
       "statuses": {
+        "aiDenoiseSuccess": "AI Denoise cache cleared successfully.",
         "aiSuccess": "{{count}} files updated. AI tags removed.",
         "aiSuccess_one": "{{count}} file updated. AI tags removed.",
         "aiSuccess_other": "{{count}} files updated. AI tags removed.",
@@ -1744,6 +1798,7 @@
         "allSuccess_other": "{{count}} files updated. All non-color tags removed.",
         "cacheSuccess": "Thumbnail cache cleared successfully.",
         "clearingAi": "Clearing AI tags from all sidecar files...",
+        "clearingAiDenoise": "Clearing AI Denoise cache...",
         "clearingAll": "Clearing all tags from sidecar files...",
         "clearingCache": "Clearing thumbnail cache...",
         "deleting": "Deleting sidecar files, please wait...",
@@ -1802,6 +1857,7 @@
     "keybinds": {
       "actions": {
         "activate_crop": "Activate Crop tool",
+        "auto_straighten": "Auto straighten",
         "brush_size_down": "Decrease brush size",
         "brush_size_up": "Increase brush size",
         "color_label_blue": "Color label: Blue",
@@ -2008,6 +2064,10 @@
         "appleRaw9Desc": "Develop RAW files with Apple's Core Image RAW 9 decoder, which demosaics and denoises in one step on the Neural Engine. Requires macOS 27 or later and a supported camera; unsupported files automatically use the built-in decoder. Slower than the default decoder. Thumbnails are not affected.",
         "applyPreprocessing": "Apply Preprocessing to Non-RAWs",
         "applyPreprocessingDesc": "If enabled, the base color noise reduction and pre-sharpening above will also be applied to standard formats.",
+        "baselineExposure": "Baseline Exposure",
+        "baselineExposureAmount": "Baseline Amount",
+        "baselineExposureAmountDesc": "Exposure added to RAW files. darktable uses +0.7 EV.",
+        "baselineExposureDesc": "Brightens every RAW file by a fixed amount, like darktable's scene-referred default, plus the DNG BaselineExposure tag when present. Images edited before this option existed are not affected.",
         "colorNr": "Base Color Noise Reduction",
         "colorNrDesc": "Applies a cross-bilateral filter early in the pipeline to remove chroma noise. Higher value = Stronger NR.",
         "defaultNonRawTonemapper": "Default Non-RAW Tonemapper",
@@ -2015,8 +2075,12 @@
         "defaultRawTonemapper": "Default RAW Tonemapper",
         "defaultRawTonemapperDesc": "The tonemapper to apply to RAW images.",
         "enableAppleRaw9": "Use Apple RAW 9 for RAW files",
+        "enableBaselineExposure": "Apply baseline exposure to RAW files",
+        "enableHighlightPreservation": "Compensate highlight-preserving camera modes",
         "enablePreprocessingNonRaws": "Enable for Non-RAWs",
         "enableTonemapperOverride": "Enable Tonemapper Override",
+        "highlightPreservation": "Highlight Preservation Compensation",
+        "highlightPreservationDesc": "Restores the exposure the camera held back in highlight-preserving modes, read from the RAW file (Fujifilm DR200/DR400, Canon Highlight Tone Priority and Auto Lighting Optimizer, Nikon Active D-Lighting, Olympus gradation, Pentax DR expansion). Images edited before this option existed are not affected.",
         "highlightRecovery": "RAW Highlight Recovery",
         "highlightRecoveryDesc": "Controls how much detail is recovered from clipped highlights in RAW files. Higher values recover more detail but can introduce purple artefacts.",
         "linearOptions": {

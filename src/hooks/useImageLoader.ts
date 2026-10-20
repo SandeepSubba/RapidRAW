@@ -96,15 +96,13 @@ export function useImageLoader(cachedEditStateRef: React.RefObject<any>) {
           });
 
           setEditor((state) => {
-            if (!state.adjustments.aspectRatio && !state.adjustments.crop) {
-              // Reopen on the ratio the user last cropped with; fall back to the
-              // image's own ratio when they have never picked one.
-              const remembered = useSettingsStore.getState().appSettings?.lastCropRatio;
-              const nativeRatio = loadImageResult.width / loadImageResult.height;
-              const aspectRatio = remembered && remembered > 0 ? remembered : nativeRatio;
-              return {
-                adjustments: { ...state.adjustments, aspectRatio },
-              };
+            // Reopen on the ratio the user last cropped with. v1.6.6's default 0
+            // already means "the image's own ratio", so only an untouched photo
+            // (ratio 0, no crop) takes the remembered one; an explicit Free (null)
+            // or other choice is kept.
+            const remembered = useSettingsStore.getState().appSettings?.lastCropRatio;
+            if (state.adjustments.aspectRatio === 0 && !state.adjustments.crop && remembered && remembered > 0) {
+              return { adjustments: { ...state.adjustments, aspectRatio: remembered } };
             }
             return state;
           });

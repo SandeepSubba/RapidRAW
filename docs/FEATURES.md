@@ -199,7 +199,8 @@ and dated.
   edits (one action = one undo step).
 - **Frequency-separation skin smoothing** (global and per-mask) with a
   Picktorial-style **Texture** knob and an adjustable **Smoothing Scale** that
-  preserves real skin texture and guards structural edges.
+  preserves real skin texture and guards structural edges. It is part of
+  the *Presence* tool, so the Presence on/off toggle includes it.
 
 ## Snapshots (versions)
 
@@ -313,7 +314,9 @@ and dated.
   (typically 5–20% smaller on real photos; the decoded image is bit-identical).
   Full 4:4:4 chroma is kept — no subsampling, colour edges stay sharp.
 - **Keyword tags carried into exports** — library keywords are embedded in the
-  exported file's metadata.
+  exported file's metadata: JPEG/PNG/WebP through upstream's XMP writer (with
+  rating and label), TIFF as an XMP IFD entry (fork), AVIF/JXL as a `.xmp`
+  sidecar next to the export.
 - **Export naming** — filename templates gain metadata tokens (`{title}`,
   `{author}`, `{copyright}`, `{comments}`) that mirror the Metadata panel, and the
   File Naming UI is available for **single-image** export (not just batch).

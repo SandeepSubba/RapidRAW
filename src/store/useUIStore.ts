@@ -211,6 +211,13 @@ export function reconcileWorkspace(
   };
 }
 
+export const isPanelVisible = (state: UIState, panel: Panel) =>
+  (Object.keys(state.activePanels) as PanelRegion[]).some(
+    (region) =>
+      state.activePanels[region] === panel &&
+      state.uiVisibility[region.startsWith('left') ? 'leftPanel' : 'rightPanel'],
+  );
+
 export interface UIState {
   activeView: string;
   isImportViewActive: boolean;

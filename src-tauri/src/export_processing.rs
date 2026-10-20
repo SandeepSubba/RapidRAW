@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fs;
-use std::io::Cursor;
+use std::io::{Cursor, Seek, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -19,28 +19,30 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::Emitter;
 use tauri::Manager;
+use tiff::encoder::{Rational, TiffEncoder, TiffValue, colortype};
+use tiff::tags::ResolutionUnit;
 
 use crate::AppState;
+use crate::baseline_exposure::BaselineOptions;
 use crate::exif_processing;
 use crate::file_management::{
     generate_filename_from_template, parse_virtual_path, read_file_mapped,
 };
 use crate::formats::is_raw_file;
-use crate::image_loader::{
-    composite_patches_on_image, load_and_composite, load_base_image_from_bytes,
-};
+use crate::image_loader::{load_and_composite, load_base_image_from_bytes, prepare_base_image};
 use crate::image_processing::{
-    AllAdjustments, Crop, GpuContext, RenderOutputPrecision, RenderRequest, downscale_f32_image,
-    get_all_adjustments_from_json, get_or_init_gpu_context, process_and_get_dynamic_image,
-    process_and_get_dynamic_image_with_precision, resolve_tonemapper_override_from_handle,
+    AllAdjustments, Crop, GpuContext, RenderOptions, RenderOutputPrecision, RenderRequest,
+    downscale_f32_image, get_all_adjustments_from_json, get_or_init_gpu_context,
+    process_and_get_dynamic_image, process_and_get_dynamic_image_with_precision,
+    resolve_render_options_from_handle,
 };
 use crate::lut_processing::{
     convert_image_to_cube_lut, generate_identity_lut_image, get_or_load_lut,
 };
 use crate::mask_generation::{MaskDefinition, build_warped_image_for_masks, generate_mask_bitmap};
 
+use crate::as_shot::as_shot;
 use crate::cache_utils::{calculate_full_job_hash, calculate_transform_hash};
-use crate::white_balance::as_shot_white_balance;
 use crate::{
     apply_all_transformations, generate_transformed_preview, get_cached_or_generate_mask,
     hydrate_adjustments, load_settings,
@@ -145,6 +147,8 @@ pub struct ExportSettings {
     pub destination_type: Option<String>,
     #[serde(default)]
     pub subfolder: Option<String>,
+    #[serde(default)]
+    pub dpi: Option<u16>,
 }
 
 #[derive(Clone)]
@@ -994,13 +998,9 @@ fn process_image_for_export_pipeline(
         })
         .collect();
 
-    let tm_override = resolve_tonemapper_override_from_handle(app_handle, is_raw);
-    let mut all_adjustments = get_all_adjustments_from_json(
-        js_adjustments,
-        is_raw,
-        as_shot_white_balance(path),
-        tm_override,
-    );
+    let render = resolve_render_options_from_handle(app_handle, is_raw);
+    let mut all_adjustments =
+        get_all_adjustments_from_json(js_adjustments, is_raw, as_shot(path), render);
     all_adjustments.global.show_clipping = 0;
 
     let lut_path = js_adjustments["lutPath"].as_str();
@@ -1061,6 +1061,7 @@ fn save_image_with_metadata(
     image: &DynamicImage,
     output_path: &std::path::Path,
     source_path_str: &str,
+    export_xmp: &exif_processing::ExportXmp,
     export_settings: &ExportSettings,
 ) -> Result<(), String> {
     let extension = output_path
@@ -1069,12 +1070,7 @@ fn save_image_with_metadata(
         .unwrap_or("")
         .to_lowercase();
 
-    let mut image_bytes = encode_image_to_bytes(
-        image,
-        &extension,
-        export_settings.jpeg_quality,
-        export_settings.tiff_bit_depth,
-    )?;
+    let mut image_bytes = encode_image_to_bytes(image, &extension, export_settings)?;
 
     exif_processing::write_image_with_metadata(
         &mut image_bytes,
@@ -1082,6 +1078,8 @@ fn save_image_with_metadata(
         &extension,
         export_settings.keep_metadata,
         export_settings.strip_gps,
+        export_xmp,
+        export_settings.dpi,
     )?;
 
     #[cfg(target_os = "android")]
@@ -1105,8 +1103,8 @@ fn save_image_with_metadata(
     fs::write(output_path, image_bytes)
         .map_err(|e| format!("Failed to write file to '{}': {}", output_path.display(), e))?;
 
-    // TIFF, WebP, AVIF and JXL each need container surgery to carry an XMP
-    // packet, so their keywords ride alongside in a .xmp sidecar — the standard
+    // Formats that came out without an embedded keyword packet (AVIF, JXL, or a
+    // splice that failed) carry their keywords in a .xmp sidecar — the standard
     // fallback, and one every DAM reads. Written next to the export, since only
     // this side knows the output path.
     #[cfg(not(target_os = "android"))]
@@ -1260,15 +1258,14 @@ fn encode_grayscale_to_png(bitmap: &GrayImage) -> Result<Vec<u8>, String> {
     Ok(buf)
 }
 
-/// Exports are sRGB-encoded; tagging them lets color-managed apps read them correctly.
 const SRGB_ICC_PROFILE: &[u8] = include_bytes!("../icc/sRGB-v2-magic.icc");
 
 fn encode_image_to_bytes(
     image: &DynamicImage,
     output_format: &str,
-    jpeg_quality: u8,
-    tiff_bit_depth: TiffBitDepth,
+    export_settings: &ExportSettings,
 ) -> Result<Vec<u8>, String> {
+    let jpeg_quality = export_settings.jpeg_quality;
     let mut image_bytes = Vec::new();
     let mut cursor = Cursor::new(&mut image_bytes);
 
@@ -1341,6 +1338,9 @@ fn encode_image_to_bytes(
             encoder
                 .add_icc_profile(crate::icc::srgb_profile())
                 .map_err(|e| e.to_string())?;
+            if let Some(dpi) = export_settings.dpi {
+                encoder.set_density(jpeg_encoder::PixelDensity::dpi(dpi));
+            }
             encoder
                 .encode(rgb_image.as_raw(), width, height, jpeg_encoder::ColorType::Rgb)
                 .map_err(|e| e.to_string())?;
@@ -1359,15 +1359,29 @@ fn encode_image_to_bytes(
             image_to_encode
                 .write_with_encoder(encoder)
                 .map_err(|e| e.to_string())?;
+            if let Some(dpi) = export_settings.dpi {
+                insert_png_phys_chunk(&mut image_bytes, dpi);
+            }
         }
         "tif" | "tiff" => {
-            let image_to_encode = match tiff_bit_depth {
-                TiffBitDepth::Eight => DynamicImage::ImageRgb8(image.to_rgb8()),
-                TiffBitDepth::Sixteen => DynamicImage::ImageRgb16(image.to_rgb16()),
-            };
-            image_to_encode
-                .write_to(&mut cursor, image::ImageFormat::Tiff)
-                .map_err(|e| e.to_string())?;
+            let (width, height) = image.dimensions();
+            let mut encoder = TiffEncoder::new(&mut cursor).map_err(|e| e.to_string())?;
+            match export_settings.tiff_bit_depth {
+                TiffBitDepth::Eight => write_tiff::<colortype::RGB8, _>(
+                    &mut encoder,
+                    width,
+                    height,
+                    image.to_rgb8().as_raw(),
+                    export_settings.dpi,
+                )?,
+                TiffBitDepth::Sixteen => write_tiff::<colortype::RGB16, _>(
+                    &mut encoder,
+                    width,
+                    height,
+                    image.to_rgb16().as_raw(),
+                    export_settings.dpi,
+                )?,
+            }
         }
         "avif" => {
             image
@@ -1379,6 +1393,40 @@ fn encode_image_to_bytes(
     Ok(image_bytes)
 }
 
+fn write_tiff<C: colortype::ColorType, W: Write + Seek>(
+    encoder: &mut TiffEncoder<W>,
+    width: u32,
+    height: u32,
+    data: &[C::Inner],
+    dpi: Option<u16>,
+) -> Result<(), String>
+where
+    [C::Inner]: TiffValue,
+{
+    let mut image = encoder
+        .new_image::<C>(width, height)
+        .map_err(|e| e.to_string())?;
+    if let Some(dpi) = dpi {
+        image.resolution(
+            ResolutionUnit::Inch,
+            Rational {
+                n: dpi.into(),
+                d: 1,
+            },
+        );
+    }
+    image.write_data(data).map_err(|e| e.to_string())
+}
+
+fn insert_png_phys_chunk(image_bytes: &mut Vec<u8>, dpi: u16) {
+    let pixels_per_meter = (f64::from(dpi) / 0.0254).round() as u32;
+    let mut data = Vec::with_capacity(9);
+    data.extend_from_slice(&pixels_per_meter.to_be_bytes());
+    data.extend_from_slice(&pixels_per_meter.to_be_bytes());
+    data.push(1);
+    exif_processing::insert_png_chunk(image_bytes, b"pHYs", &data);
+}
+
 #[allow(clippy::too_many_arguments)]
 fn export_masks_for_image(
     base_image: &DynamicImage,
@@ -1386,6 +1434,7 @@ fn export_masks_for_image(
     export_settings: &ExportSettings,
     output_path_obj: &std::path::Path,
     source_path_str: &str,
+    export_xmp: &exif_processing::ExportXmp,
     context: &Arc<GpuContext>,
     state: &tauri::State<AppState>,
     is_raw: bool,
@@ -1421,13 +1470,9 @@ fn export_masks_for_image(
     }
 
     if !mask_bitmaps.is_empty() {
-        let tm_override = resolve_tonemapper_override_from_handle(app_handle, is_raw);
-        let all_adjustments = get_all_adjustments_from_json(
-            js_adjustments,
-            is_raw,
-            as_shot_white_balance(source_path_str),
-            tm_override,
-        );
+        let render = resolve_render_options_from_handle(app_handle, is_raw);
+        let all_adjustments =
+            get_all_adjustments_from_json(js_adjustments, is_raw, as_shot(source_path_str), render);
         let lut_path = js_adjustments["lutPath"].as_str();
         let lut = lut_path.and_then(|p| get_or_load_lut(state, p).ok());
         let unique_hash = calculate_full_job_hash(source_path_str, js_adjustments);
@@ -1488,6 +1533,7 @@ fn export_masks_for_image(
                 &with_options,
                 &mask_image_path,
                 source_path_str,
+                export_xmp,
                 export_settings,
             )?;
             ensure_export_not_cancelled(cancellation_token)?;
@@ -1531,13 +1577,12 @@ fn export_adjustments_as_lut(
     let lut_size = 33;
     let identity_image = generate_identity_lut_image(lut_size);
 
-    let tm_override = resolve_tonemapper_override_from_handle(app_handle, false);
-    let mut all_adjustments = get_all_adjustments_from_json(
-        js_adjustments,
-        false,
-        as_shot_white_balance(source_path_str),
-        tm_override,
-    );
+    let render = RenderOptions {
+        baseline: BaselineOptions::default(),
+        ..resolve_render_options_from_handle(app_handle, false)
+    };
+    let mut all_adjustments =
+        get_all_adjustments_from_json(js_adjustments, false, as_shot(source_path_str), render);
 
     all_adjustments.global.show_clipping = 0;
     all_adjustments.global.vignette_amount = 0.0;
@@ -1766,6 +1811,9 @@ pub(crate) async fn export_images_impl(
                     ExportAdjustmentsMode::GlobalOverride(_) => false,
                 };
 
+                let sidecar = crate::exif_processing::load_sidecar(&sidecar_path);
+                let export_xmp = crate::exif_processing::ExportXmp::from_metadata(&sidecar);
+
                 let mut js_adjustments = match &adjustments_mode {
                     ExportAdjustmentsMode::UseSidecars {
                         active_adjustments, ..
@@ -1774,10 +1822,10 @@ pub(crate) async fn export_images_impl(
                             if let Some(adj) = active_adjustments {
                                 adj.clone()
                             } else {
-                                crate::exif_processing::load_sidecar(&sidecar_path).adjustments
+                                sidecar.adjustments
                             }
                         } else {
-                            crate::exif_processing::load_sidecar(&sidecar_path).adjustments
+                            sidecar.adjustments
                         }
                     }
                     ExportAdjustmentsMode::GlobalOverride(adj) => adj.clone(),
@@ -1948,7 +1996,7 @@ pub(crate) async fn export_images_impl(
                     };
 
                     let base_image = if let Some(loaded_image) = loaded_image {
-                        composite_patches_on_image(&loaded_image.image, &js_adjustments)
+                        prepare_base_image(&loaded_image.image, &loaded_image.path, &js_adjustments)
                             .map_err(|e| format!("Failed to composite AI patches: {}", e))?
                     } else {
                         match read_file_mapped(Path::new(&source_path_str)) {
@@ -2006,6 +2054,7 @@ pub(crate) async fn export_images_impl(
                         &final_image,
                         &output_path,
                         &source_path_str,
+                        &export_xmp,
                         &export_settings,
                     )?;
                     ensure_export_not_cancelled(&cancellation_token_clone)?;
@@ -2022,6 +2071,7 @@ pub(crate) async fn export_images_impl(
                             &export_settings,
                             &output_path,
                             &source_path_str,
+                            &export_xmp,
                             &context_clone,
                             &state,
                             is_raw,
@@ -2206,6 +2256,7 @@ pub async fn run_headless_export(
         preserve_folders: true,
         destination_type: None,
         subfolder: None,
+        dpi: None,
     };
 
     let mut custom_adjustments = None;
@@ -2329,8 +2380,7 @@ pub async fn estimate_export_sizes(
                 let s = cached.scale;
                 let offset = cached.unscaled_crop_offset;
                 drop(cached_preview_lock);
-                let owned_img = Arc::try_unwrap(img).unwrap_or_else(|arc| (*arc).clone());
-                (owned_img, s, offset)
+                (img, s, offset)
             } else {
                 drop(cached_preview_lock);
                 generate_transformed_preview(
@@ -2372,13 +2422,9 @@ pub async fn estimate_export_sizes(
             })
             .collect();
 
-        let tm_override = resolve_tonemapper_override_from_handle(&app_handle, is_raw);
-        let mut all_adjustments = get_all_adjustments_from_json(
-            &adjustments_clone,
-            is_raw,
-            loaded_image.as_shot_white_balance,
-            tm_override,
-        );
+        let render = resolve_render_options_from_handle(&app_handle, is_raw);
+        let mut all_adjustments =
+            get_all_adjustments_from_json(&adjustments_clone, is_raw, loaded_image.as_shot, render);
         all_adjustments.global.show_clipping = 0;
 
         let lut = adjustments_clone["lutPath"]
@@ -2402,17 +2448,15 @@ pub async fn estimate_export_sizes(
             render_output_precision(&output_format, &export_settings),
         )?;
 
-        let preview_bytes = encode_image_to_bytes(
-            &processed_preview,
-            &output_format,
-            export_settings.jpeg_quality,
-            export_settings.tiff_bit_depth,
-        )?;
+        let preview_bytes =
+            encode_image_to_bytes(&processed_preview, &output_format, &export_settings)?;
         let preview_byte_size = preview_bytes.len();
 
-        let (transformed_full_res, _) =
-            apply_all_transformations(&loaded_image.image, &adjustments_clone);
-        let (full_w, full_h) = transformed_full_res.dimensions();
+        let (full_w, full_h) = crate::adjustment_utils::transformed_dimensions(
+            loaded_image.image.width(),
+            loaded_image.image.height(),
+            &adjustments_clone,
+        );
 
         let (final_full_w, final_full_h) =
             compute_export_output_size(full_w, full_h, &export_settings);
@@ -2514,12 +2558,12 @@ pub async fn estimate_export_sizes(
             })
             .collect();
 
-        let tm_override = resolve_tonemapper_override_from_handle(&app_handle, is_raw);
+        let render = resolve_render_options_from_handle(&app_handle, is_raw);
         let mut all_adjustments = get_all_adjustments_from_json(
             &js_adjustments,
             is_raw,
-            as_shot_white_balance(&source_path_str),
-            tm_override,
+            as_shot(&source_path_str),
+            render,
         );
         all_adjustments.global.show_clipping = 0;
 
@@ -2544,12 +2588,8 @@ pub async fn estimate_export_sizes(
             render_output_precision(&output_format, &export_settings),
         )?;
 
-        let preview_bytes = encode_image_to_bytes(
-            &processed_preview,
-            &output_format,
-            export_settings.jpeg_quality,
-            export_settings.tiff_bit_depth,
-        )?;
+        let preview_bytes =
+            encode_image_to_bytes(&processed_preview, &output_format, &export_settings)?;
         let single_image_estimated_size = preview_bytes.len();
 
         let full_w = (shrunk_w as f32 / raw_scale_factor).round() as u32;
@@ -2748,6 +2788,7 @@ pub async fn start_external_edit(
         subfolder: None,
         border: None,
         pad: None,
+        dpi: None,
     };
 
     let (tx, rx) = tokio::sync::oneshot::channel();
@@ -2819,7 +2860,24 @@ mod tests {
         let image = DynamicImage::ImageRgb8(ImageBuffer::from_fn(64, 48, |x, y| {
             image::Rgb([(x * 4) as u8, (y * 5) as u8, 128])
         }));
-        let bytes = encode_image_to_bytes(&image, "jpg", 90, TiffBitDepth::Sixteen).unwrap();
+        let settings = ExportSettings {
+            jpeg_quality: 90,
+            tiff_bit_depth: TiffBitDepth::Sixteen,
+            resize: None,
+            border: None,
+            pad: None,
+            keep_metadata: false,
+            preserve_timestamps: false,
+            strip_gps: false,
+            filename_template: None,
+            watermark: None,
+            export_masks: false,
+            preserve_folders: false,
+            destination_type: None,
+            subfolder: None,
+            dpi: None,
+        };
+        let bytes = encode_image_to_bytes(&image, "jpg", &settings).unwrap();
 
         assert_eq!(&bytes[0..2], &[0xFF, 0xD8], "not a JPEG");
 

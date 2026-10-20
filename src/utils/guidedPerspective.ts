@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { Crop } from 'react-image-crop';
 import { Adjustments, GuideLine } from './adjustments';
-import { getOrientedDimensions, guidedRectToCrop } from './cropUtils';
+import { getOrientedDimensions, guidedRectToCrop, resolveAspectRatio } from './cropUtils';
 
 type SetAdjustments = (fn: (prev: Adjustments) => Adjustments) => void;
 
@@ -56,7 +56,12 @@ export async function applyGuidedAutoCrop(
       prev.orientationSteps || 0,
       !!prev.flipHorizontal,
       !!prev.flipVertical,
-      prev.aspectRatio ?? null,
+      // aspectRatio 0 = locked to the photo's own ratio (v1.6.6 default), as in the crop tool.
+      resolveAspectRatio(
+        prev.aspectRatio ?? null,
+        { width: imageWidth, height: imageHeight },
+        prev.orientationSteps || 0,
+      ),
     );
     return { ...prev, crop, guidedPerspective: { ...gp, appliedCrop: crop } };
   });

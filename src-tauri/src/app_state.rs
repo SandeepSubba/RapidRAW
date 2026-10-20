@@ -13,13 +13,13 @@ use tokio::task::JoinHandle;
 use wgpu::{Texture, TextureView};
 
 use crate::ai_processing::AiState;
+use crate::as_shot::AsShot;
 use crate::cache_utils::DecodedImageCache;
 use crate::gpu_processing::GpuProcessor;
 use crate::image_processing::GpuContext;
 use crate::launch_request::ExternalEditSession;
 use crate::lens_correction::LensDatabase;
 use crate::lut_processing::Lut;
-use crate::white_balance::WhiteBalance;
 
 pub struct AiTaskToken {
     cancelled: AtomicBool,
@@ -108,7 +108,7 @@ pub struct LoadedImage {
     pub path: String,
     pub image: Arc<DynamicImage>,
     pub is_raw: bool,
-    pub as_shot_white_balance: WhiteBalance,
+    pub as_shot: AsShot,
 }
 
 #[derive(Clone)]
@@ -152,7 +152,7 @@ pub struct PreviewJob {
 
 pub struct AnalyticsJob {
     pub path: String,
-    pub image: Arc<DynamicImage>,
+    pub frame: crate::image_processing::AnalyticsFrame,
     pub compute_waveform: bool,
     pub active_waveform_channel: Option<String>,
 }
@@ -175,17 +175,61 @@ pub struct ThumbnailManager {
     pub processing_now: Mutex<HashSet<String>>,
     pub rotational_disk: AtomicBool,
     pub io_gate: Mutex<()>,
+    active_decodes: Mutex<usize>,
+    decode_cvar: Condvar,
+    max_decodes: usize,
 }
+
+const RAM_PER_THUMBNAIL_DECODE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 
 impl ThumbnailManager {
     pub fn new() -> Arc<Self> {
+        let mut sys = sysinfo::System::new();
+        sys.refresh_memory();
+        let max_decodes =
+            (sys.total_memory() / RAM_PER_THUMBNAIL_DECODE_BYTES).clamp(1, 4) as usize;
+
         Arc::new(Self {
             queue: Mutex::new(VecDeque::new()),
             cvar: Condvar::new(),
             processing_now: Mutex::new(HashSet::new()),
             rotational_disk: AtomicBool::new(false),
             io_gate: Mutex::new(()),
+            active_decodes: Mutex::new(0),
+            decode_cvar: Condvar::new(),
+            max_decodes,
         })
+    }
+
+    pub fn acquire_decode_permit(&self) -> DecodePermit<'_> {
+        let mut active = self
+            .active_decodes
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        while *active >= self.max_decodes {
+            active = self
+                .decode_cvar
+                .wait(active)
+                .unwrap_or_else(|e| e.into_inner());
+        }
+        *active += 1;
+        DecodePermit { manager: self }
+    }
+}
+
+pub struct DecodePermit<'a> {
+    manager: &'a ThumbnailManager,
+}
+
+impl Drop for DecodePermit<'_> {
+    fn drop(&mut self) {
+        let mut active = self
+            .manager
+            .active_decodes
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        *active -= 1;
+        self.manager.decode_cvar.notify_one();
     }
 }
 
@@ -212,7 +256,8 @@ impl MetadataManager {
 }
 
 pub type ThumbnailGeometryEntry = (u64, Arc<DynamicImage>, f32);
-pub type TransformedImageCache = (u64, Arc<DynamicImage>, (f32, f32));
+pub type TransformedImageCache = (u64, Arc<DynamicImage>, f32, (f32, f32));
+pub type TransformedPreview = (Arc<DynamicImage>, f32, (f32, f32));
 
 pub struct AppState {
     pub window_setup_complete: AtomicBool,
@@ -251,7 +296,10 @@ pub struct AppState {
     // fast drag) can detect they've been superseded and bail before doing work.
     pub uncropped_preview_generation: Arc<AtomicUsize>,
     pub full_warped_cache: Mutex<Option<(u64, Arc<DynamicImage>)>>,
-    pub patched_warped_cache: Mutex<Option<(u64, Arc<DynamicImage>)>>,
+    pub patched_cache: Mutex<Option<(u64, Arc<DynamicImage>)>>,
+    pub warped_cache: Mutex<Option<(u64, Arc<DynamicImage>)>>,
+    pub working_cache: Mutex<Option<(u64, Arc<DynamicImage>)>>,
+    pub effects_cache: Mutex<Option<(u64, Arc<DynamicImage>)>>,
     pub full_transformed_cache: Mutex<Option<TransformedImageCache>>,
     pub decoded_image_cache: Mutex<DecodedImageCache>,
     /// Only one full-resolution decode at a time. Arrowing through a folder

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { toast } from 'react-toastify';
-import { ImageFile, ImageFlag, Panel, ExifOverlay } from '../components/ui/AppProperties';
+import { ImageFile, ImageFlag, Panel, ExifOverlay, LibraryViewMode } from '../components/ui/AppProperties';
 import {
   KEYBIND_DEFINITIONS,
   ADJUSTMENT_NUDGES,
@@ -15,6 +15,13 @@ import { useUIStore } from '../store/useUIStore';
 import { useProcessStore } from '../store/useProcessStore';
 import { useEditorActions } from './useEditorActions';
 import { useLibraryActions } from './useLibraryActions';
+
+const getParentFolder = (path: string) => {
+  const physicalPath = path.split('?vc=')[0];
+  const separator = physicalPath.includes('/') ? '/' : '\\';
+  const lastSep = physicalPath.lastIndexOf(separator);
+  return lastSep === -1 ? physicalPath : physicalPath.slice(0, lastSep);
+};
 
 interface KeyboardShortcutsProps {
   sortedImageList: Array<ImageFile>;
@@ -37,8 +44,14 @@ export const useKeyboardShortcuts = ({
   handlePasteFiles,
   handleZoomChange,
 }: KeyboardShortcutsProps) => {
-  const { setAdjustments, handleRotateWithSelection, handleCopyAdjustments, handlePasteAdjustments, toggleShowOriginal } =
-    useEditorActions();
+  const {
+    setAdjustments,
+    handleRotateWithSelection,
+    handleAutoStraighten,
+    handleCopyAdjustments,
+    handlePasteAdjustments,
+    toggleShowOriginal,
+  } = useEditorActions();
   const { handleRate, handleSetFlag, handleToggleFlag, handleSetColorLabel, handleRotateSelected } = useLibraryActions();
 
   const rotateActiveAndSelection = useCallback(
@@ -82,6 +95,7 @@ export const useKeyboardShortcuts = ({
       settings: useSettingsStore.getState(),
       process: useProcessStore.getState(),
     });
+    type ShortcutState = ReturnType<typeof getStoreState>;
 
     const comboMap = new Map<string, string>();
     // Held-chord bindings: a keybind whose first element is a non-modifier key,
@@ -523,6 +537,16 @@ export const useKeyboardShortcuts = ({
           }
         },
       },
+      auto_straighten: {
+        shouldFire: (s: ShortcutState) => s.ui.activeView === 'editor' && !!s.editor.selectedImage,
+        execute: (e: KeyboardEvent, s: ShortcutState) => {
+          e.preventDefault();
+          if (s.ui.activePanel !== Panel.Crop) {
+            s.ui.setPanel(Panel.Crop);
+          }
+          handleAutoStraighten();
+        },
+      },
       rate_0: {
         shouldFire: () => true,
         execute: (e: any) => {
@@ -815,15 +839,14 @@ export const useKeyboardShortcuts = ({
           s.ui.activeView === 'library' && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code),
         execute: (e: KeyboardEvent, s: any) => {
           e.preventDefault();
-          const list = sortedListRef.current;
           const isNext = e.code === 'ArrowRight' || e.code === 'ArrowDown';
           const activePath = s.library.libraryActivePath;
-          if (list.length === 0) return;
+          if (sortedListRef.current.length === 0) return;
           // Nothing focused yet (e.g. just entered the folder, no click): the first
           // arrow press seeds the cursor on the first image so keyboard nav works
           // without needing an initial mouse click.
           if (!activePath) {
-            const first = list[0];
+            const first = sortedListRef.current[0];
             s.library.setLibrary({
               libraryActivePath: first.path,
               multiSelectedPaths: [first.path],
@@ -832,6 +855,12 @@ export const useKeyboardShortcuts = ({
             handleImageSelect(first.path, false);
             return;
           }
+          // Recursive view groups the grid by folder; arrows stay inside the
+          // focused image's folder so rows line up with what's on screen.
+          const recursive = s.settings.appSettings?.libraryViewMode === LibraryViewMode.Recursive;
+          const list = recursive
+            ? sortedListRef.current.filter((img) => getParentFolder(img.path) === getParentFolder(activePath))
+            : sortedListRef.current;
           const currentIndex = list.findIndex((img) => img.path === activePath);
           if (currentIndex === -1) return;
 
@@ -1024,6 +1053,7 @@ export const useKeyboardShortcuts = ({
     handleZoomChange,
     setAdjustments,
     handleRotateWithSelection,
+    handleAutoStraighten,
     handleCopyAdjustments,
     handleCopyImagePaths,
     handlePasteAdjustments,

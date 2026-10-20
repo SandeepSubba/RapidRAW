@@ -8,68 +8,72 @@ pub struct HistogramData {
     luma: Vec<f32>,
 }
 
-pub fn calculate_histogram_from_image(image: &DynamicImage) -> Result<HistogramData, String> {
-    let init_hist = || ([0u32; 256], [0u32; 256], [0u32; 256], [0u32; 256]);
+pub enum AnalyticsPixels {
+    Owned(Vec<u8>),
+    Mapped(wgpu::BufferView),
+}
 
-    let reduce_hist = |mut a: ([u32; 256], [u32; 256], [u32; 256], [u32; 256]),
-                       b: ([u32; 256], [u32; 256], [u32; 256], [u32; 256])| {
-        for i in 0..256 {
-            a.0[i] += b.0[i];
-            a.1[i] += b.1[i];
-            a.2[i] += b.2[i];
-            a.3[i] += b.3[i];
+impl std::ops::Deref for AnalyticsPixels {
+    type Target = [u8];
+
+    fn deref(&self) -> &[u8] {
+        match self {
+            AnalyticsPixels::Owned(data) => data,
+            AnalyticsPixels::Mapped(view) => view,
         }
-        a
-    };
+    }
+}
 
-    let (r_c, g_c, b_c, l_c) = match image {
-        DynamicImage::ImageRgb32F(f32_img) => {
-            let raw = f32_img.as_raw();
-            raw.par_chunks(30_000)
-                .fold(init_hist, |mut acc, chunk| {
-                    for pixel in chunk.chunks_exact(3).step_by(2) {
-                        let r = (pixel[0].clamp(0.0, 1.0) * 255.0) as usize;
-                        let g = (pixel[1].clamp(0.0, 1.0) * 255.0) as usize;
-                        let b = (pixel[2].clamp(0.0, 1.0) * 255.0) as usize;
+pub struct AnalyticsFrame {
+    pub data: AnalyticsPixels,
+    pub width: u32,
+    pub height: u32,
+    pub row_stride: usize,
+}
 
-                        acc.0[r] += 1;
-                        acc.1[g] += 1;
-                        acc.2[b] += 1;
+impl AnalyticsFrame {
+    fn row(&self, y: usize) -> &[[u8; 4]] {
+        let start = y * self.row_stride;
+        self.data[start..start + self.width as usize * 4]
+            .as_chunks::<4>()
+            .0
+    }
+}
 
-                        let luma = (r * 218 + g * 732 + b * 74) >> 10;
-                        acc.3[luma.min(255)] += 1;
-                    }
-                    acc
-                })
-                .reduce(init_hist, reduce_hist)
-        }
-        _ => {
-            let rgb = image.to_rgb8();
-            let raw = rgb.as_raw();
-            raw.par_chunks(30_000)
-                .fold(init_hist, |mut acc, chunk| {
-                    for pixel in chunk.chunks_exact(3).step_by(2) {
-                        let r = pixel[0] as usize;
-                        let g = pixel[1] as usize;
-                        let b = pixel[2] as usize;
+pub fn calculate_histogram(frame: &AnalyticsFrame) -> Result<HistogramData, String> {
+    let width = frame.width as usize;
+    let empty = || [[0u32; 256]; 4];
 
-                        acc.0[r] += 1;
-                        acc.1[g] += 1;
-                        acc.2[b] += 1;
+    let counts = (0..frame.height as usize)
+        .into_par_iter()
+        .with_min_len(16)
+        .fold(empty, |mut acc, y| {
+            let first = (y * width) & 1;
+            for px in frame.row(y).iter().skip(first).step_by(2) {
+                let r = px[0] as usize;
+                let g = px[1] as usize;
+                let b = px[2] as usize;
 
-                        let luma = (r * 218 + g * 732 + b * 74) >> 10;
-                        acc.3[luma.min(255)] += 1;
-                    }
-                    acc
-                })
-                .reduce(init_hist, reduce_hist)
-        }
-    };
+                acc[0][r] += 1;
+                acc[1][g] += 1;
+                acc[2][b] += 1;
 
-    let mut red: Vec<f32> = r_c.into_iter().map(|c| c as f32).collect();
-    let mut green: Vec<f32> = g_c.into_iter().map(|c| c as f32).collect();
-    let mut blue: Vec<f32> = b_c.into_iter().map(|c| c as f32).collect();
-    let mut luma: Vec<f32> = l_c.into_iter().map(|c| c as f32).collect();
+                let luma = (r * 218 + g * 732 + b * 74) >> 10;
+                acc[3][luma.min(255)] += 1;
+            }
+            acc
+        })
+        .reduce(empty, |mut a, b| {
+            for (a_channel, b_channel) in a.iter_mut().zip(b.iter()) {
+                for (a_bin, b_bin) in a_channel.iter_mut().zip(b_channel.iter()) {
+                    *a_bin += b_bin;
+                }
+            }
+            a
+        });
+
+    let [mut red, mut green, mut blue, mut luma] =
+        counts.map(|channel| channel.map(|c| c as f32).to_vec());
 
     let smoothing_sigma = 2.0;
     apply_gaussian_smoothing(&mut red, smoothing_sigma);
@@ -167,14 +171,63 @@ pub struct WaveformData {
     pub height: u32,
 }
 
-pub fn calculate_waveform_from_image(
-    image: &DynamicImage,
+const WAVEFORM_W: usize = 256;
+const WAVEFORM_H: usize = 256;
+const WAVEFORM_MAX_BANDS: usize = 16;
+
+struct WaveformBins {
+    red: Vec<u32>,
+    green: Vec<u32>,
+    blue: Vec<u32>,
+    luma: Vec<u32>,
+    parade: Vec<u32>,
+    vector: Vec<u32>,
+}
+
+impl WaveformBins {
+    fn new(do_rgb: bool, do_luma: bool, do_parade: bool, do_vectorscope: bool) -> Self {
+        let bins = |enabled: bool| {
+            if enabled {
+                vec![0u32; WAVEFORM_W * WAVEFORM_H]
+            } else {
+                vec![]
+            }
+        };
+        Self {
+            red: bins(do_rgb),
+            green: bins(do_rgb),
+            blue: bins(do_rgb),
+            luma: bins(do_luma),
+            parade: bins(do_parade),
+            vector: bins(do_vectorscope),
+        }
+    }
+
+    fn merge(mut self, other: Self) -> Self {
+        for (a, b) in [
+            (&mut self.red, &other.red),
+            (&mut self.green, &other.green),
+            (&mut self.blue, &other.blue),
+            (&mut self.luma, &other.luma),
+            (&mut self.parade, &other.parade),
+            (&mut self.vector, &other.vector),
+        ] {
+            for (a_bin, b_bin) in a.iter_mut().zip(b.iter()) {
+                *a_bin += b_bin;
+            }
+        }
+        self
+    }
+}
+
+pub fn calculate_waveform(
+    frame: &AnalyticsFrame,
     active_channel: Option<&str>,
 ) -> Result<WaveformData, String> {
-    const W: usize = 256;
-    const H: usize = 256;
+    const W: usize = WAVEFORM_W;
+    const H: usize = WAVEFORM_H;
 
-    let (orig_w, orig_h) = image.dimensions();
+    let (orig_w, orig_h) = (frame.width, frame.height);
     if orig_w == 0 || orig_h == 0 {
         return Err("Image has zero dimensions.".to_string());
     }
@@ -184,17 +237,6 @@ pub fn calculate_waveform_from_image(
         active_channel.is_none() || active_channel == Some("luma") || active_channel == Some("rgb");
     let do_parade = active_channel.is_none() || active_channel == Some("parade");
     let do_vectorscope = active_channel.is_none() || active_channel == Some("vectorscope");
-
-    let mut red_bins = if do_rgb { vec![0u32; W * H] } else { vec![] };
-    let mut green_bins = if do_rgb { vec![0u32; W * H] } else { vec![] };
-    let mut blue_bins = if do_rgb { vec![0u32; W * H] } else { vec![] };
-    let mut luma_bins = if do_luma { vec![0u32; W * H] } else { vec![] };
-    let mut parade_bins = if do_parade { vec![0u32; W * H] } else { vec![] };
-    let mut vector_bins = if do_vectorscope {
-        vec![0u32; W * H]
-    } else {
-        vec![]
-    };
 
     let x_scale = W as f32 / orig_w as f32;
     let mut x_buckets = vec![0usize; orig_w as usize];
@@ -213,101 +255,93 @@ pub fn calculate_waveform_from_image(
         }
     }
 
-    let mut process_pixel = |r: u8, g: u8, b: u8, out_x: usize, orig_x: usize| {
-        if do_rgb {
-            red_bins[(255 - r as usize) * W + out_x] += 1;
-            green_bins[(255 - g as usize) * W + out_x] += 1;
-            blue_bins[(255 - b as usize) * W + out_x] += 1;
-        }
-        if do_luma {
-            let l = ((r as u32 * 218 + g as u32 * 732 + b as u32 * 74) >> 10).min(255) as usize;
-            luma_bins[(255 - l) * W + out_x] += 1;
-        }
-        if do_parade {
-            parade_bins[(255 - r as usize) * W + x_buckets_parade_r[orig_x]] += 1;
-            parade_bins[(255 - g as usize) * W + x_buckets_parade_g[orig_x]] += 1;
-            parade_bins[(255 - b as usize) * W + x_buckets_parade_b[orig_x]] += 1;
-        }
-        if do_vectorscope {
-            let r_f = r as f32;
-            let g_f = g as f32;
-            let b_f = b as f32;
-
-            let mut cb = (-0.1146 * r_f - 0.3854 * g_f + 0.5 * b_f) * 0.836;
-            let mut cr = (0.5 * r_f - 0.4542 * g_f - 0.0458 * b_f) * 0.836;
-
-            let dist_sq = cb * cb + cr * cr;
-            if dist_sq > 16129.0 {
-                let scale = 127.0 / dist_sq.sqrt();
-                cb *= scale;
-                cr *= scale;
+    let process_pixel =
+        |bins: &mut WaveformBins, r: u8, g: u8, b: u8, out_x: usize, orig_x: usize| {
+            if do_rgb {
+                bins.red[(255 - r as usize) * W + out_x] += 1;
+                bins.green[(255 - g as usize) * W + out_x] += 1;
+                bins.blue[(255 - b as usize) * W + out_x] += 1;
             }
+            if do_luma {
+                let l = ((r as u32 * 218 + g as u32 * 732 + b as u32 * 74) >> 10).min(255) as usize;
+                bins.luma[(255 - l) * W + out_x] += 1;
+            }
+            if do_parade {
+                bins.parade[(255 - r as usize) * W + x_buckets_parade_r[orig_x]] += 1;
+                bins.parade[(255 - g as usize) * W + x_buckets_parade_g[orig_x]] += 1;
+                bins.parade[(255 - b as usize) * W + x_buckets_parade_b[orig_x]] += 1;
+            }
+            if do_vectorscope {
+                let r_f = r as f32;
+                let g_f = g as f32;
+                let b_f = b as f32;
 
-            let vx = (cb + 128.0).clamp(0.0, 255.0) as usize;
-            let vy = (128.0 - cr).clamp(0.0, 255.0) as usize;
-            vector_bins[vy * W + vx] += 1;
-        }
-    };
+                let mut cb = (-0.1146 * r_f - 0.3854 * g_f + 0.5 * b_f) * 0.836;
+                let mut cr = (0.5 * r_f - 0.4542 * g_f - 0.0458 * b_f) * 0.836;
 
-    match image {
-        DynamicImage::ImageRgb32F(f32_img) => {
-            let raw = f32_img.as_raw();
-            let stride = orig_w as usize * 3;
-            for y in 0..(orig_h as usize) {
-                let row = y * stride;
-                for (x, &x_bucket) in x_buckets.iter().enumerate() {
-                    let i = row + x * 3;
-                    process_pixel(
-                        (raw[i].clamp(0.0, 1.0) * 255.0) as u8,
-                        (raw[i + 1].clamp(0.0, 1.0) * 255.0) as u8,
-                        (raw[i + 2].clamp(0.0, 1.0) * 255.0) as u8,
-                        x_bucket,
-                        x,
-                    );
+                let dist_sq = cb * cb + cr * cr;
+                if dist_sq > 16129.0 {
+                    let scale = 127.0 / dist_sq.sqrt();
+                    cb *= scale;
+                    cr *= scale;
+                }
+
+                let vx = (cb + 128.0).clamp(0.0, 255.0) as usize;
+                let vy = (128.0 - cr).clamp(0.0, 255.0) as usize;
+                bins.vector[vy * W + vx] += 1;
+            }
+        };
+
+    let height = orig_h as usize;
+    let bands = rayon::current_num_threads()
+        .clamp(1, WAVEFORM_MAX_BANDS)
+        .min(height);
+    let rows_per_band = height.div_ceil(bands);
+    let bins = (0..bands)
+        .into_par_iter()
+        .map(|band| {
+            let mut bins = WaveformBins::new(do_rgb, do_luma, do_parade, do_vectorscope);
+            for y in band * rows_per_band..((band + 1) * rows_per_band).min(height) {
+                for (x, px) in frame.row(y).iter().enumerate() {
+                    process_pixel(&mut bins, px[0], px[1], px[2], x_buckets[x], x);
                 }
             }
-        }
-        _ => {
-            let rgb = image.to_rgb8();
-            let raw = rgb.as_raw();
-            let stride = orig_w as usize * 3;
-            for y in 0..(orig_h as usize) {
-                let row = y * stride;
-                for (x, &x_bucket) in x_buckets.iter().enumerate() {
-                    let i = row + x * 3;
-                    process_pixel(raw[i], raw[i + 1], raw[i + 2], x_bucket, x);
-                }
-            }
-        }
-    }
-
-    let build_lut = |bins: &[u32], do_calc: bool| -> (Vec<u8>, u32) {
-        if !do_calc {
-            return (vec![0; 1], 0);
-        }
-        let max_val = *bins.iter().max().unwrap_or(&0);
-        if max_val == 0 {
-            return (vec![0; 1], 0);
-        }
+            bins
+        })
+        .reduce_with(WaveformBins::merge)
+        .unwrap_or_else(|| WaveformBins::new(do_rgb, do_luma, do_parade, do_vectorscope));
+    let WaveformBins {
+        red: red_bins,
+        green: green_bins,
+        blue: blue_bins,
+        luma: luma_bins,
+        parade: parade_bins,
+        vector: vector_bins,
+    } = bins;
+    let build_lut = |bins: &[u32], do_calc: bool| {
+        let max_val = if do_calc {
+            bins.iter().copied().max().unwrap_or(0)
+        } else {
+            0
+        };
         let scale = 255.0 / (1.0 + max_val as f32).ln();
-        let lut = (0..=max_val)
-            .map(|v| {
-                if v == 0 {
-                    0
-                } else {
-                    ((1.0 + v as f32).ln() * scale) as u8
-                }
-            })
-            .collect();
-        (lut, max_val)
+        let log_value = move |v: u32| {
+            if v == 0 {
+                0
+            } else {
+                ((1.0 + v as f32).ln() * scale) as u8
+            }
+        };
+        let lut: Vec<u8> = (0..=max_val.min(1023)).map(log_value).collect();
+        move |v: u32| lut.get(v as usize).copied().unwrap_or_else(|| log_value(v))
     };
 
-    let (lut_r, max_r) = build_lut(&red_bins, do_rgb);
-    let (lut_g, max_g) = build_lut(&green_bins, do_rgb);
-    let (lut_b, max_b) = build_lut(&blue_bins, do_rgb);
-    let (lut_l, max_l) = build_lut(&luma_bins, do_luma);
-    let (lut_p, max_p) = build_lut(&parade_bins, do_parade);
-    let (lut_v, max_v) = build_lut(&vector_bins, do_vectorscope);
+    let lut_r = build_lut(&red_bins, do_rgb);
+    let lut_g = build_lut(&green_bins, do_rgb);
+    let lut_b = build_lut(&blue_bins, do_rgb);
+    let lut_l = build_lut(&luma_bins, do_luma);
+    let lut_p = build_lut(&parade_bins, do_parade);
+    let lut_v = build_lut(&vector_bins, do_vectorscope);
 
     let pixel_count = W * H;
     let byte_count = pixel_count * 4;
@@ -339,21 +373,9 @@ pub fn calculate_waveform_from_image(
         let off = i * 4;
 
         if do_rgb {
-            let r = if red_bins[i] <= max_r {
-                lut_r[red_bins[i] as usize]
-            } else {
-                0
-            };
-            let g = if green_bins[i] <= max_g {
-                lut_g[green_bins[i] as usize]
-            } else {
-                0
-            };
-            let b = if blue_bins[i] <= max_b {
-                lut_b[blue_bins[i] as usize]
-            } else {
-                0
-            };
+            let r = lut_r(red_bins[i]);
+            let g = lut_g(green_bins[i]);
+            let b = lut_b(blue_bins[i]);
             if r > 0 || g > 0 || b > 0 {
                 rgba_rgb[off] = r;
                 rgba_rgb[off + 1] = g;
@@ -362,16 +384,16 @@ pub fn calculate_waveform_from_image(
             }
         }
 
-        if do_luma && luma_bins[i] > 0 && luma_bins[i] <= max_l {
-            let l = lut_l[luma_bins[i] as usize];
+        if do_luma && luma_bins[i] > 0 {
+            let l = lut_l(luma_bins[i]);
             rgba_luma[off] = 255;
             rgba_luma[off + 1] = 255;
             rgba_luma[off + 2] = 255;
             rgba_luma[off + 3] = l;
         }
 
-        if do_parade && parade_bins[i] > 0 && parade_bins[i] <= max_p {
-            let bright = lut_p[parade_bins[i] as usize];
+        if do_parade && parade_bins[i] > 0 {
+            let bright = lut_p(parade_bins[i]);
             if x < 82 {
                 rgba_parade[off] = 255;
                 rgba_parade[off + 3] = bright;
@@ -392,8 +414,8 @@ pub fn calculate_waveform_from_image(
             let min_d = dx.abs().min(dy.abs());
             let dist = (dx * dx + dy * dy).sqrt();
 
-            if val > 0 && val <= max_v {
-                let bright = lut_v[val as usize];
+            if val > 0 {
+                let bright = lut_v(val);
 
                 let y_mid = 128.0;
                 rgba_vector[off] = (y_mid + 1.402 * (dy / 0.836)).clamp(0.0, 255.0) as u8;
@@ -453,6 +475,7 @@ pub fn calculate_waveform_from_image(
 /// subject out while "fixing" the background.
 pub fn perform_auto_analysis(
     image: &DynamicImage,
+    exposure: f32,
     face_median_luma: Option<f64>,
     profile: Option<&crate::app_settings::AutoProfile>,
 ) -> AutoAdjustmentResults {
@@ -526,7 +549,12 @@ pub fn perform_auto_analysis(
     const EXPOSURE_OUTPUT_SCALE: f64 = 20.0;
     const BRIGHTNESS_SCALE: f64 = 0.007;
 
-    let analysis_preview = downscale_f32_image(image, ANALYSIS_MAX_DIM, ANALYSIS_MAX_DIM);
+    // Measure the photo with the raw's baseline exposure applied, the way it renders
+    // before any slider moves (upstream v1.6.6); 0 for rendered or non-raw input.
+    let analysis_preview = apply_exposure(
+        downscale_f32_image(image, ANALYSIS_MAX_DIM, ANALYSIS_MAX_DIM),
+        exposure,
+    );
     let rgb_image = analysis_preview.to_rgb8();
     let total_pixels = (rgb_image.width() * rgb_image.height()) as f64;
 
@@ -767,8 +795,9 @@ pub fn auto_results_to_json(
         put("tint", tint);
     }
 
-    // A hidden section renders as if its sliders were zero, so make the ones Auto
-    // just wrote visible (clarity/dehaze live in "details", vignette/centré in "effects").
+    // A switched-off tool renders as if its sliders were zero, so switch on the tools
+    // Auto just wrote (v1.6.6 per-tool `activeTools`: vibrance is "colorPresence",
+    // clarity/dehaze are "presence", vignette/centré are "vignette").
     let mut visibility = serde_json::Map::new();
     let basic = options.exposure
         || options.brightness
@@ -780,16 +809,19 @@ pub fn auto_results_to_json(
     if basic {
         visibility.insert("basic".into(), json!(true));
     }
-    if options.vibrance || (options.white_balance && white_balance.is_some()) {
-        visibility.insert("color".into(), json!(true));
+    if options.vibrance {
+        visibility.insert("colorPresence".into(), json!(true));
+    }
+    if options.white_balance && white_balance.is_some() {
+        visibility.insert("whiteBalance".into(), json!(true));
     }
     if options.clarity || options.dehaze {
-        visibility.insert("details".into(), json!(true));
+        visibility.insert("presence".into(), json!(true));
     }
     if options.vignette {
-        visibility.insert("effects".into(), json!(true));
+        visibility.insert("vignette".into(), json!(true));
     }
-    out.insert("sectionVisibility".into(), serde_json::Value::Object(visibility));
+    out.insert("activeTools".into(), serde_json::Value::Object(visibility));
     out.insert("_relative".into(), json!(relative));
     serde_json::Value::Object(out)
 }
@@ -1330,8 +1362,8 @@ fn render_for_analysis(
             )
         })
         .collect();
-    let tm_override = resolve_tonemapper_override_from_handle(app_handle, loaded.is_raw);
-    let mut all = get_all_adjustments_from_json(js_adjustments, loaded.is_raw, loaded.as_shot_white_balance, tm_override);
+    let render = resolve_render_options_from_handle(app_handle, loaded.is_raw);
+    let mut all = get_all_adjustments_from_json(js_adjustments, loaded.is_raw, loaded.as_shot, render);
     all.global.show_clipping = 0;
     let lut = js_adjustments["lutPath"]
         .as_str()
@@ -1416,16 +1448,28 @@ pub async fn calculate_auto_adjustments(
         None => (&loaded.image, loaded.is_raw),
     };
 
+    // The untouched decode needs the raw's baseline exposure applied to be measured
+    // as it renders (v1.6.6); the keep-look render already includes it.
+    let exposure = if relative {
+        0.0
+    } else {
+        let render = resolve_render_options_from_handle(&app_handle, loaded.is_raw);
+        effective_baseline_exposure(
+            adjustments.as_ref().unwrap_or(&serde_json::Value::Null),
+            loaded.as_shot,
+            render.baseline,
+        )
+    };
     let face_median = detect_face_median_luma(&app_handle, &state, analysis_image).await;
-    let results = perform_auto_analysis(analysis_image, face_median, profile.as_ref());
+    let results = perform_auto_analysis(analysis_image, exposure, face_median, profile.as_ref());
 
     let white_balance = if options.white_balance {
-        let as_shot = loaded.as_shot_white_balance;
+        let as_shot = loaded.as_shot.white_balance;
         let js = adjustments.as_ref();
         if relative {
             // The render was balanced to the current sliders; the shift is added to them.
             let current = js
-                .filter(|j| is_section_visible(j, "color"))
+                .filter(|j| is_tool_active(j, "whiteBalance"))
                 .map(|j| white_balance::from_adjustments(j, as_shot))
                 .unwrap_or(as_shot);
             auto_white_balance_shift(analysis_image, is_raw, current, current, profile.as_ref())
@@ -1480,10 +1524,10 @@ mod auto_adjust_tests {
             assert!(json.get(k).is_none(), "{k} should not be written");
         }
         assert_eq!(json["_relative"], json!(false));
-        let vis = &json["sectionVisibility"];
+        let vis = &json["activeTools"];
         assert_eq!(vis["basic"], json!(true));
-        assert!(vis.get("effects").is_none());
-        assert!(vis.get("color").is_none());
+        assert!(vis.get("vignette").is_none());
+        assert!(vis.get("whiteBalance").is_none());
     }
 
     #[test]
@@ -1503,9 +1547,9 @@ mod auto_adjust_tests {
         assert_eq!(json["clarity"], json!(9.0));
         assert!(json.get("exposure").is_none());
         assert_eq!(json["_relative"], json!(true));
-        assert_eq!(json["sectionVisibility"]["color"], json!(true));
-        assert_eq!(json["sectionVisibility"]["details"], json!(true));
-        assert_eq!(json["sectionVisibility"]["effects"], json!(true));
+        assert_eq!(json["activeTools"]["whiteBalance"], json!(true));
+        assert_eq!(json["activeTools"]["presence"], json!(true));
+        assert_eq!(json["activeTools"]["vignette"], json!(true));
     }
 
     #[test]
@@ -1589,14 +1633,14 @@ mod auto_learning_tests {
     fn learned_style_changes_what_auto_asks_for() {
         // A low-contrast scene: stock Auto adds contrast toward a 220 span...
         let scene = flat_gradient(120.0, 0.0);
-        let stock = perform_auto_analysis(&scene, None, None);
+        let stock = perform_auto_analysis(&scene, 0.0, None, None);
         assert!(stock.contrast > 0.0);
         // ...but a user whose finished photos stay soft (span ~150) gets much less.
         let mut soft = AutoProfile::default();
         for _ in 0..3 {
             learn_style(&mut soft, &measure_output_style(&flat_gradient(150.0, 0.0)), 0.5);
         }
-        let learned = perform_auto_analysis(&scene, None, Some(&soft));
+        let learned = perform_auto_analysis(&scene, 0.0, None, Some(&soft));
         assert!(learned.contrast < stock.contrast * 0.6, "{} vs {}", learned.contrast, stock.contrast);
     }
 

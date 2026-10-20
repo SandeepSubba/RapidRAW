@@ -182,6 +182,58 @@ npm run typecheck  # note: upstream has pre-existing strict-tsc errors; the
 npm start          # tauri dev — builds the Rust backend and launches the app
 ```
 
+### v1.6.6 sync notes
+
+Upstream v1.6.6 (+8 commits: relight, fog, AI denoise, auto straighten,
+DNG-style baseline exposure, per-tool `activeTools`, shared
+`defaultAdjustments.json`, zero-copy histogram/waveform, export DPI, Android
+selection mode). How the fork was re-expressed on the new APIs:
+
+- **`sectionVisibility` → `activeTools`.** Per-tool on/off replaces per-section
+  eye toggles. Fork tools map as: point colors → `pointColor` (added to the
+  Rust legacy `color` list so old sidecars keep working), skin smoothing /
+  texture / scale → `presence` (global and per-mask), Auto's outputs →
+  `basic`, `whiteBalance`, `colorPresence` (vibrance), `presence`
+  (clarity/dehaze), `vignette`. The assistant's LUT action enables `lut`.
+- **Shared defaults.** `src/utils/defaultAdjustments.json` is read by both TS
+  and Rust (sidecars holding only defaults are deleted). The fork appended
+  `pointColors`, `skinSmoothing`, `skinSmoothingScale`, `skinTexture`,
+  `snapshots`; any new fork adjustment key belongs there too.
+- **As-shot data.** The fork's as-shot WB cache in `white_balance.rs` moved to
+  upstream's `as_shot.rs` (`AsShot { white_balance, exposure }`). Auto adjust
+  measures at the effective baseline exposure (absolute mode) and reads WB
+  from `loaded.as_shot`; `render_for_analysis` uses `RenderOptions`.
+- **Histogram/waveform.** Upstream's zero-copy `AnalyticsFrame` code replaced
+  the fork's copy inside `image_processing/analysis.rs`; the fork's auto
+  analysis, auto profile and learning stay there. Upstream's duplicate block
+  in `image_processing.rs` was dropped again.
+- **Batch auto.** Rebuilt inside upstream's generic
+  `update_sidecars_from_images` closure (git had silently merged the fork's
+  auto code into the generic helper, which auto-straighten also uses).
+- **Thumbnails.** Took upstream's downscale-then-warp path with relight, fog
+  and lens blur — lens blur had been lost from thumbnails in the v1.6.5 merge.
+- **Export XMP.** Upstream's `embed_xmp` (keywords + rating + label, merged
+  with the source's XMP) now writes JPEG/PNG/WebP; the fork's keyword splicers
+  for JPEG/PNG were removed. TIFF still gets the fork's XMP IFD entry (upstream
+  writes nothing to TIFF), and AVIF/JXL keep the `.xmp` sidecar fallback.
+  `jpeg_encoder` (fork) gained upstream's DPI density.
+- **Crop.** `aspectRatio 0` is upstream's `ORIGINAL_RATIO` (resolved per image
+  via `resolveAspectRatio`), which retired the fork's "keep Original tracking
+  90° turns" effect. Upstream's `normalizeCropChange` replaced the fork's
+  "don't persist a full-frame crop" check. The opt-in crop tool, guided
+  perspective and remembered ratio (now only when `aspectRatio === 0`) stay.
+- **Film panel** is registered in `AdjustmentSection`'s component map; the
+  Controls panel only gates it on `negativeConversion.enabled`. The unused
+  `NegativeConversionModal.tsx` was deleted rather than receiving upstream's
+  pinch-zoom.
+- **Settings** keep the fork's layout; upstream's baseline-exposure,
+  highlight-preservation and AI-denoise-cache items were slotted into
+  Processing.
+- **Library arrows** in recursive view stay inside the focused image's folder
+  (upstream), combined with the fork's row-step / shift-extend navigation.
+- `ai_processing.rs` keeps both the fork's `face_model` and upstream's
+  `normal_model` (relight normals).
+
 ### v1.6.5 sync notes
 
 Upstream v1.6.5 (guided-filter local contrast, whites rewrite, LMS white

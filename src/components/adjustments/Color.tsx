@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, memo } from 'react';
 import { Pipette, Sliders, Trash2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
@@ -25,6 +25,7 @@ import {
   withRelativeWhiteBalance,
 } from '../../utils/whiteBalance';
 import { TextColors, TextWeights } from '../../types/typography';
+import { areSectionPropsEqual } from '../../utils/adjustments';
 
 interface ColorProps {
   color: string;
@@ -53,7 +54,7 @@ interface ColorSwatchProps {
   onClick: (name: string) => void;
 }
 
-const ColorSwatch = ({ color, name, isActive, ariaLabel, onClick }: ColorSwatchProps) => {
+export const ColorSwatch = ({ color, name, isActive, ariaLabel, onClick }: ColorSwatchProps) => {
   const [isPressed, setIsPressed] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
 
@@ -609,7 +610,7 @@ const PointColorPanel = ({
   );
 };
 
-export default function ColorPanel({
+function ColorPanel({
   adjustments,
   setAdjustments,
   appSettings,
@@ -928,3 +929,5 @@ export default function ColorPanel({
     </div>
   );
 }
+
+export default memo(ColorPanel, areSectionPropsEqual('color'));

@@ -61,6 +61,11 @@ Rules:
   `AutoProfile` (settings.json) is learned from rendered edited thumbnails only
   (`measure_output_style` / `learn_style`); new fields need serde defaults so v1
   profiles keep loading. Auto never learns from its own output — only from saves.
+- Upstream v1.6.6 replaced `sectionVisibility` with per-tool `activeTools`
+  (Rust `is_tool_active`, TS `getActiveTools`/`mergeActiveTools`). Fork tools:
+  `pointColor`, skin smoothing under `presence`; Auto returns an `activeTools`
+  patch. New adjustment keys go in `src/utils/defaultAdjustments.json` (shared
+  by TS and Rust). See FORK_NOTES.md "v1.6.6 sync notes".
 - The `claudecode` assistant provider shells out to the `claude` CLI (absolute
   path in settings); prompts go via stdin — never argv (E2BIG with mask-laden
   adjustments).
