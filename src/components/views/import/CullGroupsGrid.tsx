@@ -5,7 +5,7 @@ import { useImportStore } from '../../../store/useImportStore';
 import { useSettingsStore } from '../../../store/useSettingsStore';
 import { useSdImportActions } from '../../../hooks/useSdImportActions';
 import { CullingSuggestions, SortDirection } from '../../../components/ui/AppProperties';
-import { computeVisible } from './importFilters';
+import { computeVisible, pairCompanions } from './importFilters';
 import ImportFilterBar from './ImportFilterBar';
 import { RatingColor } from './RatingColor';
 import LazyThumb from './LazyThumb';
@@ -165,6 +165,12 @@ export default function CullGroupsGrid({ suggestions }: { suggestions: CullingSu
   // populated when "Exclude already-imported" is on AND a destination is set, so this hides
   // them exactly when exclusion is active and shows everything otherwise.
   const vis = (p: string) => (!visibleSet || visibleSet.has(p)) && !alreadyImported.has(p);
+  // With the RAW + JPEG pairs option, a RAW's tile stands for both files; say so on its label.
+  const pairedRaws = useMemo(
+    () => (fileTypeFilter === 'pairs' ? new Set(pairCompanions(scannedPaths, rawExts ?? []).keys()) : null),
+    [fileTypeFilter, scannedPaths, rawExts],
+  );
+  const nameBadge = (p: string) => `${p.split(/[\\/]/).pop()}${pairedRaws?.has(p) ? ' + JPG' : ''}`;
 
   const [viewMode, setViewMode] = useState<'grid' | 'viewer'>('grid');
   const [viewerInitialPath, setViewerInitialPath] = useState<string | null>(null);
@@ -235,7 +241,7 @@ export default function CullGroupsGrid({ suggestions }: { suggestions: CullingSu
         sortedMembers.forEach((p) => {
           // After scoring, show the 0–5 quality grade ("Q" distinguishes it from the manual
           // 1–5 star rating); before scoring, just the filename since the score is unranked.
-          badge[p] = scoresReady ? `Q ${to5(scoreOf[p] ?? 0)}` : fileName(p);
+          badge[p] = scoresReady ? `Q ${to5(scoreOf[p] ?? 0)}` : nameBadge(p);
           members[p] = sortedMembers;
           lead[p] = rep;
         });
@@ -277,7 +283,7 @@ export default function CullGroupsGrid({ suggestions }: { suggestions: CullingSu
     const orderedList = [...entries.flat(), ...visBlurry];
 
     return { flat: visScanned, groups: groupList, singles: singleList, timeline: timelineList, blurry: visBlurry, ordered: orderedList, badgeOf: badge, bestOf: best, memberOf: members, collapsed: collapsedList, leadOf: lead };
-  }, [suggestions, scannedPaths, visibleSet, scoresReady, alreadyImported, sortKey, sortOrder, captureTimes]);
+  }, [suggestions, scannedPaths, visibleSet, scoresReady, alreadyImported, sortKey, sortOrder, captureTimes, pairedRaws]);
 
   const onOpen = (p: string) => {
     setViewerInitialPath(p);
@@ -567,7 +573,7 @@ export default function CullGroupsGrid({ suggestions }: { suggestions: CullingSu
           <section>
             <div className={CELL_GRID}>
               {flat.map((p) => (
-                <Cell key={p} {...cellProps(p)} badge={p.split(/[\\/]/).pop()} />
+                <Cell key={p} {...cellProps(p)} badge={nameBadge(p)} />
               ))}
             </div>
           </section>
@@ -594,7 +600,7 @@ export default function CullGroupsGrid({ suggestions }: { suggestions: CullingSu
               ) : (
                 <div key={paths[0]} className={`${CELL_GRID} px-3`}>
                   {paths.map((p) => (
-                    <Cell key={p} {...cellProps(p)} badge={p.split(/[\\/]/).pop()} />
+                    <Cell key={p} {...cellProps(p)} badge={nameBadge(p)} />
                   ))}
                 </div>
               ),

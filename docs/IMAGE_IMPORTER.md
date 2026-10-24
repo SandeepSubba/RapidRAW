@@ -254,7 +254,17 @@ You can always override afterward (keep extras, drop keepers).
 - **Ratings & color labels** (1–5 stars, color labels) per photo — written to the source
   `.rrdata` sidecars so they travel with the import.
 - **Filters** by rating, color label, and file type (e.g. hide JPEGs when shooting
-  RAW+JPEG). The file-type filter also governs what gets imported.
+  RAW+JPEG). The file-type filter also governs what gets imported:
+  - **Prefer RAW (skip its JPEG)** shows a RAW + JPEG pair as its RAW and imports only
+    the RAW.
+  - **RAW + JPEG pairs (import both)** also shows one tile per pair (the RAW, labelled
+    "+ JPG"), but keeping it imports both files; the JPEG takes the RAW's rating and
+    colour label. A pair is a raw and a non-raw with the same folder and file name
+    (case-insensitive). The bar shows "(+N paired JPEG)" and the Import button counts
+    both. Built in `importSelection()` (`useSdImportActions.ts`).
+  - Grouping analyses only the file types on show, so the hidden half of a pair does
+    not crowd the scene look-ahead; changing to a filter that shows a different set
+    re-runs the analysis.
 - **Select all / Select none / Auto-select best.**
 
 ## 8. The viewer

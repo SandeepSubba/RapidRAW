@@ -1,4 +1,5 @@
-export type FileTypeFilter = 'all' | 'raw' | 'nonraw' | 'preferRaw';
+// 'pairs' shows a RAW + JPEG pair as its RAW, like 'preferRaw', but imports both files.
+export type FileTypeFilter = 'all' | 'raw' | 'nonraw' | 'preferRaw' | 'pairs';
 
 const extOf = (p: string) => p.split('?')[0].split(/[\\/]/).pop()?.split('.').pop()?.toLowerCase() || '';
 
@@ -24,16 +25,33 @@ export function computeVisibleSet(paths: string[], filter: FileTypeFilter, rawEx
   if (filter === 'raw') return new Set(paths.filter(isRaw));
   if (filter === 'nonraw') return new Set(paths.filter((p) => !isRaw(p)));
 
-  // preferRaw
+  // preferRaw / pairs
   const rawStems = new Set(paths.filter(isRaw).map(stemKey));
   return new Set(paths.filter((p) => isRaw(p) || !rawStems.has(stemKey(p))));
+}
+
+/**
+ * The non-raw files (JPEG, HEIF…) that share a raw's folder and file name, keyed by the
+ * raw's path. Only raws that have a companion appear.
+ */
+export function pairCompanions(paths: string[], rawExts: string[]): Map<string, string[]> {
+  const rawSet = new Set(rawExts.map((e) => e.toLowerCase()));
+  const isRaw = (p: string) => rawSet.has(extOf(p));
+  const rawByStem = new Map(paths.filter(isRaw).map((p) => [stemKey(p), p]));
+  const pairs = new Map<string, string[]>();
+  paths.forEach((p) => {
+    const raw = !isRaw(p) && rawByStem.get(stemKey(p));
+    if (raw) pairs.set(raw, [...(pairs.get(raw) ?? []), p]);
+  });
+  return pairs;
 }
 
 export const FILE_TYPE_OPTIONS: { value: FileTypeFilter; label: string }[] = [
   { value: 'all', label: 'All types' },
   { value: 'raw', label: 'RAW only' },
   { value: 'nonraw', label: 'JPEG only' },
-  { value: 'preferRaw', label: 'Prefer RAW' },
+  { value: 'preferRaw', label: 'Prefer RAW (skip its JPEG)' },
+  { value: 'pairs', label: 'RAW + JPEG pairs (import both)' },
 ];
 
 export const LABEL_COLORS = ['red', 'yellow', 'green', 'blue', 'purple', 'gray'] as const;

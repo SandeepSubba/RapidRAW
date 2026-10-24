@@ -7,7 +7,7 @@ import { CullingSuggestions, Invokes, SortDirection } from '../components/ui/App
 import { DriveInfo, ImportSortKey, restoreSelection, useImportStore } from '../store/useImportStore';
 import { useUIStore } from '../store/useUIStore';
 import { useSettingsStore } from '../store/useSettingsStore';
-import { FileTypeFilter, ImportFilterState, computeVisible, computeVisibleSet } from '../components/views/import/importFilters';
+import { FileTypeFilter, ImportFilterState, computeVisible, computeVisibleSet, pairCompanions } from '../components/views/import/importFilters';
 import { CullLearning, keepersOf, learnFromImport, loadCullLearning, rankedGroups } from '../utils/importLearning';
 
 const rawExts = () => useSettingsStore.getState().supportedTypes?.raw ?? [];
@@ -16,6 +16,33 @@ const filterState = (): ImportFilterState => {
   const s = useImportStore.getState();
   return { fileType: s.fileTypeFilter, rating: s.filterRating, colors: s.filterColors };
 };
+/**
+ * What an import of the current selection copies: the kept photos, plus — with the
+ * 'pairs' file-type option — the JPEG of every kept RAW, which the grid hides. A
+ * companion takes its RAW's rating and colour label. Companions already in the
+ * destination are left out.
+ */
+export function importSelection() {
+  const s = useImportStore.getState();
+  const paths = [...s.keptPaths];
+  const ratings = { ...s.ratings };
+  const colors = { ...s.colors };
+  let companionCount = 0;
+  if (s.fileTypeFilter === 'pairs') {
+    const companions = pairCompanions(s.scannedPaths, rawExts());
+    [...s.keptPaths].forEach((raw) => {
+      (companions.get(raw) ?? []).forEach((p) => {
+        if (s.alreadyImported.has(p)) return;
+        paths.push(p);
+        companionCount++;
+        if (ratings[raw]) ratings[p] = ratings[raw];
+        if (colors[raw]) colors[p] = colors[raw];
+      });
+    });
+  }
+  return { paths, ratings, colors, companionCount };
+}
+
 const visibleNow = () => {
   const s = useImportStore.getState();
   return computeVisible(s.scannedPaths, filterState(), s.ratings, s.colors, rawExts());
@@ -140,14 +167,18 @@ export function useSdImportActions() {
   // First-time grouping: analyze for grouping (hash only — fast) then group. Scoring is
   // a separate step, so this resets scoresReady.
   const analyzeThenGroup = useCallback(async () => {
-    const { scannedPaths, setImport } = useImportStore.getState();
+    const { scannedPaths, fileTypeFilter, setImport } = useImportStore.getState();
     if (scannedPaths.length === 0) return;
-    setImport({ stage: 'culling', cullProgress: { current: 0, total: scannedPaths.length, stage: 'Starting…' } });
+    // Analyse only the file types on show: the hidden JPEG of a RAW + JPEG pair is the same
+    // frame again, and would only crowd the scene grouping's look-ahead.
+    const typeVisible = computeVisibleSet(scannedPaths, fileTypeFilter, rawExts());
+    const paths = typeVisible ? scannedPaths.filter((p) => typeVisible.has(p)) : scannedPaths;
+    setImport({ stage: 'culling', cullProgress: { current: 0, total: paths.length, stage: 'Starting…' } });
     const unlisten = await listen('sd-import-cull-progress', (event: any) => {
       useImportStore.getState().setImport({ cullProgress: event.payload });
     });
     try {
-      await invoke<number>(Invokes.AnalyzeForImport, { paths: scannedPaths });
+      await invoke<number>(Invokes.AnalyzeForImport, { paths });
       const suggestions = await invoke<CullingSuggestions>(Invokes.GroupForImport, groupArgs());
       setImport({ suggestions, analysisReady: true, scoresReady: false, cullProgress: null, stage: 'review' });
     } catch (err) {
@@ -239,12 +270,23 @@ export function useSdImportActions() {
 
   // The file-type filter governs what gets imported, so dropping a type also unselects
   // those photos. Rating/colour filters are view-only and don't change the selection.
-  const setFileTypeFilter = useCallback((filter: FileTypeFilter) => {
-    const { scannedPaths, keptPaths, setImport } = useImportStore.getState();
-    const visible = computeVisibleSet(scannedPaths, filter, rawExts());
-    const keptVisible = visible ? new Set([...keptPaths].filter((p) => visible.has(p))) : keptPaths;
-    setImport({ fileTypeFilter: filter, keptPaths: keptVisible });
-  }, []);
+  const setFileTypeFilter = useCallback(
+    (filter: FileTypeFilter) => {
+      const { scannedPaths, keptPaths, fileTypeFilter, analysisReady, enableGroups, setImport } = useImportStore.getState();
+      const visible = computeVisibleSet(scannedPaths, filter, rawExts());
+      const keptVisible = visible ? new Set([...keptPaths].filter((p) => visible.has(p))) : keptPaths;
+      setImport({ fileTypeFilter: filter, keptPaths: keptVisible });
+      // Grouping only analysed the types that were on show; re-analyse for the new set.
+      const before = computeVisibleSet(scannedPaths, fileTypeFilter, rawExts());
+      const sameTypes = before?.size === visible?.size;
+      if (analysisReady && !sameTypes) {
+        setImport({ analysisReady: false, scoresReady: false });
+        if (enableGroups) analyzeThenGroup();
+        else setImport({ suggestions: null });
+      }
+    },
+    [analyzeThenGroup],
+  );
 
   const setActivePath = useCallback((p: string | null) => useImportStore.getState().setImport({ activePath: p }), []);
 
@@ -415,8 +457,8 @@ export function useSdImportActions() {
   }, [refreshAlreadyImported]);
 
   const startImport = useCallback(async () => {
-    const { keptPaths, destinationFolder, importSettings, setImport } = useImportStore.getState();
-    const sourcePaths = Array.from(keptPaths);
+    const { destinationFolder, importSettings, setImport } = useImportStore.getState();
+    const { paths: sourcePaths, ratings, colors } = importSelection();
     if (sourcePaths.length === 0) {
       toast.warn('No images selected to import.');
       return;
@@ -430,7 +472,6 @@ export function useSdImportActions() {
       // Persist culling ratings/labels onto the source sidecars so they travel with the
       // imported copies (import_files copies the .rrdata sidecar). This is best-effort —
       // a read-only card / sidecar write failure must NOT block the actual import.
-      const { ratings, colors } = useImportStore.getState();
       try {
         await writeCullingMetadata(sourcePaths, ratings, colors);
       } catch (metaErr) {

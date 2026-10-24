@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { FolderInput, Settings2, ArrowRight } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 import { useImportStore } from '../../../store/useImportStore';
-import { useSdImportActions } from '../../../hooks/useSdImportActions';
+import { importSelection, useSdImportActions } from '../../../hooks/useSdImportActions';
 import Button from '../../ui/Button';
 import Switch from '../../ui/Switch';
 import { CullLearning, describeLearning, loadCullLearning } from '../../../utils/importLearning';
@@ -21,6 +21,10 @@ export default function ImportReviewBar() {
         setImport: s.setImport,
       })),
     );
+  // Re-derived on every store change that can move it (selection, scan, file type, exclusions).
+  const companionCount = useImportStore(
+    (s) => (s.fileTypeFilter === 'pairs' && s.keptPaths.size > 0 ? importSelection().companionCount : 0),
+  );
   const { pickDestination, startImport, setExcludeImported, setPersonalize, resetLearning } = useSdImportActions();
   const [showSettings, setShowSettings] = useState(false);
   const [learning, setLearning] = useState<CullLearning | null>(null);
@@ -113,6 +117,7 @@ export default function ImportReviewBar() {
       <div className="flex items-center gap-3 px-4 py-3">
         <div className="text-sm text-text-secondary">
           <span className="text-text-primary font-medium">{keptCount}</span> selected to import
+          {companionCount > 0 && ` (+${companionCount} paired JPEG)`}
         </div>
 
         <div className="flex-1" />
@@ -143,7 +148,7 @@ export default function ImportReviewBar() {
           }}
           disabled={keptCount === 0}
         >
-          Import {keptCount}
+          Import {keptCount + companionCount}
           <ArrowRight size={16} className="ml-2" />
         </Button>
       </div>
