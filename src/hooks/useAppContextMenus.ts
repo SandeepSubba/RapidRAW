@@ -786,7 +786,7 @@ export function useAppContextMenus(latestProps: UseAppContextMenusProps) {
               ],
             },
             {
-              label: t('contextMenus.editor.convertNegative'),
+              label: conversionLabel,
               icon: Film,
               disabled: selectionCount === 0,
               onClick: () => {
