@@ -1961,7 +1961,15 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
           rotation,
         );
 
+        // An uncropped, unrotated image only gets the default frame drawn, not
+        // saved: its aspectRatio may just be the remembered crop-tool ratio, so
+        // persisting here put crops on photos nobody cropped (merely showing the
+        // crop panel, or a quarter turn, was enough). Dragging the frame, picking
+        // a ratio or straightening still commits a crop through their own paths.
+        const isUntouchedDefault = !currentAdjCrop && !rotation;
+
         if (
+          !isUntouchedDefault &&
           normalizedCrop !== currentAdjCrop &&
           (!normalizedCrop ||
             !currentAdjCrop ||

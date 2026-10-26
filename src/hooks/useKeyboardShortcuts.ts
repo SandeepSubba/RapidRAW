@@ -52,17 +52,15 @@ export const useKeyboardShortcuts = ({
     handlePasteAdjustments,
     toggleShowOriginal,
   } = useEditorActions();
-  const { handleRate, handleSetFlag, handleToggleFlag, handleSetColorLabel, handleRotateSelected } = useLibraryActions();
+  const { handleRate, handleSetFlag, handleToggleFlag, handleSetColorLabel } = useLibraryActions();
 
+  // Same path as the crop-panel buttons: it picks editor state vs. sidecar per
+  // image, so the library and the editor behave alike.
   const rotateActiveAndSelection = useCallback(
-    (s: any, degrees: number) => {
-      if (s.ui.activeView === 'editor' && s.editor.selectedImage) {
-        handleRotateWithSelection(degrees);
-      } else {
-        handleRotateSelected(degrees);
-      }
+    (_s: any, degrees: number) => {
+      handleRotateWithSelection(degrees);
     },
-    [handleRotateWithSelection, handleRotateSelected],
+    [handleRotateWithSelection],
   );
 
   const sortedListRef = useRef(sortedImageList);

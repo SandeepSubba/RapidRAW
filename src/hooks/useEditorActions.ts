@@ -19,7 +19,7 @@ import {
   normalizeLoadedAdjustments,
   setToolActive,
 } from '../utils/adjustments';
-import { calculateAutoCropForRotation, calculateCenteredCrop } from '../utils/cropUtils';
+import { calculateAutoCropForRotation, calculateCenteredCrop, isFullFrameCrop } from '../utils/cropUtils';
 import { Invokes, SelectedImage } from '../components/ui/AppProperties';
 import { globalImageCache } from '../utils/ImageLRUCache';
 
@@ -83,6 +83,20 @@ export const reloadAdjustmentsForPaths = async (paths: string[]) => {
   }
 };
 
+// Quarter-turn images straight in their sidecars, then pull the new orientation
+// back into the editor/library state for any of them that is loaded there, so
+// a later autosave can't write the old orientation back.
+export const rotatePathsOnDisk = (paths: string[], direction: number) => {
+  if (paths.length === 0) return;
+  paths.forEach((p) => globalImageCache.delete(p));
+  invoke(Invokes.ApplyOrientationToPaths, { paths, direction })
+    .then(() => reloadAdjustmentsForPaths(paths))
+    .catch((err) => {
+      console.error(err);
+      toast.error(`Failed to rotate selected images: ${err}`);
+    });
+};
+
 export function useEditorActions() {
   const { t } = useTranslation();
   const setEditor = useEditorStore((s) => s.setEditor);
@@ -109,8 +123,18 @@ export function useEditorActions() {
       const increment = degrees > 0 ? 1 : 3;
       const newAspectRatio = adjustments.aspectRatio ? 1 / adjustments.aspectRatio : adjustments.aspectRatio;
       const newOrientationSteps = ((adjustments.orientationSteps || 0) + increment) % 4;
+      // An uncropped image stays uncropped: its aspectRatio may only be the
+      // remembered crop-tool ratio, which must not turn into a real crop here.
+      const wasUncropped =
+        !adjustments.rotation &&
+        isFullFrameCrop(
+          adjustments.crop,
+          selectedImage?.width || 0,
+          selectedImage?.height || 0,
+          adjustments.orientationSteps || 0,
+        );
       const newCrop =
-        selectedImage?.width && selectedImage?.height
+        !wasUncropped && selectedImage?.width && selectedImage?.height
           ? calculateCenteredCrop(selectedImage.width, selectedImage.height, newOrientationSteps, newAspectRatio)
           : null;
 
@@ -130,18 +154,33 @@ export function useEditorActions() {
   // selected images through the sidecar command too — a selection behaves the
   // same whether you rotate from the crop panel, the shortcuts, or the
   // library grid.
+  //
+  // The editor only autosaves an image that has finished loading. So the loaded
+  // image is rotated through the editor state (writing it on disk too would race
+  // its pending autosave), and everything else — including a library pick that
+  // is still loading — is rotated on disk.
   const handleRotateWithSelection = useCallback(
     (degrees: number) => {
-      handleRotate(degrees);
-      const activePath = useEditorStore.getState().selectedImage?.path;
-      const others = useLibraryStore
-        .getState()
-        .multiSelectedPaths.filter((p: string) => p !== activePath);
-      if (others.length > 0) {
-        invoke(Invokes.ApplyOrientationToPaths, { paths: others, direction: degrees }).catch((err) => {
-          console.error(err);
-          toast.error(`Failed to rotate selected images: ${err}`);
-        });
+      const { selectedImage } = useEditorStore.getState();
+      const { multiSelectedPaths, libraryActivePath } = useLibraryStore.getState();
+      const inEditor = useUIStore.getState().activeView === 'editor';
+
+      const selection =
+        multiSelectedPaths.length > 0 ? multiSelectedPaths : libraryActivePath ? [libraryActivePath] : [];
+      const targets = Array.from(
+        new Set(inEditor && selectedImage ? [selectedImage.path, ...selection] : selection),
+      );
+      if (targets.length === 0 && selectedImage) targets.push(selectedImage.path);
+
+      const loadedPath = selectedImage?.isReady ? selectedImage.path : null;
+      if (loadedPath && targets.includes(loadedPath)) {
+        handleRotate(degrees);
+        rotatePathsOnDisk(
+          targets.filter((p) => p !== loadedPath),
+          degrees,
+        );
+      } else {
+        rotatePathsOnDisk(targets, degrees);
       }
     },
     [handleRotate],

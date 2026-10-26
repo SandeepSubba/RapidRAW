@@ -166,6 +166,21 @@ export function calculateCenteredCrop(
   };
 }
 
+// True when there is no real crop: none set, or one spanning the whole oriented
+// image (a couple of pixels of rounding slack).
+export function isFullFrameCrop(
+  crop: Crop | null | undefined,
+  imageWidth: number,
+  imageHeight: number,
+  orientationSteps: number,
+): boolean {
+  if (!crop) return true;
+  if (!imageWidth || !imageHeight) return false;
+  const { width: W, height: H } = getOrientedDimensions(imageWidth, imageHeight, orientationSteps);
+  const tol = 2;
+  return crop.x <= tol && crop.y <= tol && crop.width >= W - tol && crop.height >= H - tol;
+}
+
 export function isCropWithinBounds(crop: Crop, imageW: number, imageH: number, rotation: number): boolean {
   const cx = imageW / 2;
   const cy = imageH / 2;

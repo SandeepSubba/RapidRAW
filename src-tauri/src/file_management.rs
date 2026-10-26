@@ -2696,10 +2696,12 @@ pub async fn apply_orientation_to_paths(
                     serde_json::json!((current + increment) % 4),
                 );
 
-                // Swap aspect ratio when one is set, else clear it — same as handleRotate.
+                // Swap a set aspect ratio — same as handleRotate. 0 ("the image's own
+                // ratio" since v1.6.6) and null (Free) stay as they are.
                 let new_aspect = match map.get("aspectRatio").and_then(|v| v.as_f64()) {
                     Some(a) if a != 0.0 => serde_json::json!(1.0 / a),
-                    _ => serde_json::Value::Null,
+                    Some(_) => serde_json::json!(0),
+                    None => serde_json::Value::Null,
                 };
                 map.insert("aspectRatio".to_string(), new_aspect);
 

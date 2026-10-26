@@ -19,6 +19,7 @@ import { useSettingsStore } from '../store/useSettingsStore';
 import { computeSortedLibrary } from './useSortedLibrary';
 import { expandGroupedPaths } from '../utils/imageGrouping';
 import { getImageFlag } from '../utils/imageFlags';
+import { rotatePathsOnDisk } from './useEditorActions';
 
 const resolveTargetPaths = (paths?: string[]) => {
   const { multiSelectedPaths, imageList } = useLibraryStore.getState();
@@ -178,12 +179,7 @@ export function useLibraryActions(handleImageSelect?: (path: string, openInEdito
           : selectedImage
             ? [selectedImage.path]
             : []);
-    if (pathsToRotate.length === 0) return;
-
-    invoke(Invokes.ApplyOrientationToPaths, { paths: pathsToRotate, direction }).catch((err) => {
-      console.error(err);
-      toast.error(`Failed to rotate selected images: ${err}`);
-    });
+    rotatePathsOnDisk(pathsToRotate, direction);
   }, []);
 
   const handleSetColorLabel = useCallback(async (color: string | null, paths?: string[]) => {
