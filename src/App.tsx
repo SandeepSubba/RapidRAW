@@ -464,6 +464,9 @@ function App() {
   }, [sortedImageList, selectedImage, handleImageSelect]);
 
   const handleLibraryRefresh = useCallback(async () => {
+    // Read the folder at call time: callers that just changed it (a folder rename)
+    // run before this callback is recreated, and the closure would reload the old path.
+    const { currentFolderPath } = useLibraryStore.getState();
     if (currentFolderPath) {
       if (currentFolderPath.startsWith('Album: ')) {
         const { activeAlbumId, albumTree } = useLibraryStore.getState();
@@ -485,7 +488,7 @@ function App() {
         await handleSelectSubfolder(currentFolderPath, false, undefined, false, true);
       }
     }
-  }, [currentFolderPath, handleSelectSubfolder, handleSelectAlbum]);
+  }, [handleSelectSubfolder, handleSelectAlbum]);
 
   const {
     executeDelete,

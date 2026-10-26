@@ -483,6 +483,22 @@ const FilmstripList = ({
     setRatioMapVersion((v) => v + 1);
   }, [data.thumbnailAspectRatio]);
 
+  // Thumbnails are requested when the rendered range changes. A list swapped in place
+  // (a folder renamed or reloaded while editing) keeps the same range, so ask again
+  // for the rendered cells whenever the list itself changes.
+  const renderedRange = useRef<{ start: number; stop: number } | null>(null);
+  useEffect(() => {
+    const range = renderedRange.current;
+    const { onRequestThumbnails, imageList } = currentDataRef.current;
+    if (!range || !onRequestThumbnails) return;
+    const cached = useProcessStore.getState().thumbnails;
+    const paths = imageList
+      .slice(range.start, range.stop + 1)
+      .map((img: any) => img.path)
+      .filter((path: string) => !cached[path]);
+    if (paths.length > 0) onRequestThumbnails(paths);
+  }, [data.imageList]);
+
   const onCellsRendered = useCallback(
     (
       visibleCells: { columnStartIndex: number; columnStopIndex: number; rowStartIndex: number; rowStopIndex: number },
@@ -492,6 +508,7 @@ const FilmstripList = ({
         start: visibleCells.columnStartIndex,
         stop: visibleCells.columnStopIndex,
       };
+      renderedRange.current = { start: allCells.columnStartIndex, stop: allCells.columnStopIndex };
 
       const currentData = currentDataRef.current;
       if (!currentData.onRequestThumbnails) return;
