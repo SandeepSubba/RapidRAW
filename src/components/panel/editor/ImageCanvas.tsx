@@ -15,6 +15,7 @@ import {
   Tag,
   Text as KonvaText,
 } from 'react-konva';
+import type Konva from 'konva';
 import { PercentCrop, Crop } from 'react-image-crop';
 import { Stamp, Bandage, Spline, BrushCleaning } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
@@ -117,7 +118,7 @@ interface ImageCanvasProps {
   cursorStyle: string;
   isMaxZoom?: boolean;
   liveRotation?: number | null;
-  transformState: { scale: number; positionX: number; positionY: number };
+  transformScale: number;
   hasRenderedFirstFrame: boolean;
 }
 
@@ -1443,6 +1444,11 @@ const classifyGuide = (dx: number, dy: number): GuideOrientation | null => {
   return null;
 };
 
+const getWbSampleAdjustments = () => {
+  const { adjustments } = useEditorStore.getState();
+  return adjustments.negativeConversionEnabled ? adjustments : null;
+};
+
 const ImageCanvas = memo(
   ({
     appSettings,
@@ -1492,7 +1498,7 @@ const ImageCanvas = memo(
     cursorStyle,
     isMaxZoom,
     liveRotation,
-    transformState,
+    transformScale,
     hasRenderedFirstFrame,
   }: ImageCanvasProps) => {
     // Crop is opt-in: the overlay only shows once the user activates the crop tool
@@ -1550,7 +1556,9 @@ const ImageCanvas = memo(
     const [previewBox, setPreviewBox] = useState<{ start: Coord; end: Coord } | null>(null);
     const activeStrokeIndex = useRef<number | null>(null);
 
-    const [cursorPreview, setCursorPreview] = useState<CursorPreview>({ x: 0, y: 0, visible: false });
+    const [isCursorPreviewVisible, setIsCursorPreviewVisible] = useState(false);
+    const cursorPreviewPosRef = useRef({ x: 0, y: 0 });
+    const cursorPreviewRef = useRef<Konva.Circle>(null);
     const [wbHover, setWbHover] = useState<CursorPreview>({ x: 0, y: 0, visible: false });
     const wbDragRef = useRef<WbDrag | null>(null);
     const [wbBox, setWbBox] = useState<WbDrag | null>(null);
@@ -1687,13 +1695,13 @@ const ImageCanvas = memo(
     const groupOffsetX = paddingX;
     const groupOffsetY = paddingY;
 
-    const [settledScale, setSettledScale] = useState(transformState.scale);
+    const [settledScale, setSettledScale] = useState(transformScale);
     useEffect(() => {
       const timer = setTimeout(() => {
-        setSettledScale(transformState.scale);
+        setSettledScale(transformScale);
       }, 150);
       return () => clearTimeout(timer);
-    }, [transformState.scale]);
+    }, [transformScale]);
 
     const maxDimension = Math.max(stageWidth, stageHeight, 1);
     const maxSafeScale = Math.max(1, Math.min(settledScale, 4092 / maxDimension));
@@ -1861,7 +1869,7 @@ const ImageCanvas = memo(
         : activeCrop.y
       : 0;
 
-    const effectiveZoomScale = transformState.scale > 0 ? transformState.scale : 1;
+    const effectiveZoomScale = transformScale > 0 ? transformScale : 1;
     const brushStageSize = (brushSettings?.size ?? 0) / effectiveZoomScale;
     const brushImageSpaceSize = brushStageSize / (imageRenderSize.scale || 1);
 
@@ -2557,7 +2565,10 @@ const ImageCanvas = memo(
       const generation = state.generation;
 
       try {
-        const sample = await invoke<WbSample>(Invokes.SampleWhiteBalance, { corners });
+        const sample = await invoke<WbSample>(Invokes.SampleWhiteBalance, {
+          corners,
+          jsAdjustments: getWbSampleAdjustments(),
+        });
         if (state.generation === generation) {
           setWbSample(sample);
         }
@@ -2592,7 +2603,10 @@ const ImageCanvas = memo(
         const { generation, session } = state;
 
         try {
-          const sample = await invoke<WbSample>(Invokes.SampleWhiteBalance, { corners });
+          const sample = await invoke<WbSample>(Invokes.SampleWhiteBalance, {
+            corners,
+            jsAdjustments: getWbSampleAdjustments(),
+          });
           if (state.session !== session) return;
           if (state.generation === generation) {
             setWbSample(sample);
@@ -2962,9 +2976,15 @@ const ImageCanvas = memo(
 
         if (isToolActive) {
           if (pos) {
-            setCursorPreview({ x: pos.x, y: pos.y, visible: true });
+            cursorPreviewPosRef.current = pos;
+            setIsCursorPreviewVisible(true);
+            const cursorNode = cursorPreviewRef.current;
+            if (cursorNode) {
+              cursorNode.position(pos);
+              cursorNode.getLayer()?.batchDraw();
+            }
           } else {
-            setCursorPreview((p: CursorPreview) => ({ ...p, visible: false }));
+            setIsCursorPreviewVisible(false);
           }
         }
 
@@ -3411,12 +3431,12 @@ const ImageCanvas = memo(
 
     const handleMouseEnter = useCallback(() => {
       if (isToolActive) {
-        setCursorPreview((p: CursorPreview) => ({ ...p, visible: true }));
+        setIsCursorPreviewVisible(true);
       }
     }, [isToolActive]);
 
     const handleMouseLeave = useCallback(() => {
-      setCursorPreview((p: CursorPreview) => ({ ...p, visible: false }));
+      setIsCursorPreviewVisible(false);
       if (!wbDragRef.current) {
         resetWbSample();
       }
@@ -4114,7 +4134,7 @@ const ImageCanvas = memo(
                           />
                         )}
                         {isBrushActive &&
-                          cursorPreview.visible &&
+                          isCursorPreviewVisible &&
                           (!isCloneOrHealActive ||
                             (activeSubMask?.parameters?.sourceX !== undefined && !isCtrlPressed)) && (
                             <Circle
@@ -4130,8 +4150,9 @@ const ImageCanvas = memo(
                               listening={false}
                               perfectDrawEnabled={false}
                               radius={brushCursorPreview.radius}
-                              x={cursorPreview.x}
-                              y={cursorPreview.y}
+                              ref={cursorPreviewRef}
+                              x={cursorPreviewPosRef.current.x}
+                              y={cursorPreviewPosRef.current.y}
                             />
                           )}
                       </Group>

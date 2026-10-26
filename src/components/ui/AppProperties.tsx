@@ -2,6 +2,7 @@ import { ExportPreset } from './ExportImportProperties';
 import { Adjustments, CopyPasteSettings } from '../../utils/adjustments';
 import { ToolType } from '../panel/right/Masks';
 import type { WhiteBalance, WhiteBalanceMode } from '../../utils/whiteBalance';
+import type { ImmichSettings } from '../immich/immichApi';
 
 export const GLOBAL_KEYS = [
   ' ',
@@ -48,7 +49,6 @@ export enum Invokes {
   ApplyOrientationToPaths = 'apply_orientation_to_paths',
   ApplyAutoAdjustmentsToPaths = 'apply_auto_adjustments_to_paths',
   ApplyAutoStraightenToPaths = 'apply_auto_straighten_to_paths',
-  ApplyDenoising = 'apply_denoising',
   CalculateAutoAdjustments = 'calculate_auto_adjustments',
   GetAutoLearning = 'get_auto_learning',
   ResetAutoProfile = 'reset_auto_profile',
@@ -81,6 +81,7 @@ export enum Invokes {
   ListSourceDrives = 'list_source_drives',
   ScanSourceImages = 'scan_source_images',
   DeleteFolder = 'delete_folder',
+  DiscardAiJobs = 'discard_ai_jobs',
   DuplicateFile = 'duplicate_file',
   EstimateExportSizes = 'estimate_export_sizes',
   ExportImages = 'export_images',
@@ -88,18 +89,26 @@ export enum Invokes {
   GenerateAiForegroundMask = 'generate_ai_foreground_mask',
   GenerateAiSkyMask = 'generate_ai_sky_mask',
   GenerateAiFaceRegionMask = 'generate_ai_face_region_mask',
+  GenerateAiTextMask = 'generate_ai_text_mask',
+  GenerateAiFaceMask = 'generate_ai_face_mask',
   GenerateAiSubjectMask = 'generate_ai_subject_mask',
   GenerateExportFilename = 'generate_export_filename',
   GeneratePreviewForPath = 'generate_preview_for_path',
   GenerateMaskOverlay = 'generate_mask_overlay',
   GeneratePresetPreview = 'generate_preset_preview',
   GenerateUncroppedPreview = 'generate_uncropped_preview',
-  GetAiDenoiseCacheSize = 'get_ai_denoise_cache_size',
+  GetStorageUsage = 'get_storage_usage',
+  ClearAiMapsCache = 'clear_ai_maps_cache',
+  ClearAiModels = 'clear_ai_models',
+  ClearImmichCache = 'clear_immich_cache',
+  ClearMetadataCache = 'clear_metadata_cache',
+  GetAiJobsStatus = 'get_ai_jobs_status',
   GetFolderTree = 'get_folder_tree',
   GetFolderChildren = 'get_folder_children',
   GetLogFilePath = 'get_log_file_path',
   TakeGpuFallbackNotice = 'take_gpu_fallback_notice',
   GetOrCreateInternalLibraryRoot = 'get_or_create_internal_library_root',
+  GetPendingAiPaths = 'get_pending_ai_paths',
   GetPinnedFolderTrees = 'get_pinned_folder_trees',
   GetSupportedFileTypes = 'get_supported_file_types',
   HandleExportPresetsToFile = 'handle_export_presets_to_file',
@@ -109,7 +118,6 @@ export enum Invokes {
   ImportFiles = 'import_files',
   InvokeGenerativeReplaseWithMaskDef = 'invoke_generative_replace_with_mask_def',
   IsTetheringSupported = 'is_tethering_supported',
-  IsRaw9Available = 'is_raw9_available',
   ListImagesInDir = 'list_images_in_dir',
   ListImagesRecursive = 'list_images_recursive',
   LoadImage = 'load_image',
@@ -127,10 +135,13 @@ export enum Invokes {
   RemoveTagForPaths = 'remove_tag_for_paths',
   RenameFiles = 'rename_files',
   RenameFolder = 'rename_folder',
+  PauseAiJobs = 'pause_ai_jobs',
+  QueueAiJobs = 'queue_ai_jobs',
   ResetAdjustmentsForPaths = 'reset_adjustments_for_paths',
+  ResumeAiJobs = 'resume_ai_jobs',
+  RetryFailedAiJobs = 'retry_failed_ai_jobs',
   SaveMetadataAndUpdateThumbnail = 'save_metadata_and_update_thumbnail',
   SaveCollage = 'save_collage',
-  SaveDenoisedImage = 'save_denoised_image',
   SavePanorama = 'save_panorama',
   RestraightenPanorama = 'restraighten_panorama',
   SaveHdr = 'save_hdr',
@@ -156,10 +167,12 @@ export enum Invokes {
   TetherSetLiveView = 'tether_set_live_view',
   TetherTriggerCapture = 'tether_trigger_capture',
   StitchFocusStack = 'stitch_focus_stack',
+  SubscribeAnalytics = 'subscribe_analytics',
   SaveFocusStack = 'save_focus_stack',
   MergeHdr = 'merge_hdr',
   TestAIConnectorConnection = 'test_ai_connector_connection',
   UpdateWgpuTransform = 'update_wgpu_transform',
+  ReleaseOriginalPreview = 'release_original_preview',
   UpdateExifFields = 'update_exif_fields',
   FetchCommunityPresets = 'fetch_community_presets',
   GenerateAllCommunityPreviews = 'generate_all_community_previews',
@@ -249,6 +262,8 @@ export interface CustomAspectRatio {
 
 export type GroupPreference = 'jpeg' | 'raw';
 export type GroupingMode = 'off' | GroupPreference;
+export type CompareView = 'off' | 'vertical' | 'horizontal' | 'sideBySide';
+export type CompareMode = 'toggle' | Exclude<CompareView, 'off'>;
 
 export interface CropPreset {
   name: string;
@@ -269,7 +284,11 @@ export interface AppSettings {
   cropPresets?: Array<CropPreset>;
   lastCropRatio?: number | null;
   lastCropPreferPortrait?: boolean;
+  aiCacheLimitGb?: number;
+  aiMapsCacheLimitGb?: number;
+  thumbnailCacheLimitGb?: number;
   aiConnectorAddress?: string;
+  aiGpuAcceleration?: boolean;
   aiProvider?: string;
   assistantProvider?: string;
   assistantEndpoint?: string;
@@ -288,6 +307,8 @@ export interface AppSettings {
   highResZoomMultiplier?: number;
   enableLivePreviews?: boolean;
   livePreviewQuality?: string;
+  exportWorkerThreads?: number;
+  exportMemoryLimit?: number;
   enableAiTagging?: boolean;
   aiTagCount?: number;
   customAiTags?: string[];
@@ -322,6 +343,7 @@ export interface AppSettings {
   // Editor canvas preset (see EDITOR_CANVAS_COLORS); unset falls back to editorNeutralGreyBg.
   editorCanvasColor?: string;
   canvasInputMode?: 'mouse' | 'trackpad';
+  compareMode?: CompareMode;
   whiteBalanceMode?: WhiteBalanceMode;
   zoomSpeedMultiplier?: number;
   zoomPhotoToPixelClick?: boolean;
@@ -353,6 +375,7 @@ export interface AppSettings {
   groupPreferredType?: GroupPreference; // legacy
   alwaysDecodeRawThumbnails?: boolean;
   workspace?: WorkspaceState;
+  immich?: ImmichSettings;
 }
 
 export interface BrushSettings {
@@ -450,6 +473,7 @@ export interface ImageFile {
   is_cloud_placeholder: boolean;
   is_raw: boolean;
   group_id: string | null;
+  needs_ai: boolean;
 }
 
 /** Which sliders the Auto button writes (one switch each), and whether it corrects on top of the current look. */
@@ -467,6 +491,8 @@ export interface AutoAdjustOptions {
   dehaze: boolean;
   vignette: boolean;
   keepLook: boolean;
+  /** How hard Auto pushes: its corrections are scaled ×0.5 / ×1 / ×1.5 (upstream v1.6.7). */
+  strength: 'subtle' | 'normal' | 'strong';
 }
 
 export const DEFAULT_AUTO_ADJUST: AutoAdjustOptions = {
@@ -483,6 +509,7 @@ export const DEFAULT_AUTO_ADJUST: AutoAdjustOptions = {
   dehaze: false,
   vignette: false,
   keepLook: true,
+  strength: 'normal',
 };
 
 /**
@@ -491,7 +518,7 @@ export const DEFAULT_AUTO_ADJUST: AutoAdjustOptions = {
  */
 export function resolveAutoAdjust(saved?: Partial<AutoAdjustOptions> & Record<string, any>): AutoAdjustOptions {
   const s = saved ?? {};
-  const pick = (key: keyof AutoAdjustOptions, legacy?: string) =>
+  const pick = (key: Exclude<keyof AutoAdjustOptions, 'strength'>, legacy?: string): boolean =>
     typeof s[key] === 'boolean'
       ? s[key]
       : legacy && typeof s[legacy] === 'boolean'
@@ -511,6 +538,10 @@ export function resolveAutoAdjust(saved?: Partial<AutoAdjustOptions> & Record<st
     dehaze: pick('dehaze', 'effects'),
     vignette: pick('vignette', 'effects'),
     keepLook: pick('keepLook'),
+    strength:
+      s.strength === 'subtle' || s.strength === 'normal' || s.strength === 'strong'
+        ? s.strength
+        : DEFAULT_AUTO_ADJUST.strength,
   };
 }
 
@@ -619,14 +650,11 @@ export interface AdjustmentLayout {
 }
 
 export interface WaveformData {
-  blue: string;
-  green: string;
   height: number;
-  luma: string;
-  red: string;
-  rgb: string;
-  parade: string;
-  vectorscope: string;
+  luma: ImageBitmap | null;
+  rgb: ImageBitmap | null;
+  parade: ImageBitmap | null;
+  vectorscope: ImageBitmap | null;
   width: number;
 }
 

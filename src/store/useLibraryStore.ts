@@ -41,6 +41,7 @@ interface LibraryState {
   /// Filenames in user-chosen order for the open folder; empty when never sorted manually.
   manualOrder: Array<string>;
   imageRatings: Record<string, number>;
+  exifByPath: Record<string, Record<string, string>>;
   multiSelectedPaths: Array<string>;
   selectionAnchorPath: string | null;
   libraryActivePath: string | null;
@@ -59,6 +60,7 @@ interface LibraryState {
   // Number of thumbnails per row in the current grid layout (1 in list view).
   // Published by LibraryGrid so keyboard nav can move Up/Down a full row.
   libraryColumnCount: number;
+  libraryGridRows: Array<Array<{ path: string; center: number }>>;
 
   // Navigation History
   navHistory: NavHistoryItem[];
@@ -87,6 +89,7 @@ export const useLibraryStore = create<LibraryState>((set) => ({
   imageList: [],
   manualOrder: [],
   imageRatings: {},
+  exifByPath: {},
   multiSelectedPaths: [],
   selectionAnchorPath: null,
   libraryActivePath: null,
@@ -100,6 +103,7 @@ export const useLibraryStore = create<LibraryState>((set) => ({
   isViewLoading: false,
   libraryScrollTop: 0,
   libraryColumnCount: 1,
+  libraryGridRows: [],
   listColumnWidths: {
     thumbnail: 4,
     name: 20,

@@ -182,6 +182,59 @@ npm run typecheck  # note: upstream has pre-existing strict-tsc errors; the
 npm start          # tauri dev — builds the Rust backend and launches the app
 ```
 
+### v1.6.7 sync notes
+
+Upstream v1.6.7 (+ ~100 commits: Immich library, ESAM3/BiRefNet AI masks with text
+and face-part masks, global AI job tracker, GPU-accelerated AI on Windows/macOS,
+split / side-by-side compare, non-destructive negative conversion and BM3D
+denoise (denoise modal removed), Auto strength levels, DNG dual-illuminant
+camera colour, highlight reconstruction, dehaze rewrite, decode sharing,
+binary analytics packets, data-management settings). How the fork fits:
+
+- **Negative conversion — two systems, one owner.** The fork's film stack
+  (`negativeConversion` object, sidecar-owned, decode time, Film panel,
+  scanner, profiles) stays the film workflow. Upstream's simpler conversion
+  (flat `negative*` keys, applied after denoise) lives in
+  `negative_conversion/inline.rs`, re-exported from `negative_conversion.rs`
+  so upstream callers are unchanged. It stands down when the fork's
+  conversion is enabled (never inverts twice), and its Details controls only
+  show on images that already use it. Context menus keep the fork's
+  Convert/Revert + Apply Film Settings.
+- **Auto adjust.** Upstream's Subtle/Normal/Strong is `AutoAdjustOptions.strength`
+  (Rust `AutoAdjustMode`, scales every correction incl. white balance), set in
+  the fork's Auto popover; `calculate_auto_adjustments` / batch auto accept an
+  optional one-off `mode` (upstream's library menu). Upstream dropped
+  brightness from Auto; the fork keeps it (own switch) — `AutoAdjustmentResults`
+  carries `brightness` again.
+- **AI masks.** Upstream's ESAM3 sky/text/face and BiRefNet foreground replace
+  U-2-Net/sky-seg. The fork's YuNet detector (`face_model`, eyes/mouth masks,
+  import culling face cues) stays, downloaded via a `FACE_DETECTOR_ASSET`
+  through upstream's asset API; `ai-eyes`/`ai-mouth` render beside `ai-face`.
+  They are not in upstream's AI job types, so presets/paste keep their data.
+- **Decoding.** `get_or_decode_pristine` (upstream, with `DecodeFlights`
+  sharing a decode between same-file requests) gained a `_with_fallback`
+  variant reporting the fork's embedded-preview fallback (never cached); the
+  fork's one-decode-at-a-time `decode_permit` still gates `load_image`.
+- **Export.** Upstream's memory budget + `exportWorkerThreads` replace the
+  fork's RAM heuristic. The fork keeps its single whole-ROI 8-bit readback
+  (now from `display_textures().working_texture`); 16-bit tiles store raw
+  half-float bits and upstream's final pass converts them once.
+- **Library.** Upstream's `build_image_file` listing (with `is_negative` added)
+  and async/parallel album + folder-tree code were ported into
+  `file_management/{albums,folder_tree}.rs`; the duplicate copies upstream
+  re-added to `file_management.rs` were removed again, as were its embedded
+  preview helpers (the fork uses `fast_raw_preview_scaled`).
+- **Arrow keys.** Up/Down use upstream's on-screen row geometry
+  (`libraryGridRows`), falling back to the fork's column step; Left/Right,
+  wrap, Shift/Ctrl selection building and the first-press seed are the fork's.
+- **Settings.** Fork layout kept; upstream's DataManagementSettings (storage
+  usage, cache limits, clear actions, logs), Immich section, AI GPU
+  acceleration, advanced processing (export threads, export memory limit) and
+  the updated credits were slotted in.
+- **Misc.** `save_primary_metadata` → upstream `update_sidecar`; the fork's
+  processor square-sizing gave way to upstream's grow-only sizing; folder
+  rename keeps the fork's full path remapping (roots, pins, icons, selection).
+
 ### v1.6.6 sync notes
 
 Upstream v1.6.6 (+8 commits: relight, fog, AI denoise, auto straighten,

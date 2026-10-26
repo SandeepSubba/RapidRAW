@@ -7,7 +7,6 @@ import EffectsPanel from './Effects';
 import FilmPanel from './FilmPanel';
 import { ActiveTools } from '../../utils/adjustments';
 import { ToolVisibilityContext } from '../../context/ToolVisibilityContext';
-import { useEditorStore } from '../../store/useEditorStore';
 
 const SECTION_COMPONENTS: Record<string, any> = {
   basic: BasicAdjustments,
@@ -32,7 +31,6 @@ export default function AdjustmentSection({
   onToggleTool,
   ...sectionProps
 }: AdjustmentSectionProps) {
-  const histogram = useEditorStore((state) => (sectionName === 'curves' ? state.histogram : null));
   const contextValue = useMemo(
     () => ({ activeTools, onToggleTool, section: sectionName }),
     [activeTools, onToggleTool, sectionName],
@@ -43,7 +41,7 @@ export default function AdjustmentSection({
 
   return (
     <ToolVisibilityContext.Provider value={contextValue}>
-      <SectionComponent histogram={histogram} {...sectionProps} />
+      <SectionComponent {...sectionProps} />
     </ToolVisibilityContext.Provider>
   );
 }

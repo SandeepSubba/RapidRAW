@@ -244,6 +244,8 @@ and dated.
 - **Auto white balance** — a grey-world estimate over the least-saturated mid-tone
   pixels (what you'd click with the picker), damped to 70% and capped at ±40 so a
   colourful scene can't swing it. Previously Auto never touched white balance.
+- **Strength** — Subtle / Normal / Strong (upstream v1.6.7's levels) in the same
+  popover; scales every correction Auto makes, white balance included.
 - **Keep current look** (on by default) — Auto analyses the photo *as rendered*,
   with your preset, edits, masks and LUT, and adds the correction on top of the
   current sliders instead of replacing them with values measured on the untouched

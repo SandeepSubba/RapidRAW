@@ -125,8 +125,18 @@ pub fn all_available_adjustments() -> HashSet<String> {
         "centréY",
         "lumaNoiseReduction",
         "colorNoiseReduction",
+        "aiDenoiseEnabled",
+        "aiDenoiseMethod",
+        "aiDenoiseAmount",
+        "aiDenoiseDetail",
         "chromaticAberrationRedCyan",
         "chromaticAberrationBlueYellow",
+        "negativeConversionEnabled",
+        "negativeRedWeight",
+        "negativeGreenWeight",
+        "negativeBlueWeight",
+        "negativeExposure",
+        "negativeContrast",
         "vignetteAmount",
         "vignetteFeather",
         "vignetteMidpoint",
@@ -145,6 +155,30 @@ pub fn all_available_adjustments() -> HashSet<String> {
         "glowAmount",
         "halationAmount",
         "flareAmount",
+        "lensBlurEnabled",
+        "lensBlurAmount",
+        "lensBlurDiffusion",
+        "lensBlurShape",
+        "lensBlurMinDepth",
+        "lensBlurMaxDepth",
+        "lensBlurMinFade",
+        "lensBlurMaxFade",
+        "fogEnabled",
+        "fogAmount",
+        "fogStart",
+        "fogDensity",
+        "fogHeight",
+        "fogVariation",
+        "fogGlow",
+        "fogTemperature",
+        "fogTint",
+        "relightEnabled",
+        "relightLights",
+        "relightAmbient",
+        "relightSoftness",
+        "relightShine",
+        "relightShadows",
+        "relightShadowSoftness",
         "crop",
         "aspectRatio",
         "rotation",
@@ -453,6 +487,22 @@ pub fn default_compensate_highlight_preservation() -> bool {
     true
 }
 
+pub fn default_ai_gpu_acceleration() -> bool {
+    true
+}
+
+pub fn default_ai_cache_limit_gb() -> u32 {
+    10
+}
+
+pub fn default_ai_maps_cache_limit_gb() -> u32 {
+    4
+}
+
+pub fn default_thumbnail_cache_limit_gb() -> u32 {
+    10
+}
+
 pub fn default_tagging_shortcuts_option() -> Option<Vec<String>> {
     Some(vec![
         "portrait".to_string(),
@@ -551,6 +601,27 @@ impl Default for AutoProfile {
     }
 }
 
+/// How hard Auto pushes (upstream v1.6.7's strength levels): its corrections are
+/// scaled ×0.5 / ×1 / ×1.5.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum AutoAdjustMode {
+    Subtle,
+    #[default]
+    Normal,
+    Strong,
+}
+
+impl AutoAdjustMode {
+    pub fn factor(self) -> f64 {
+        match self {
+            AutoAdjustMode::Subtle => 0.5,
+            AutoAdjustMode::Normal => 1.0,
+            AutoAdjustMode::Strong => 1.5,
+        }
+    }
+}
+
 /// Which sliders the Auto button is allowed to touch (Capture One's "Auto Adjust"
 /// checklist, one switch per slider), and whether it corrects the photo as it
 /// currently looks (on top of presets and edits) or starts from the untouched photo.
@@ -575,6 +646,7 @@ pub struct AutoAdjustOptions {
     /// Analyse the rendered photo and add the correction to the current values
     /// instead of replacing them with values measured on the untouched photo.
     pub keep_look: bool,
+    pub strength: AutoAdjustMode,
 }
 
 impl Default for AutoAdjustOptions {
@@ -593,6 +665,7 @@ impl Default for AutoAdjustOptions {
             dehaze: false,
             vignette: false,
             keep_look: true,
+            strength: AutoAdjustMode::Normal,
         }
     }
 }
@@ -617,6 +690,7 @@ struct AutoAdjustOptionsWire {
     dehaze: Option<bool>,
     vignette: Option<bool>,
     keep_look: Option<bool>,
+    strength: Option<AutoAdjustMode>,
     tone: Option<bool>,
     levels: Option<bool>,
     effects: Option<bool>,
@@ -640,6 +714,7 @@ impl<'de> Deserialize<'de> for AutoAdjustOptions {
             dehaze: w.dehaze.or(w.effects).unwrap_or(base.dehaze),
             vignette: w.vignette.or(w.effects).unwrap_or(base.vignette),
             keep_look: w.keep_look.unwrap_or(base.keep_look),
+            strength: w.strength.unwrap_or(base.strength),
         })
     }
 }
@@ -757,6 +832,8 @@ pub struct AppSettings {
     pub external_editor_format: Option<String>,
     #[serde(default = "default_adjustment_visibility")]
     pub adjustment_visibility: HashMap<String, bool>,
+    #[serde(default = "default_ai_gpu_acceleration")]
+    pub ai_gpu_acceleration: bool,
     #[serde(default = "default_open_tree_sections")]
     pub open_tree_sections: Vec<String>,
     #[serde(default)]
@@ -805,6 +882,8 @@ pub struct AppSettings {
     pub editor_canvas_color: Option<String>,
     #[serde(default)]
     pub canvas_input_mode: Option<String>,
+    #[serde(default)]
+    pub compare_mode: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub white_balance_mode: Option<String>,
     #[serde(default)]
@@ -823,6 +902,16 @@ pub struct AppSettings {
     pub thumbnail_worker_threads: Option<u32>,
     #[serde(default)]
     pub image_cache_size: Option<u32>,
+    #[serde(default)]
+    pub ai_cache_limit_gb: Option<u32>,
+    #[serde(default)]
+    pub thumbnail_cache_limit_gb: Option<u32>,
+    #[serde(default)]
+    pub ai_maps_cache_limit_gb: Option<u32>,
+    #[serde(default)]
+    pub export_worker_threads: Option<u32>,
+    #[serde(default)]
+    pub export_memory_limit: Option<u32>,
     #[serde(default)]
     pub enable_baseline_exposure: bool,
     #[serde(default = "default_baseline_exposure")]
@@ -879,6 +968,8 @@ pub struct AppSettings {
     pub adjustment_layout: AdjustmentLayout,
     #[serde(default)]
     pub workspace: WorkspaceState,
+    #[serde(default)]
+    pub immich: crate::immich::ImmichSettings,
 }
 
 impl Default for AppSettings {
@@ -931,6 +1022,7 @@ impl Default for AppSettings {
             external_editor_path: None,
             external_editor_format: None,
             adjustment_visibility: default_adjustment_visibility(),
+            ai_gpu_acceleration: default_ai_gpu_acceleration(),
             open_tree_sections: default_open_tree_sections(),
             copy_paste_settings: CopyPasteSettings::default(),
             raw_highlight_compression: Some(2.5),
@@ -961,6 +1053,7 @@ impl Default for AppSettings {
             editor_neutral_grey_bg: Some(false),
             editor_canvas_color: None,
             canvas_input_mode: Some("mouse".to_string()),
+            compare_mode: None,
             white_balance_mode: None,
             zoom_speed_multiplier: Some(1.0),
             zoom_photo_to_pixel_click: Some(false),
@@ -974,6 +1067,11 @@ impl Default for AppSettings {
             image_cache_size: Some(2),
             #[cfg(not(target_os = "android"))]
             image_cache_size: Some(5),
+            ai_cache_limit_gb: Some(default_ai_cache_limit_gb()),
+            thumbnail_cache_limit_gb: Some(default_thumbnail_cache_limit_gb()),
+            ai_maps_cache_limit_gb: Some(default_ai_maps_cache_limit_gb()),
+            export_worker_threads: None,
+            export_memory_limit: None,
             enable_baseline_exposure: false,
             baseline_exposure: default_baseline_exposure(),
             compensate_highlight_preservation: default_compensate_highlight_preservation(),
@@ -1001,6 +1099,7 @@ impl Default for AppSettings {
             custom_aspect_ratios: Vec::new(),
             adjustment_layout: AdjustmentLayout::default(),
             workspace: WorkspaceState::default(),
+            immich: crate::immich::ImmichSettings::default(),
         }
     }
 }
@@ -1108,10 +1207,14 @@ fn read_settings_from_disk(app_handle: &AppHandle) -> Result<AppSettings, String
 
 #[tauri::command]
 pub fn save_settings(settings: AppSettings, app_handle: AppHandle) -> Result<(), String> {
+    let previous_gpu_acceleration = load_settings(app_handle.clone())
+        .map(|previous| previous.ai_gpu_acceleration)
+        .ok();
     let path = get_settings_path(&app_handle)?;
     let json_string = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
     fs::write(path, json_string).map_err(|e| e.to_string())?;
     *settings_cache() = None;
+    crate::immich::apply_settings(&settings.immich);
 
     let state = app_handle.state::<AppState>();
     let cache_size = settings.image_cache_size.unwrap_or(5) as usize;
@@ -1120,5 +1223,10 @@ pub fn save_settings(settings: AppSettings, app_handle: AppHandle) -> Result<(),
         .lock()
         .unwrap()
         .set_capacity(cache_size);
+    crate::storage::apply_cache_limits(&settings);
+
+    if previous_gpu_acceleration != Some(settings.ai_gpu_acceleration) {
+        crate::ai_processing::reset_ai_sessions(&state.ai_state);
+    }
     Ok(())
 }

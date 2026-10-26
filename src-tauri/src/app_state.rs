@@ -14,8 +14,8 @@ use wgpu::{Texture, TextureView};
 
 use crate::ai_processing::AiState;
 use crate::as_shot::AsShot;
-use crate::cache_utils::DecodedImageCache;
-use crate::gpu_processing::GpuProcessor;
+use crate::cache_utils::{DecodeFlights, DecodedImageCache};
+use crate::gpu_processing::{DisplayLayer, GpuProcessor};
 use crate::image_processing::GpuContext;
 use crate::launch_request::ExternalEditSession;
 use crate::lens_correction::LensDatabase;
@@ -123,14 +123,22 @@ pub struct CachedPreview {
 }
 
 pub struct GpuImageCache {
+    pub entries: Vec<GpuImageEntry>,
+}
+
+pub struct GpuImageEntry {
+    pub id: u64,
     pub texture: Texture,
     pub texture_view: TextureView,
     pub gf_coeffs_view: TextureView,
-    pub gf_dehaze_view: TextureView,
+    pub gf_structure_view: TextureView,
+    pub haze_view: TextureView,
+    pub airlight_view: TextureView,
     pub is_raw: u32,
     pub width: u32,
     pub height: u32,
     pub transform_hash: u64,
+    pub source: (usize, usize),
 }
 
 pub struct GpuProcessorState {
@@ -141,6 +149,7 @@ pub struct GpuProcessorState {
 
 pub struct PreviewJob {
     pub adjustments: serde_json::Value,
+    pub layer: DisplayLayer,
     pub is_interactive: bool,
     pub target_resolution: Option<u32>,
     pub roi: Option<(f32, f32, f32, f32)>,
@@ -175,61 +184,17 @@ pub struct ThumbnailManager {
     pub processing_now: Mutex<HashSet<String>>,
     pub rotational_disk: AtomicBool,
     pub io_gate: Mutex<()>,
-    active_decodes: Mutex<usize>,
-    decode_cvar: Condvar,
-    max_decodes: usize,
 }
-
-const RAM_PER_THUMBNAIL_DECODE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 
 impl ThumbnailManager {
     pub fn new() -> Arc<Self> {
-        let mut sys = sysinfo::System::new();
-        sys.refresh_memory();
-        let max_decodes =
-            (sys.total_memory() / RAM_PER_THUMBNAIL_DECODE_BYTES).clamp(1, 4) as usize;
-
         Arc::new(Self {
             queue: Mutex::new(VecDeque::new()),
             cvar: Condvar::new(),
             processing_now: Mutex::new(HashSet::new()),
             rotational_disk: AtomicBool::new(false),
             io_gate: Mutex::new(()),
-            active_decodes: Mutex::new(0),
-            decode_cvar: Condvar::new(),
-            max_decodes,
         })
-    }
-
-    pub fn acquire_decode_permit(&self) -> DecodePermit<'_> {
-        let mut active = self
-            .active_decodes
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        while *active >= self.max_decodes {
-            active = self
-                .decode_cvar
-                .wait(active)
-                .unwrap_or_else(|e| e.into_inner());
-        }
-        *active += 1;
-        DecodePermit { manager: self }
-    }
-}
-
-pub struct DecodePermit<'a> {
-    manager: &'a ThumbnailManager,
-}
-
-impl Drop for DecodePermit<'_> {
-    fn drop(&mut self) {
-        let mut active = self
-            .manager
-            .active_decodes
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        *active -= 1;
-        self.manager.decode_cvar.notify_one();
     }
 }
 
@@ -277,7 +242,6 @@ pub struct AppState {
     pub hdr_result: Arc<Mutex<Option<DynamicImage>>>,
     pub panorama_result: Arc<Mutex<Option<DynamicImage>>>,
     pub focus_stack_result: Arc<Mutex<Option<DynamicImage>>>,
-    pub denoise_result: Arc<Mutex<Option<DynamicImage>>>,
     pub indexing_task_handle: Mutex<Option<JoinHandle<()>>>,
     pub lut_cache: Mutex<HashMap<String, Arc<Lut>>>,
     pub initial_file_path: Mutex<Option<String>>,
@@ -286,6 +250,7 @@ pub struct AppState {
     pub thumbnail_progress: Mutex<ThumbnailProgressTracker>,
     pub preview_worker_tx: Mutex<Option<Sender<PreviewJob>>>,
     pub analytics_worker_tx: Mutex<Option<Sender<AnalyticsJob>>>,
+    pub analytics_channel: Mutex<Option<tauri::ipc::Channel>>,
     pub mask_cache: Mutex<HashMap<u64, GrayImage>>,
     pub patch_cache: Mutex<HashMap<String, serde_json::Value>>,
     pub geometry_cache: Mutex<HashMap<u64, DynamicImage>>,
@@ -295,20 +260,25 @@ pub struct AppState {
     // Bumped on every uncropped-preview request so stale in-flight jobs (from a
     // fast drag) can detect they've been superseded and bail before doing work.
     pub uncropped_preview_generation: Arc<AtomicUsize>,
+    pub wgpu_presented_generation: AtomicUsize,
     pub full_warped_cache: Mutex<Option<(u64, Arc<DynamicImage>)>>,
+    pub full_warped_build_lock: Mutex<()>,
     pub patched_cache: Mutex<Option<(u64, Arc<DynamicImage>)>>,
     pub warped_cache: Mutex<Option<(u64, Arc<DynamicImage>)>>,
     pub working_cache: Mutex<Option<(u64, Arc<DynamicImage>)>>,
     pub effects_cache: Mutex<Option<(u64, Arc<DynamicImage>)>>,
     pub full_transformed_cache: Mutex<Option<TransformedImageCache>>,
     pub decoded_image_cache: Mutex<DecodedImageCache>,
-    /// Only one full-resolution decode at a time. Arrowing through a folder
+    /// Only one full-resolution decode at a time (fork). Arrowing through a folder
     /// fires a load per keypress, and key auto-repeat outruns a RAW decode —
     /// without this every in-flight decode holds its own hundreds of MB and
     /// the machine runs out of memory. Stale waiters bail on the generation
-    /// check as soon as they get the permit.
+    /// check as soon as they get the permit. Complements `decode_flights`, which
+    /// shares one decode between concurrent requests for the same file.
     pub decode_permit: Arc<tokio::sync::Semaphore>,
+    pub decode_flights: DecodeFlights,
     pub thumbnail_manager: Arc<ThumbnailManager>,
+    pub memory_budget: Arc<crate::memory_budget::MemoryBudget>,
     pub metadata_manager: Arc<MetadataManager>,
     pub disks_cache: Mutex<Option<Disks>>,
     pub disks_cache_refreshing: AtomicBool,

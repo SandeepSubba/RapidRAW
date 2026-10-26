@@ -10,7 +10,7 @@ pub struct HistogramData {
 
 pub enum AnalyticsPixels {
     Owned(Vec<u8>),
-    Mapped(wgpu::BufferView),
+    Mapped(crate::gpu_processing::PooledReadback),
 }
 
 impl std::ops::Deref for AnalyticsPixels {
@@ -160,15 +160,57 @@ fn normalize_histogram_range(histogram: &mut [f32], percentile_clip: f32) {
     }
 }
 
-#[derive(serde::Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
 pub struct WaveformData {
-    pub rgb: String,
-    pub luma: String,
-    pub parade: String,
-    pub vectorscope: String,
+    pub rgb: Vec<u8>,
+    pub luma: Vec<u8>,
+    pub parade: Vec<u8>,
+    pub vectorscope: Vec<u8>,
     pub width: u32,
     pub height: u32,
+}
+
+pub fn encode_analytics_packet(
+    path: &str,
+    histogram: Option<&HistogramData>,
+    waveform: Option<&WaveformData>,
+) -> Vec<u8> {
+    let put_u32 = |out: &mut Vec<u8>, v: usize| out.extend_from_slice(&(v as u32).to_le_bytes());
+    let wave_len = waveform.map_or(0, |w| {
+        w.rgb.len() + w.luma.len() + w.parade.len() + w.vectorscope.len()
+    });
+    let mut out = Vec::with_capacity(path.len() + 4 * 256 * 4 + wave_len + 40);
+
+    put_u32(&mut out, path.len());
+    out.extend_from_slice(path.as_bytes());
+
+    match histogram {
+        Some(h) => {
+            put_u32(&mut out, h.red.len());
+            for channel in [&h.red, &h.green, &h.blue, &h.luma] {
+                for v in channel.iter() {
+                    out.extend_from_slice(&v.to_le_bytes());
+                }
+            }
+        }
+        None => put_u32(&mut out, 0),
+    }
+
+    match waveform {
+        Some(w) => {
+            put_u32(&mut out, w.width as usize);
+            put_u32(&mut out, w.height as usize);
+            for plane in [&w.rgb, &w.luma, &w.parade, &w.vectorscope] {
+                put_u32(&mut out, plane.len());
+                out.extend_from_slice(plane);
+            }
+        }
+        None => {
+            put_u32(&mut out, 0);
+            put_u32(&mut out, 0);
+        }
+    }
+
+    out
 }
 
 const WAVEFORM_W: usize = 256;
@@ -444,26 +486,10 @@ pub fn calculate_waveform(
     }
 
     Ok(WaveformData {
-        rgb: if do_rgb {
-            BASE64.encode(&rgba_rgb)
-        } else {
-            String::new()
-        },
-        luma: if do_luma {
-            BASE64.encode(&rgba_luma)
-        } else {
-            String::new()
-        },
-        parade: if do_parade {
-            BASE64.encode(&rgba_parade)
-        } else {
-            String::new()
-        },
-        vectorscope: if do_vectorscope {
-            BASE64.encode(&rgba_vector)
-        } else {
-            String::new()
-        },
+        rgb: rgba_rgb,
+        luma: rgba_luma,
+        parade: rgba_parade,
+        vectorscope: rgba_vector,
         width: W as u32,
         height: H as u32,
     })
@@ -782,17 +808,20 @@ pub fn auto_results_to_json(
         (options.dehaze, "dehaze", results.dehaze),
         (options.vignette, "vignetteAmount", results.vignette_amount),
     ];
+    // Strength (Subtle / Normal / Strong) scales every correction, white balance too.
+    let k = options.strength.factor();
+    let limit = |key: &str| if key == "exposure" { 5.0 } else { 100.0 };
     for (on, key, value) in sliders {
         if on {
-            put(key, value);
+            put(key, (value * k).clamp(-limit(key), limit(key)));
         }
     }
     if options.vignette {
-        put("centré", results.centre);
+        put("centré", (results.centre * k).clamp(-100.0, 100.0));
     }
     if let Some((temperature, tint)) = white_balance.filter(|_| options.white_balance) {
-        put("temperature", temperature);
-        put("tint", tint);
+        put("temperature", (temperature * k).clamp(-100.0, 100.0));
+        put("tint", (tint * k).clamp(-100.0, 100.0));
     }
 
     // A switched-off tool renders as if its sliders were zero, so switch on the tools
@@ -1347,21 +1376,17 @@ fn render_for_analysis(
         .and_then(|m| serde_json::from_value(m.clone()).ok())
         .unwrap_or_default();
     let scaled_offset = (unscaled_crop_offset.0 * scale_for_gpu, unscaled_crop_offset.1 * scale_for_gpu);
-    let mask_bitmaps: Vec<image::ImageBuffer<image::Luma<u8>, Vec<u8>>> = mask_definitions
-        .iter()
-        .filter_map(|def| {
-            crate::mask_generation::get_cached_or_generate_mask(
-                state,
-                &loaded.path,
-                def,
-                w,
-                h,
-                scale_for_gpu,
-                scaled_offset,
-                js_adjustments,
-            )
-        })
-        .collect();
+    let mask_bitmaps = crate::mask_generation::get_cached_or_generate_masks(
+        state,
+        &loaded.path,
+        &mask_definitions,
+        w,
+        h,
+        scale_for_gpu,
+        scaled_offset,
+        js_adjustments,
+    )
+    .bitmaps;
     let render = resolve_render_options_from_handle(app_handle, loaded.is_raw);
     let mut all = get_all_adjustments_from_json(js_adjustments, loaded.is_raw, loaded.as_shot, render);
     all.global.show_clipping = 0;
@@ -1373,7 +1398,13 @@ fn render_for_analysis(
         state,
         &preview,
         crate::cache_utils::calculate_full_job_hash(&loaded.path, js_adjustments),
-        crate::gpu_processing::RenderRequest { adjustments: all, mask_bitmaps: &mask_bitmaps, lut, roi: None },
+        crate::gpu_processing::RenderRequest {
+            adjustments: all,
+            mask_bitmaps: &mask_bitmaps,
+            mask_cache_key: None,
+            lut,
+            roi: None,
+        },
         "auto_adjust_analysis",
     )
 }
@@ -1386,6 +1417,8 @@ fn render_for_analysis(
 #[tauri::command]
 pub async fn calculate_auto_adjustments(
     adjustments: Option<serde_json::Value>,
+    // One-off strength (upstream's right-click levels); the saved option otherwise.
+    mode: Option<crate::app_settings::AutoAdjustMode>,
     state: tauri::State<'_, AppState>,
     app_handle: tauri::AppHandle,
 ) -> Result<serde_json::Value, String> {
@@ -1400,7 +1433,10 @@ pub async fn calculate_auto_adjustments(
 
     let settings = crate::app_settings::load_settings(app_handle.clone()).unwrap_or_default();
     let profile = settings.auto_profile.clone();
-    let options = settings.auto_adjust.unwrap_or_default();
+    let mut options = settings.auto_adjust.unwrap_or_default();
+    if let Some(mode) = mode {
+        options.strength = mode;
+    }
 
     // Bootstrap: with no learned profile yet, scan the current folder's edited
     // thumbnails in the background so the NEXT auto benefits. Ongoing learning

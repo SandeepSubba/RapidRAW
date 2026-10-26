@@ -66,6 +66,11 @@ Rules:
   `pointColor`, skin smoothing under `presence`; Auto returns an `activeTools`
   patch. New adjustment keys go in `src/utils/defaultAdjustments.json` (shared
   by TS and Rust). See FORK_NOTES.md "v1.6.6 sync notes".
+- Two negative conversions exist since upstream v1.6.7: the fork's sidecar-owned
+  `negativeConversion` (Film panel, the film workflow) and upstream's flat
+  `negative*` keys (`negative_conversion/inline.rs`). Upstream's stands down when
+  the fork's is enabled — keep that guard if either changes. Auto strength is
+  `AutoAdjustOptions.strength`. See FORK_NOTES.md "v1.6.7 sync notes".
 - The `claudecode` assistant provider shells out to the `claude` CLI (absolute
   path in settings); prompts go via stdin — never argv (E2BIG with mask-laden
   adjustments).

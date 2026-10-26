@@ -50,7 +50,7 @@ export const useKeyboardShortcuts = ({
     handleAutoStraighten,
     handleCopyAdjustments,
     handlePasteAdjustments,
-    toggleShowOriginal,
+    toggleCompare,
   } = useEditorActions();
   const { handleRate, handleSetFlag, handleToggleFlag, handleSetColorLabel } = useLibraryActions();
 
@@ -379,7 +379,7 @@ export const useKeyboardShortcuts = ({
         shouldFire: (s: any) => s.ui.activeView === 'editor' && !!s.editor.selectedImage,
         execute: (e: any) => {
           e.preventDefault();
-          toggleShowOriginal();
+          toggleCompare();
         },
       },
       toggle_adjustments: {
@@ -837,7 +837,6 @@ export const useKeyboardShortcuts = ({
           s.ui.activeView === 'library' && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code),
         execute: (e: KeyboardEvent, s: any) => {
           e.preventDefault();
-          const isNext = e.code === 'ArrowRight' || e.code === 'ArrowDown';
           const activePath = s.library.libraryActivePath;
           if (sortedListRef.current.length === 0) return;
           // Nothing focused yet (e.g. just entered the folder, no click): the first
@@ -853,12 +852,31 @@ export const useKeyboardShortcuts = ({
             handleImageSelect(first.path, false);
             return;
           }
-          // Recursive view groups the grid by folder; arrows stay inside the
-          // focused image's folder so rows line up with what's on screen.
-          const recursive = s.settings.appSettings?.libraryViewMode === LibraryViewMode.Recursive;
-          const list = recursive
-            ? sortedListRef.current.filter((img) => getParentFolder(img.path) === getParentFolder(activePath))
-            : sortedListRef.current;
+          const isNext = e.code === 'ArrowRight' || e.code === 'ArrowDown';
+          const isVertical = e.code === 'ArrowUp' || e.code === 'ArrowDown';
+
+          // Up/Down follow the grid as drawn (upstream): the item in the next row
+          // closest to the current one's centre. Rows come from LibraryGrid, so
+          // folder headers in recursive view and short last rows are handled.
+          const gridRows: Array<Array<{ path: string; center: number }>> = s.library.libraryGridRows ?? [];
+          let targetPath: string | null = null;
+          let list = sortedListRef.current;
+          const rowIndex = isVertical ? gridRows.findIndex((row) => row.some((item) => item.path === activePath)) : -1;
+          if (rowIndex !== -1) {
+            const targetRow = gridRows[rowIndex + (isNext ? 1 : -1)];
+            if (!targetRow) return;
+            const center = gridRows[rowIndex].find((item) => item.path === activePath)!.center;
+            targetPath = targetRow.reduce((best, item) =>
+              Math.abs(item.center - center) < Math.abs(best.center - center) ? item : best,
+            ).path;
+          } else {
+            // Recursive view groups the grid by folder; Left/Right stay inside the
+            // focused image's folder so they move through what's on screen.
+            const recursive = s.settings.appSettings?.libraryViewMode === LibraryViewMode.Recursive;
+            if (recursive) {
+              list = list.filter((img) => getParentFolder(img.path) === getParentFolder(activePath));
+            }
+          }
           const currentIndex = list.findIndex((img) => img.path === activePath);
           if (currentIndex === -1) return;
 
@@ -868,16 +886,17 @@ export const useKeyboardShortcuts = ({
           const extend = e.shiftKey || e.ctrlKey || e.metaKey;
           const wrap = s.settings.appSettings?.wrapImageNavigation ?? true;
 
-          // Up/Down move a whole grid row; Left/Right move one item. Vertical
-          // moves never wrap and clamp at the edges (a no-op past top/bottom).
-          const isVertical = e.code === 'ArrowUp' || e.code === 'ArrowDown';
-          const columnCount = Math.max(1, s.library.libraryColumnCount ?? 1);
-          const step = isVertical ? columnCount : 1;
-
-          let nextIndex = isNext ? currentIndex + step : currentIndex - step;
-          if (isVertical) {
+          let nextIndex: number;
+          if (targetPath) {
+            nextIndex = list.findIndex((img) => img.path === targetPath);
+            if (nextIndex === -1) return;
+          } else if (isVertical) {
+            // No row geometry (list view, or not rendered yet): step a whole row.
+            const columnCount = Math.max(1, s.library.libraryColumnCount ?? 1);
+            nextIndex = isNext ? currentIndex + columnCount : currentIndex - columnCount;
             if (nextIndex < 0 || nextIndex >= list.length) return;
           } else {
+            nextIndex = isNext ? currentIndex + 1 : currentIndex - 1;
             if (nextIndex >= list.length) {
               if (!wrap || extend) return;
               nextIndex = 0;
@@ -947,8 +966,7 @@ export const useKeyboardShortcuts = ({
         state.ui.confirmModalState.isOpen ||
         state.ui.panoramaModalState.isOpen ||
         state.ui.cullingModalState.isOpen ||
-        state.ui.collageModalState.isOpen ||
-        state.ui.denoiseModalState.isOpen;
+        state.ui.collageModalState.isOpen;
 
       if (isModalOpen) return;
 
@@ -1059,6 +1077,6 @@ export const useKeyboardShortcuts = ({
     handleSetFlag,
     handleToggleFlag,
     handleSetColorLabel,
-    toggleShowOriginal,
+    toggleCompare,
   ]);
 };

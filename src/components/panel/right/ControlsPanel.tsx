@@ -31,10 +31,10 @@ import { useSettingsStore } from '../../../store/useSettingsStore';
 import { useTetherStore } from '../../../store/useTetherStore';
 import { CameraSection } from '../library/TetherMenu';
 import { useUIStore } from '../../../store/useUIStore';
-import { useEditorActions } from '../../../hooks/useEditorActions';
+import { buildAutoAdjustModeOptions, useEditorActions } from '../../../hooks/useEditorActions';
 import { useWaveformControls } from '../../../hooks/useWaveformControls';
 
-const AUTO_TOOLS: Array<keyof AutoAdjustOptions> = [
+const AUTO_TOOLS: Array<Exclude<keyof AutoAdjustOptions, 'strength' | 'keepLook'>> = [
   'exposure',
   'brightness',
   'contrast',
@@ -161,6 +161,27 @@ function AutoAdjustOptionsPopover({ onClose }: { onClose(): void }) {
           {t('editor.adjustments.auto.nothingSelected')}
         </Text>
       )}
+      <div className="border-t border-border-color pt-2 mt-1 flex flex-col gap-1.5">
+        <Text variant={TextVariants.small} color={TextColors.secondary}>
+          {t('editor.adjustments.auto.strength')}
+        </Text>
+        <div className="grid grid-cols-3 gap-1 bg-bg-primary rounded-md p-0.5">
+          {(['subtle', 'normal', 'strong'] as const).map((level) => (
+            <button
+              key={level}
+              onClick={() => update({ strength: level })}
+              className={clsx(
+                'text-xs py-1 rounded transition-colors',
+                options.strength === level
+                  ? 'bg-accent text-button-text'
+                  : 'text-text-secondary hover:text-text-primary hover:bg-surface',
+              )}
+            >
+              {t(`contextMenus.autoAdjustModes.${level}`)}
+            </button>
+          ))}
+        </div>
+      </div>
       <div className="border-t border-border-color pt-2 mt-1 flex flex-col gap-1">
         <Switch
           label={t('editor.adjustments.auto.keepLook')}
@@ -315,6 +336,12 @@ export default function Controls() {
     }));
   };
 
+  const handleAutoAdjustContextMenu = (event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    showContextMenu(event.clientX, event.clientY, buildAutoAdjustModeOptions(t, handleAutoAdjustments));
+  };
+
   const handleToggleSection = (section: string) => {
     setCollapsibleState((prev: any) => {
       const isOpening = !prev[section];
@@ -413,7 +440,7 @@ export default function Controls() {
             <button
               className="p-2 pr-1 rounded-l-full disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               disabled={!selectedImage}
-              onClick={handleAutoAdjustments}
+              onClick={() => handleAutoAdjustments()}
               onContextMenu={(e) => {
                 e.preventDefault();
                 setIsAutoOptionsOpen((open) => !open);

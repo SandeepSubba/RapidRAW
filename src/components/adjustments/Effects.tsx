@@ -27,7 +27,7 @@ import Text from '../ui/Text';
 import AdjustmentSubSection from './AdjustmentSubSection';
 import { TextVariants } from '../../types/typography';
 import { DepthRangePicker } from '../ui/DepthRangePicker';
-import { useProcessStore } from '../../store/useProcessStore';
+import { selectAiModelDownloadStatus, useProcessStore } from '../../store/useProcessStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
 import { useEditorStore } from '../../store/useEditorStore';
 import { useContextMenu } from '../../context/ContextMenuContext';
@@ -195,7 +195,7 @@ function EffectsPanel({
   const [isGeneratingNormals, setIsGeneratingNormals] = useState(false);
   const [isGeneratingFogDepth, setIsGeneratingFogDepth] = useState(false);
   const [hoveredLightId, setHoveredLightId] = useState<string | null>(null);
-  const aiModelDownloadStatus = useProcessStore((state) => state.aiModelDownloadStatus);
+  const aiModelDownloadStatus = useProcessStore(selectAiModelDownloadStatus);
   const isRelightPickerActive = useEditorStore((state) => state.isRelightPickerActive);
   const activeRelightLightId = useEditorStore((state) => state.activeRelightLightId);
   const setEditor = useEditorStore((state) => state.setEditor);
@@ -204,7 +204,7 @@ function EffectsPanel({
   const handleGenerateLensBlurDepthMap = async () => {
     setIsGeneratingDepth(true);
     try {
-      const b64: string = await invoke('generate_full_image_depth_map');
+      const b64: string = await invoke('generate_full_image_depth_map', { jsAdjustments: adjustments });
       setAdjustments((prev: Partial<Adjustments>) => ({
         ...prev,
         lensBlurDepthMap: b64,
@@ -220,7 +220,7 @@ function EffectsPanel({
   const handleGenerateRelightNormalMap = async () => {
     setIsGeneratingNormals(true);
     try {
-      const b64: string = await invoke('generate_relight_normal_map');
+      const b64: string = await invoke('generate_relight_normal_map', { jsAdjustments: adjustments });
       setAdjustments((prev: Partial<Adjustments>) => ({
         ...prev,
         relightNormalMap: b64,
@@ -236,7 +236,7 @@ function EffectsPanel({
   const handleGenerateFogDepthMap = async () => {
     setIsGeneratingFogDepth(true);
     try {
-      const b64: string = await invoke('generate_full_image_depth_map');
+      const b64: string = await invoke('generate_full_image_depth_map', { jsAdjustments: adjustments });
       setAdjustments((prev: Partial<Adjustments>) => ({
         ...prev,
         fogDepthMap: b64,

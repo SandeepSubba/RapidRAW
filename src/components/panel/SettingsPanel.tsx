@@ -14,6 +14,9 @@ import {
   Bookmark,
   RefreshCw,
   RotateCcw,
+  ChevronDown,
+  ChevronRight,
+  Settings as SettingsIcon,
 } from 'lucide-react';
 import { useUIStore } from '../../store/useUIStore';
 import { invoke } from '@tauri-apps/api/core';
@@ -47,12 +50,12 @@ import {
   AiProviderSwitch,
   CanvasInputModeSwitch,
   CloudDashboard,
-  DataActionItem,
   KeybindRow,
   PreviewModeSwitch,
   SettingItem,
 } from './settings/widgets';
-import { formatBytes } from '../../utils/formatBytes';
+import ImmichSettings from '../immich/ImmichSettings';
+import DataManagementSettings from './settings/DataManagementSettings';
 
 interface ConfirmModalState {
   confirmText: string;
@@ -111,6 +114,13 @@ const smallThumbnailResolutions: OptionItem<number>[] = [
   { value: 720, label: '720px' },
 ];
 
+const exportMemoryLimits: OptionItem<number>[] = [
+  { value: 50, label: '50%' },
+  { value: 65, label: '65%' },
+  { value: 80, label: '80%' },
+  { value: 90, label: '90%' },
+];
+
 const mediumThumbnailResolutions: OptionItem<number>[] = [
   { value: 720, label: '720px' },
   { value: 1024, label: '1024px' },
@@ -136,17 +146,6 @@ export default function SettingsPanel({
 }: SettingsPanelProps) {
   const { user: _user } = useUser();
   const { t } = useTranslation();
-  const [isClearing, setIsClearing] = useState(false);
-  const [clearMessage, setClearMessage] = useState('');
-  const [isClearingCache, setIsClearingCache] = useState(false);
-  const [cacheClearMessage, setCacheClearMessage] = useState('');
-  const [aiDenoiseCacheSize, setAiDenoiseCacheSize] = useState<number | null>(null);
-  const [isClearingAiDenoiseCache, setIsClearingAiDenoiseCache] = useState(false);
-  const [aiDenoiseCacheMessage, setAiDenoiseCacheMessage] = useState('');
-  const [isClearingAiTags, setIsClearingAiTags] = useState(false);
-  const [aiTagsClearMessage, setAiTagsClearMessage] = useState('');
-  const [isClearingTags, setIsClearingTags] = useState(false);
-  const [tagsClearMessage, setTagsClearMessage] = useState('');
   const [confirmModalState, setConfirmModalState] = useState<ConfirmModalState>({
     confirmText: t('settings.data.modals.confirmClear'),
     confirmVariant: 'primary',
@@ -157,6 +156,7 @@ export default function SettingsPanel({
   });
   const [testStatus, setTestStatus] = useState<TestStatus>({ message: '', success: null, testing: false });
   const [hasInteractedWithLivePreview, setHasInteractedWithLivePreview] = useState(false);
+  const [isAdvancedProcessingExpanded, setIsAdvancedProcessingExpanded] = useState(false);
   const [recordingAction, setRecordingAction] = useState<string | null>(null);
 
   const [aiProvider, setAiProvider] = useState(appSettings?.aiProvider || 'cpu');
@@ -182,9 +182,6 @@ export default function SettingsPanel({
   const [tempLensMaker, setTempLensMaker] = useState<string>('');
   const [tempLensModel, setTempLensModel] = useState<string>('');
 
-  const [isResettingLayout, setIsResettingLayout] = useState(false);
-  const [layoutResetMessage, setLayoutResetMessage] = useState('');
-
   const osPlatform = useOsPlatform();
   const [processingSettings, setProcessingSettings] = useState({
     editorPreviewResolution: appSettings?.editorPreviewResolution || 1920,
@@ -206,9 +203,6 @@ export default function SettingsPanel({
   });
   const [restartRequired, setRestartRequired] = useState(false);
   const [activeCategory, setActiveCategory] = useState('general');
-  const [logPath, setLogPath] = useState<string | null>(null);
-  const [logPathLoading, setLogPathLoading] = useState(true);
-  const [logPathError, setLogPathError] = useState(false);
   const [dpr, setDpr] = useState(() => (typeof window !== 'undefined' ? window.devicePixelRatio : 1));
 
   const settingCategories = useMemo(
@@ -220,9 +214,16 @@ export default function SettingsPanel({
     [t],
   );
 
+  const exportWorkerThreadOptions = useMemo<OptionItem<number>[]>(
+    () => [
+      { value: 0, label: t('settings.processing.advanced.auto') },
+      ...[1, 2, 3, 4, 6, 8].map((threads) => ({ value: threads, label: String(threads) })),
+    ],
+    [t],
+  );
+
   const livePreviewQualityOptions = useMemo<OptionItem<string>[]>(
     () => [
-      { value: 'full', label: t('settings.processing.qualities.full') },
       { value: 'high', label: t('settings.processing.qualities.high') },
       { value: 'performance', label: t('settings.processing.qualities.performance') },
     ],
@@ -332,31 +333,8 @@ export default function SettingsPanel({
   }, [appSettings]);
 
   useEffect(() => {
-    const fetchLogPath = async () => {
-      try {
-        const path: string = await invoke(Invokes.GetLogFilePath);
-        setLogPath(path);
-      } catch (error) {
-        console.error('Failed to get log file path:', error);
-        setLogPathError(true);
-      } finally {
-        setLogPathLoading(false);
-      }
-    };
-    fetchLogPath();
-  }, []);
-
-  useEffect(() => {
     invoke<string[]>('get_lensfun_makers').then(setLensMakers).catch(console.error);
   }, []);
-
-  const refreshAiDenoiseCacheSize = useCallback(() => {
-    invoke<number>(Invokes.GetAiDenoiseCacheSize).then(setAiDenoiseCacheSize).catch(console.error);
-  }, []);
-
-  useEffect(() => {
-    if (activeCategory === 'processing') refreshAiDenoiseCacheSize();
-  }, [activeCategory, refreshAiDenoiseCacheSize]);
 
   const handleProcessingSettingChange = async (key: string, value: any) => {
     setProcessingSettings((prev) => ({ ...prev, [key]: value }));
@@ -442,201 +420,9 @@ export default function SettingsPanel({
 
   const effectiveRootPaths = rootPaths?.length > 0 ? rootPaths : appSettings?.rootFolders || [];
 
-  const executeClearSidecars = async () => {
-    setIsClearing(true);
-    setClearMessage(t('settings.data.statuses.deleting'));
-    try {
-      let totalCount = 0;
-      for (const root of effectiveRootPaths) {
-        const count: number = await invoke(Invokes.ClearAllSidecars, { rootPath: root });
-        totalCount += count;
-      }
-      setClearMessage(t('settings.data.statuses.sidecarSuccess', { count: totalCount }));
-      onLibraryRefresh();
-    } catch (err: any) {
-      console.error('Failed to clear sidecars:', err);
-      setClearMessage(`Error: ${err}`);
-    } finally {
-      setTimeout(() => {
-        setIsClearing(false);
-        setClearMessage('');
-      }, EXECUTE_TIMEOUT);
-    }
-  };
-
-  const executeResetLayout = async () => {
-    setIsResettingLayout(true);
-    setLayoutResetMessage(t('settings.data.statuses.resettingLayout'));
-    try {
-      const resetWorkspaceLayout = useUIStore.getState().resetWorkspaceLayout;
-      const defaultWorkspace = resetWorkspaceLayout(false);
-
-      await onSettingsChange({
-        ...appSettings,
-        workspace: defaultWorkspace,
-      });
-
-      setLayoutResetMessage(t('settings.data.statuses.layoutResetSuccess'));
-    } catch (err: any) {
-      console.error('Failed to reset workspace layout:', err);
-      setLayoutResetMessage(`Error: ${err}`);
-    } finally {
-      setTimeout(() => {
-        setIsResettingLayout(false);
-        setLayoutResetMessage('');
-      }, EXECUTE_TIMEOUT);
-    }
-  };
-
-  const handleResetLayout = () => {
-    setConfirmModalState({
-      confirmText: t('settings.data.modals.confirmResetLayout'),
-      confirmVariant: 'destructive',
-      isOpen: true,
-      message: t('settings.data.modals.resetLayoutMessage'),
-      onConfirm: executeResetLayout,
-      title: t('settings.data.modals.confirmResetLayoutTitle'),
-    });
-  };
-
-  const handleClearSidecars = () => {
-    setConfirmModalState({
-      confirmText: t('settings.data.modals.confirmDeleteAllEdits'),
-      confirmVariant: 'destructive',
-      isOpen: true,
-      message: t('settings.data.modals.sidecarMessage'),
-      onConfirm: executeClearSidecars,
-      title: t('settings.data.modals.confirmTitle'),
-    });
-  };
-
-  const executeClearAiTags = async () => {
-    setIsClearingAiTags(true);
-    setAiTagsClearMessage(t('settings.data.statuses.clearingAi'));
-    try {
-      let totalCount = 0;
-      for (const root of effectiveRootPaths) {
-        const count: number = await invoke(Invokes.ClearAiTags, { rootPath: root });
-        totalCount += count;
-      }
-      setAiTagsClearMessage(t('settings.data.statuses.aiSuccess', { count: totalCount }));
-      onLibraryRefresh();
-    } catch (err: any) {
-      console.error('Failed to clear AI tags:', err);
-      setAiTagsClearMessage(`Error: ${err}`);
-    } finally {
-      setTimeout(() => {
-        setIsClearingAiTags(false);
-        setAiTagsClearMessage('');
-      }, EXECUTE_TIMEOUT);
-    }
-  };
-
-  const handleClearAiTags = () => {
-    setConfirmModalState({
-      confirmText: t('settings.data.modals.confirmClearAi'),
-      confirmVariant: 'destructive',
-      isOpen: true,
-      message: t('settings.data.modals.aiMessage'),
-      onConfirm: executeClearAiTags,
-      title: t('settings.data.modals.confirmAiTitle'),
-    });
-  };
-
-  const executeClearTags = async () => {
-    setIsClearingTags(true);
-    setTagsClearMessage(t('settings.data.statuses.clearingAll'));
-    try {
-      let totalCount = 0;
-      for (const root of effectiveRootPaths) {
-        const count: number = await invoke(Invokes.ClearAllTags, { rootPath: root });
-        totalCount += count;
-      }
-      setTagsClearMessage(t('settings.data.statuses.allSuccess', { count: totalCount }));
-      onLibraryRefresh();
-    } catch (err: any) {
-      console.error('Failed to clear tags:', err);
-      setTagsClearMessage(`Error: ${err}`);
-    } finally {
-      setTimeout(() => {
-        setIsClearingTags(false);
-        setTagsClearMessage('');
-      }, EXECUTE_TIMEOUT);
-    }
-  };
-
-  const handleClearTags = () => {
-    setConfirmModalState({
-      confirmText: t('settings.data.modals.confirmClearAll'),
-      confirmVariant: 'destructive',
-      isOpen: true,
-      message: t('settings.data.modals.allMessage'),
-      onConfirm: executeClearTags,
-      title: t('settings.data.modals.confirmAllTitle'),
-    });
-  };
-
   const shortcutTagVariants = {
     visible: { opacity: 1, scale: 1, transition: { type: 'spring', stiffness: 500, damping: 30 } },
     exit: { opacity: 0, scale: 0.8, transition: { duration: 0.15 } },
-  };
-
-  const executeClearCache = async () => {
-    setIsClearingCache(true);
-    setCacheClearMessage(t('settings.data.statuses.clearingCache'));
-    try {
-      await invoke(Invokes.ClearThumbnailCache);
-      setCacheClearMessage(t('settings.data.statuses.cacheSuccess'));
-      onLibraryRefresh();
-    } catch (err: any) {
-      console.error('Failed to clear thumbnail cache:', err);
-      setCacheClearMessage(`Error: ${err}`);
-    } finally {
-      setTimeout(() => {
-        setIsClearingCache(false);
-        setCacheClearMessage('');
-      }, EXECUTE_TIMEOUT);
-    }
-  };
-
-  const handleClearCache = () => {
-    setConfirmModalState({
-      confirmText: t('settings.data.modals.confirmClearCache'),
-      confirmVariant: 'destructive',
-      isOpen: true,
-      message: t('settings.data.modals.cacheMessage'),
-      onConfirm: executeClearCache,
-      title: t('settings.data.modals.confirmCacheTitle'),
-    });
-  };
-
-  const executeClearAiDenoiseCache = async () => {
-    setIsClearingAiDenoiseCache(true);
-    setAiDenoiseCacheMessage(t('settings.data.statuses.clearingAiDenoise'));
-    try {
-      await invoke(Invokes.ClearAiDenoiseCache);
-      setAiDenoiseCacheMessage(t('settings.data.statuses.aiDenoiseSuccess'));
-    } catch (err: any) {
-      console.error('Failed to clear AI denoise cache:', err);
-      setAiDenoiseCacheMessage(`Error: ${err}`);
-    } finally {
-      refreshAiDenoiseCacheSize();
-      setTimeout(() => {
-        setIsClearingAiDenoiseCache(false);
-        setAiDenoiseCacheMessage('');
-      }, EXECUTE_TIMEOUT);
-    }
-  };
-
-  const handleClearAiDenoiseCache = () => {
-    setConfirmModalState({
-      confirmText: t('settings.data.modals.confirmClearCache'),
-      confirmVariant: 'destructive',
-      isOpen: true,
-      message: t('settings.data.modals.aiDenoiseMessage'),
-      onConfirm: executeClearAiDenoiseCache,
-      title: t('settings.data.modals.confirmCacheTitle'),
-    });
   };
 
   const handleTestConnection = async () => {
@@ -1219,6 +1005,8 @@ export default function SettingsPanel({
                   </div>
                 </div>
 
+                <ImmichSettings />
+
                 <div className="p-6 bg-surface rounded-xl shadow-md">
                   <Text variant={TextVariants.title} color={TextColors.accent} className="mb-8">
                     {t('settings.tagging.title')}
@@ -1415,31 +1203,6 @@ export default function SettingsPanel({
                         </div>
                       </div>
                     </SettingItem>
-
-                    <div className="pt-8 border-t border-border-color">
-                      <div className="space-y-8">
-                        <DataActionItem
-                          buttonAction={handleClearAiTags}
-                          buttonText={t('settings.tagging.clearAiTagsButton')}
-                          description={t('settings.tagging.clearAiTagsDesc')}
-                          disabled={effectiveRootPaths.length === 0}
-                          icon={<Trash2 size={16} className="mr-2" />}
-                          isProcessing={isClearingAiTags}
-                          message={aiTagsClearMessage}
-                          title={t('settings.tagging.clearAiTagsTitle')}
-                        />
-                        <DataActionItem
-                          buttonAction={handleClearTags}
-                          buttonText={t('settings.tagging.clearAiTagsButton')}
-                          description={t('settings.tagging.clearAllTagsDesc')}
-                          disabled={effectiveRootPaths.length === 0}
-                          icon={<Trash2 size={16} className="mr-2" />}
-                          isProcessing={isClearingTags}
-                          message={tagsClearMessage}
-                          title={t('settings.tagging.clearAllTagsTitle')}
-                        />
-                      </div>
-                    </div>
                   </div>
                 </div>
 
@@ -1495,25 +1258,47 @@ export default function SettingsPanel({
                     </li>
                     <li>
                       <a
-                        href="https://github.com/facebookresearch/sam2"
+                        href="https://github.com/facebookresearch/segment-anything"
                         target="_blank"
                         rel="noopener noreferrer"
                         className="font-semibold text-accent hover:underline"
                       >
-                        SAM 2
+                        Segment Anything
                       </a>
                       : {t('settings.thanks.list.sam2')}
                     </li>
                     <li>
                       <a
-                        href="https://github.com/xuebinqin/U-2-Net"
+                        href="https://github.com/SimonZeng7108/efficientsam3"
                         target="_blank"
                         rel="noopener noreferrer"
                         className="font-semibold text-accent hover:underline"
                       >
-                        U-2-Net
+                        EfficientSAM3
                       </a>
-                      : {t('settings.thanks.list.u2net')}
+                      : {t('settings.thanks.list.efficientsam3')}
+                    </li>
+                    <li>
+                      <a
+                        href="https://github.com/ZhengPeng7/BiRefNet"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-semibold text-accent hover:underline"
+                      >
+                        BiRefNet
+                      </a>
+                      : {t('settings.thanks.list.birefnet')}
+                    </li>
+                    <li>
+                      <a
+                        href="https://github.com/google-ai-edge/mediapipe"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-semibold text-accent hover:underline"
+                      >
+                        MediaPipe
+                      </a>
+                      : {t('settings.thanks.list.mediapipe')}
                     </li>
                     <li>
                       <a
@@ -1707,7 +1492,7 @@ export default function SettingsPanel({
                                     onSettingsChange({ ...appSettings, livePreviewQuality: value })
                                   }
                                   options={livePreviewQualityOptions}
-                                  value={appSettings?.livePreviewQuality || 'high'}
+                                  value={appSettings?.livePreviewQuality === 'performance' ? 'performance' : 'high'}
                                   triggerClassName="bg-bg-primary"
                                 />
                               </SettingItem>
@@ -1742,37 +1527,100 @@ export default function SettingsPanel({
                     </SettingItem>
 
                     <SettingItem
-                      label={t('settings.processing.workerThreads')}
-                      description={t('settings.processing.workerThreadsDesc')}
+                      label={t('settings.processing.advanced.heading')}
+                      description={t('settings.processing.advanced.headingDesc')}
                     >
-                      <Slider
-                        label={t('settings.processing.threads')}
-                        min={2}
-                        max={10}
-                        step={1}
-                        value={processingSettings.thumbnailWorkerThreads}
-                        defaultValue={4}
-                        onChange={(e: any) =>
-                          handleProcessingSettingChange('thumbnailWorkerThreads', parseInt(e.target.value))
-                        }
-                        fillOrigin="min"
-                      />
-                    </SettingItem>
+                      <div className="bg-bg-primary rounded-xl overflow-hidden">
+                        <button
+                          onClick={() => setIsAdvancedProcessingExpanded((expanded) => !expanded)}
+                          className="w-full flex items-center justify-between p-3.5 hover:bg-card-active transition-colors"
+                        >
+                          <Text
+                            as="span"
+                            variant={TextVariants.label}
+                            color={TextColors.primary}
+                            className="flex items-center gap-2"
+                          >
+                            <SettingsIcon size={16} /> {t('settings.processing.advanced.title')}
+                          </Text>
+                          <Text color={TextColors.secondary}>
+                            {isAdvancedProcessingExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                          </Text>
+                        </button>
+                        <AnimatePresence initial={false}>
+                          {isAdvancedProcessingExpanded && (
+                            <motion.div
+                              initial={{ height: 0, opacity: 0 }}
+                              animate={{ height: 'auto', opacity: 1 }}
+                              exit={{ height: 0, opacity: 0 }}
+                              transition={{ duration: 0.25, ease: [0.4, 0, 0.2, 1] }}
+                              className="overflow-hidden"
+                            >
+                              <div className="px-4 pb-4 pt-4 border-t border-surface/50 space-y-8">
+                                <SettingItem
+                                  label={t('settings.processing.workerThreads')}
+                                  description={t('settings.processing.workerThreadsDesc')}
+                                >
+                                  <Slider
+                                    label={t('settings.processing.threads')}
+                                    min={2}
+                                    max={10}
+                                    step={1}
+                                    value={processingSettings.thumbnailWorkerThreads}
+                                    defaultValue={4}
+                                    onChange={(e: any) =>
+                                      handleProcessingSettingChange('thumbnailWorkerThreads', parseInt(e.target.value))
+                                    }
+                                    fillOrigin="min"
+                                  />
+                                </SettingItem>
 
-                    <SettingItem
-                      label={t('settings.processing.imageCache')}
-                      description={t('settings.processing.imageCacheDesc')}
-                    >
-                      <Slider
-                        label={t('settings.processing.images')}
-                        min={2}
-                        max={10}
-                        step={1}
-                        value={processingSettings.imageCacheSize}
-                        defaultValue={5}
-                        onChange={(e: any) => handleProcessingSettingChange('imageCacheSize', parseInt(e.target.value))}
-                        fillOrigin="min"
-                      />
+                                <SettingItem
+                                  label={t('settings.processing.imageCache')}
+                                  description={t('settings.processing.imageCacheDesc')}
+                                >
+                                  <Slider
+                                    label={t('settings.processing.images')}
+                                    min={2}
+                                    max={10}
+                                    step={1}
+                                    value={processingSettings.imageCacheSize}
+                                    defaultValue={5}
+                                    onChange={(e: any) =>
+                                      handleProcessingSettingChange('imageCacheSize', parseInt(e.target.value))
+                                    }
+                                    fillOrigin="min"
+                                  />
+                                </SettingItem>
+
+                                <SettingItem
+                                  label={t('settings.processing.advanced.exportThreads')}
+                                  description={t('settings.processing.advanced.exportThreadsDesc')}
+                                >
+                                  <Dropdown
+                                    onChange={(value: any) => onSettingsChange({ ...appSettings, exportWorkerThreads: value })}
+                                    options={exportWorkerThreadOptions}
+                                    value={appSettings?.exportWorkerThreads ?? 0}
+                                    triggerClassName="bg-surface"
+                                  />
+                                </SettingItem>
+
+                                <SettingItem
+                                  label={t('settings.processing.advanced.exportMemoryLimit')}
+                                  description={t('settings.processing.advanced.exportMemoryLimitDesc')}
+                                >
+                                  <Dropdown
+                                    onChange={(value: any) => onSettingsChange({ ...appSettings, exportMemoryLimit: value })}
+                                    options={exportMemoryLimits}
+                                    value={appSettings?.exportMemoryLimit ?? 80}
+                                    triggerClassName="bg-surface"
+                                  />
+                                </SettingItem>
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </div>
                     </SettingItem>
 
                     <SettingItem
@@ -2279,6 +2127,21 @@ export default function SettingsPanel({
                             <li>{t('settings.processing.ai.cpu.feature2')}</li>
                             <li>{t('settings.processing.ai.cpu.feature3')}</li>
                           </Text>
+                          {(osPlatform === 'windows' || osPlatform === 'macos') && (
+                            <div className="mt-8">
+                              <SettingItem
+                                label={t('settings.processing.ai.cpu.gpuAcceleration')}
+                                description={t('settings.processing.ai.cpu.gpuAccelerationDesc')}
+                              >
+                                <Switch
+                                  checked={appSettings?.aiGpuAcceleration ?? true}
+                                  id="ai-gpu-acceleration-toggle"
+                                  label={t('settings.processing.ai.cpu.gpuAccelerationLabel')}
+                                  onChange={(checked) => onSettingsChange({ ...appSettings, aiGpuAcceleration: checked })}
+                                />
+                              </SettingItem>
+                            </div>
+                          )}
                         </motion.div>
                       )}
 
@@ -2437,88 +2300,15 @@ export default function SettingsPanel({
                   <Text variant={TextVariants.title} color={TextColors.accent} className="mb-8">
                     {t('settings.data.title')}
                   </Text>
-                  <div className="space-y-8">
-                    <DataActionItem
-                      buttonAction={handleClearSidecars}
-                      buttonText={t('settings.data.clearSidecarsButton')}
-                      description={
-                        <Text as="span" variant={TextVariants.small}>
-                          {t('settings.data.clearSidecarsDesc')}{' '}
-                          <code className="bg-bg-primary px-1 rounded-sm text-text-primary">.rrdata</code> files
-                          (containing your edits) within your root folders:
-                          <span className="block font-mono bg-bg-primary p-2 rounded-sm mt-2 break-all border border-border-color whitespace-pre-wrap">
-                            {effectiveRootPaths.length > 0
-                              ? effectiveRootPaths.join('\n')
-                              : t('settings.data.noFolders')}
-                          </span>
-                        </Text>
-                      }
-                      disabled={effectiveRootPaths.length === 0}
-                      icon={<Trash2 size={16} className="mr-2" />}
-                      isProcessing={isClearing}
-                      message={clearMessage}
-                      title={t('settings.data.clearSidecars')}
-                    />
-
-                    <DataActionItem
-                      buttonAction={handleResetLayout}
-                      buttonText={t('settings.data.resetLayoutButton')}
-                      description={t('settings.data.resetLayoutDesc')}
-                      icon={<RotateCcw size={16} className="mr-2" />}
-                      isProcessing={isResettingLayout}
-                      message={layoutResetMessage}
-                      title={t('settings.data.resetLayoutTitle')}
-                    />
-
-                    <DataActionItem
-                      buttonAction={handleClearCache}
-                      buttonText={t('settings.data.clearThumbnailButton')}
-                      description={t('settings.data.clearThumbnailDesc')}
-                      icon={<Trash2 size={16} className="mr-2" />}
-                      isProcessing={isClearingCache}
-                      message={cacheClearMessage}
-                      title={t('settings.data.clearThumbnail')}
-                    />
-
-                    <DataActionItem
-                      buttonAction={handleClearAiDenoiseCache}
-                      buttonText={t('settings.data.clearAiDenoiseButton')}
-                      description={t('settings.data.clearAiDenoiseDesc', {
-                        size: aiDenoiseCacheSize === null ? '…' : formatBytes(aiDenoiseCacheSize, t),
-                      })}
-                      disabled={!aiDenoiseCacheSize}
-                      icon={<Trash2 size={16} className="mr-2" />}
-                      isProcessing={isClearingAiDenoiseCache}
-                      message={aiDenoiseCacheMessage}
-                      title={t('settings.data.clearAiDenoise')}
-                    />
-
-                    <DataActionItem
-                      buttonAction={async () => {
-                        if (logPath && !logPathLoading && !logPathError) {
-                          await invoke(Invokes.ShowInFinder, { path: logPath });
-                        }
-                      }}
-                      buttonText={t('settings.data.logsButton')}
-                      description={
-                        <Text as="span" variant={TextVariants.small}>
-                          {t('settings.data.logsDesc')}
-                          <span className="block font-mono bg-bg-primary p-2 rounded-sm mt-2 break-all border border-border-color">
-                            {logPathLoading
-                              ? t('settings.data.loading')
-                              : logPathError
-                                ? t('settings.data.statuses.failedToGetPath')
-                                : logPath}
-                          </span>
-                        </Text>
-                      }
-                      disabled={logPathLoading || logPathError || !logPath}
-                      icon={<ExternalLinkIcon size={16} className="mr-2" />}
-                      isProcessing={false}
-                      message=""
-                      title={t('settings.data.logs')}
-                    />
-                  </div>
+                  <DataManagementSettings
+                    appSettings={appSettings}
+                    onLibraryRefresh={onLibraryRefresh}
+                    onRequestConfirm={(request) =>
+                      setConfirmModalState({ ...request, confirmVariant: 'destructive', isOpen: true })
+                    }
+                    onSettingsChange={onSettingsChange}
+                    rootPaths={effectiveRootPaths}
+                  />
                 </div>
               </motion.div>
             )}

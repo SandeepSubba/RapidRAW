@@ -35,9 +35,6 @@ fn scan_dir_lazy(
     show_image_counts: bool,
     prefetch_one_level: bool,
 ) -> Result<(Vec<FolderNode>, usize), std::io::Error> {
-    let mut children_folders = Vec::new();
-    let mut current_dir_image_count = 0;
-
     let entries = match std::fs::read_dir(path) {
         Ok(entries) => entries,
         Err(e) => {
@@ -46,37 +43,41 @@ fn scan_dir_lazy(
         }
     };
 
+    let mut subdirs = Vec::new();
+    let mut current_dir_image_count = 0;
+
     for entry in entries.filter_map(Result::ok) {
-        let current_path = entry.path();
-        let (file_type, modified, created) = match entry.metadata() {
-            Ok(meta) => {
-                let ft = meta.file_type();
-                let mod_time = meta.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-                let cre_time = meta.created().unwrap_or(mod_time);
-
-                (
-                    ft,
-                    mod_time
-                        .duration_since(std::time::SystemTime::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_secs(),
-                    cre_time
-                        .duration_since(std::time::SystemTime::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_secs(),
-                )
-            }
-            Err(_) => continue,
+        let Ok(file_type) = entry.file_type() else {
+            continue;
         };
-
         let file_name = entry.file_name();
-        let name_str = file_name.to_string_lossy();
-
-        if name_str.starts_with('.') {
+        if file_name.to_string_lossy().starts_with('.') {
             continue;
         }
 
         if file_type.is_dir() {
+            subdirs.push(entry);
+        } else if show_image_counts
+            && file_type.is_file()
+            && crate::formats::is_supported_image_file(&file_name)
+        {
+            current_dir_image_count += 1;
+        }
+    }
+
+    let mut children_folders = subdirs
+        .into_par_iter()
+        .filter_map(|entry| {
+            let meta = entry.metadata().ok()?;
+            let mod_time = meta.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+            let cre_time = meta.created().unwrap_or(mod_time);
+            let to_secs = |t: std::time::SystemTime| {
+                t.duration_since(std::time::SystemTime::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs()
+            };
+
+            let current_path = entry.path();
             let path_str = current_path.to_string_lossy().into_owned();
             let is_expanded = expanded_folders.contains(path_str.as_str());
 
@@ -84,12 +85,15 @@ fn scan_dir_lazy(
             let next_prefetch = is_expanded;
 
             let (grand_children, sub_dir_own_images) = if should_scan {
-                scan_dir_lazy(
+                match scan_dir_lazy(
                     &current_path,
                     expanded_folders,
                     show_image_counts,
                     next_prefetch,
-                )?
+                ) {
+                    Ok(result) => result,
+                    Err(e) => return Some(Err(e)),
+                }
             } else {
                 let count = if show_image_counts {
                     WalkDir::new(&current_path)
@@ -97,7 +101,7 @@ fn scan_dir_lazy(
                         .filter_map(Result::ok)
                         .filter(|e| {
                             e.file_type().is_file()
-                                && crate::formats::is_supported_image_file(e.path())
+                                && crate::formats::is_supported_image_file(e.file_name())
                         })
                         .count()
                 } else {
@@ -113,25 +117,19 @@ fn scan_dir_lazy(
             };
 
             let grand_children_sum: usize = grand_children.iter().map(|c| c.image_count).sum();
-            let total_child_count = sub_dir_own_images + grand_children_sum;
 
-            children_folders.push(FolderNode {
-                name: name_str.into_owned(),
+            Some(Ok(FolderNode {
+                name: entry.file_name().to_string_lossy().into_owned(),
                 path: path_str,
                 children: grand_children,
                 is_dir: true,
-                image_count: total_child_count,
+                image_count: sub_dir_own_images + grand_children_sum,
                 has_subdirs: has_any_subdirs,
-                modified,
-                created,
-            });
-        } else if show_image_counts
-            && file_type.is_file()
-            && crate::formats::is_supported_image_file(&current_path)
-        {
-            current_dir_image_count += 1;
-        }
-    }
+                modified: to_secs(mod_time),
+                created: to_secs(cre_time),
+            }))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
 
     children_folders.sort_by_key(|a| a.name.to_lowercase());
 

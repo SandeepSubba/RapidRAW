@@ -1,3 +1,6 @@
+mod inline;
+pub use inline::{PARAM_KEYS, apply_negative_conversion, effective_is_raw, is_enabled};
+
 use crate::file_management::{parse_virtual_path, read_file_mapped};
 use crate::image_loader::load_base_image_raw;
 use image::{DynamicImage, Rgb32FImage};

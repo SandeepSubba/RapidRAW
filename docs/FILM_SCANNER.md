@@ -310,6 +310,16 @@ reliability, connect it directly rather than through a USB hub.
 | Epson / flatbed scanners with a transparency unit | Scanning supported; **IR dust removal unavailable** (Epson's Digital ICE is not exposed through SANE) |
 | Document scanners (no transparency unit) | Detected and blocked — cannot scan film |
 
+### Upstream's negative conversion (v1.6.7)
+
+Upstream RapidRAW added its own, simpler negative conversion: flat `negative*`
+adjustment keys (red/green/blue weight, exposure, contrast) applied after denoise,
+with controls in the Details panel. It is a separate system from the Film panel
+and never runs on top of it — when a frame's `negativeConversion` (the fork's,
+sidecar-owned) is enabled, upstream's conversion stands down
+(`negative_conversion/inline.rs`), and its Details controls only appear on images
+that already use it, e.g. ones edited in upstream RapidRAW.
+
 ## Limitations
 
 - **Windows** is unsupported (no SANE).

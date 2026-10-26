@@ -201,72 +201,37 @@ pub(crate) fn sync_album_path_changes(
 }
 
 #[tauri::command]
-pub fn get_album_images(
+pub async fn get_album_images(
     paths: Vec<String>,
     app_handle: AppHandle,
 ) -> Result<Vec<ImageFile>, String> {
-    let settings = load_settings(app_handle.clone()).unwrap_or_default();
-    let enable_xmp_sync = settings.enable_xmp_sync.unwrap_or(false);
+    tauri::async_runtime::spawn_blocking(move || {
+        let settings = load_settings(app_handle.clone()).unwrap_or_default();
 
-    let result_list: Vec<ImageFile> = paths
-        .into_par_iter()
-        .filter_map(|virtual_path| {
-            let (source_path, sidecar_path) = parse_virtual_path(&virtual_path);
-            if !source_path.exists() {
-                return None;
-            }
+        let mut result_list: Vec<ImageFile> = paths
+            .into_par_iter()
+            .filter_map(|virtual_path| {
+                let (source_path, sidecar_path) = parse_virtual_path(&virtual_path);
+                let metadata = fs::metadata(&source_path).ok()?;
+                let modified = modified_secs(Ok(metadata), &source_path);
+                let is_cloud_placeholder = is_cloud_placeholder(&source_path);
 
-            let modified = fs::metadata(&source_path)
-                .ok()
-                .and_then(|m| m.modified().ok())
-                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
-
-            let is_virtual_copy = virtual_path.contains("?vc=");
-            let is_cloud_placeholder = crate::file_management::is_cloud_placeholder(&source_path);
-
-            let xmp_is_placeholder = enable_xmp_sync
-                && resolve_xmp_path(&source_path)
-                    .is_some_and(|p| crate::file_management::is_cloud_placeholder(&p));
-
-            let metadata = if crate::file_management::is_cloud_placeholder(&sidecar_path)
-                || xmp_is_placeholder
-            {
-                enqueue_metadata(
+                Some(build_image_file(
                     &app_handle,
-                    virtual_path.clone(),
-                    source_path.clone(),
-                    sidecar_path.clone(),
-                );
-                ImageFileMetadata {
-                    is_edited: false,
-                    is_negative: false,
-                    tags: None,
-                    rating: 0,
-                    flag: None,
-                    is_raw: crate::formats::is_raw_file(&source_path),
-                }
-            } else {
-                resolve_image_metadata(&source_path, &sidecar_path, enable_xmp_sync, &settings)
-            };
-
-            Some(ImageFile {
-                path: virtual_path,
-                modified,
-                is_edited: metadata.is_edited,
-                is_negative: metadata.is_negative,
-                tags: metadata.tags,
-                exif: None,
-                is_virtual_copy,
-                is_raw: metadata.is_raw,
-                group_id: None,
-                rating: metadata.rating,
-                flag: metadata.flag,
-                is_cloud_placeholder,
+                    &settings,
+                    &source_path,
+                    virtual_path,
+                    &sidecar_path,
+                    true,
+                    modified,
+                    is_cloud_placeholder,
+                ))
             })
-        })
-        .collect();
+            .collect();
 
-    Ok(result_list)
+        assign_group_ids(&mut result_list, &settings);
+        result_list
+    })
+    .await
+    .map_err(|e| format!("Task failed: {}", e))
 }
