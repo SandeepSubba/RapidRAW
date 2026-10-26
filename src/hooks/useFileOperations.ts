@@ -14,7 +14,7 @@ import { Status } from '../components/ui/ExportImportProperties';
 export function useFileOperations(
   refreshImageList: () => Promise<void>,
   refreshAllFolderTrees: () => Promise<void>,
-  handleImageSelect: (path: string) => void,
+  handleImageSelect: (path: string, openInEditor?: boolean) => void,
   handleBackToLibrary: () => void,
   sortedImageList: any[],
 ) {
@@ -200,8 +200,9 @@ export function useFileOperations(
   const handleRenameFolder = useCallback(
     async (newName: string) => {
       const { folderActionTarget } = useUIStore.getState();
-      const { rootPaths, currentFolderPath, setLibrary } = useLibraryStore.getState();
+      const library = useLibraryStore.getState();
       const { appSettings, handleSettingsChange } = useSettingsStore.getState();
+      const { selectedImage } = useEditorStore.getState();
 
       if (newName && newName.trim() !== '' && folderActionTarget) {
         try {
@@ -214,40 +215,58 @@ export function useFileOperations(
           const separator = oldPath.includes('/') ? '/' : '\\';
           const newPath = parentDir ? `${parentDir}${separator}${trimmedNewName}` : trimmedNewName;
 
-          const newAppSettings = { ...appSettings } as any;
-          let settingsChanged = false;
+          // Every remembered path at or below the renamed folder moves with it — roots,
+          // pins, icons, expanded nodes, the open folder and the selection. A plain
+          // prefix test would also catch siblings ("/a/trip" vs "/a/trip-2").
+          const remap = (path: string): string => {
+            if (path === oldPath) return newPath;
+            const rest = path.slice(oldPath.length);
+            return path.startsWith(oldPath) && (rest[0] === '/' || rest[0] === '\\') ? newPath + rest : path;
+          };
+          const remapOrNull = (path: string | null) => (path ? remap(path) : path);
+          const moved = (path: string | null | undefined) => !!path && remap(path) !== path;
 
-          if (rootPaths.includes(oldPath)) {
-            const newRoots = rootPaths.map((r) => (r === oldPath ? newPath : r));
-            setLibrary({ rootPaths: newRoots });
+          const newRoots = library.rootPaths.map(remap);
+          const wasInCurrent = moved(library.currentFolderPath);
+          library.setLibrary({
+            rootPaths: newRoots,
+            currentFolderPath: remapOrNull(library.currentFolderPath),
+            expandedFolders: new Set(Array.from(library.expandedFolders).map(remap)),
+            libraryActivePath: remapOrNull(library.libraryActivePath),
+            multiSelectedPaths: library.multiSelectedPaths.map(remap),
+            selectionAnchorPath: remapOrNull(library.selectionAnchorPath),
+          });
+
+          if (appSettings) {
+            const newAppSettings = { ...appSettings } as any;
             newAppSettings.rootFolders = newRoots;
-            settingsChanged = true;
-          }
-          if (currentFolderPath?.startsWith(oldPath)) {
-            const newCurrentPath = currentFolderPath.replace(oldPath, newPath);
-            setLibrary({ currentFolderPath: newCurrentPath });
-          }
-
-          const currentPins = appSettings?.pinnedFolders || [];
-          if (currentPins.includes(oldPath)) {
-            const newPins = currentPins
-              .map((p: string) => (p === oldPath ? newPath : p))
-              .sort((a: string, b: string) => a.localeCompare(b));
-            newAppSettings.pinnedFolders = newPins;
-            settingsChanged = true;
-          }
-
-          if (settingsChanged) {
+            if (appSettings.lastRootPath) newAppSettings.lastRootPath = remap(appSettings.lastRootPath);
+            if (appSettings.pinnedFolders) {
+              newAppSettings.pinnedFolders = appSettings.pinnedFolders
+                .map(remap)
+                .sort((a: string, b: string) => a.localeCompare(b));
+            }
+            if (appSettings.folderIcons) {
+              newAppSettings.folderIcons = Object.fromEntries(
+                Object.entries(appSettings.folderIcons).map(([path, icon]) => [remap(path), icon]),
+              );
+            }
             handleSettingsChange(newAppSettings);
           }
 
           await refreshAllFolderTrees();
+          if (wasInCurrent) await refreshImageList();
+          // The loaded image's file moved too: reload it from its new path, staying in
+          // whichever view is showing.
+          if (selectedImage && moved(selectedImage.path)) {
+            handleImageSelect(remap(selectedImage.path), useUIStore.getState().activeView === 'editor');
+          }
         } catch (err) {
           toast.error(`Failed to rename folder: ${err}`);
         }
       }
     },
-    [refreshAllFolderTrees],
+    [refreshAllFolderTrees, refreshImageList, handleImageSelect],
   );
 
   const handleSaveRename = useCallback(

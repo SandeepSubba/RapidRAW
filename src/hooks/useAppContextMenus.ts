@@ -1085,7 +1085,6 @@ export function useAppContextMenus(props: UseAppContextMenusProps) {
           },
         },
         {
-          disabled: isRoot,
           icon: FileEdit,
           label: t('contextMenus.folders.renameFolder'),
           onClick: () => {
