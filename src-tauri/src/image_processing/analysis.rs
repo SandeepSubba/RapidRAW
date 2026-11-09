@@ -1368,9 +1368,11 @@ fn render_for_analysis(
 ) -> Result<DynamicImage, String> {
     const ANALYSIS_DIM: u32 = 1024;
     let context = crate::gpu_processing::get_or_init_gpu_context(state, app_handle)?;
-    let (preview, scale_for_gpu, unscaled_crop_offset) =
-        crate::generate_transformed_preview(state, loaded, js_adjustments, ANALYSIS_DIM)?;
-    let (w, h) = preview.dimensions();
+    let preview =
+        crate::prepare_preview_source(state, &context, loaded, js_adjustments, ANALYSIS_DIM)?;
+    let source = preview.render_source(js_adjustments);
+    let (scale_for_gpu, unscaled_crop_offset) = (preview.scale, preview.unscaled_crop_offset);
+    let (w, h) = source.size();
     let mask_definitions: Vec<crate::mask_generation::MaskDefinition> = js_adjustments
         .get("masks")
         .and_then(|m| serde_json::from_value(m.clone()).ok())
@@ -1396,14 +1398,21 @@ fn render_for_analysis(
     crate::gpu_processing::process_and_get_dynamic_image(
         &context,
         state,
-        &preview,
-        crate::cache_utils::calculate_full_job_hash(&loaded.path, js_adjustments),
+        &source,
         crate::gpu_processing::RenderRequest {
             adjustments: all,
             mask_bitmaps: &mask_bitmaps,
             mask_cache_key: None,
             lut,
             roi: None,
+            hsl_probe: false,
+            motion_blur: crate::motion_blur::MotionBlurs::new(
+                &loaded.path,
+                js_adjustments,
+                (w, h),
+                scaled_offset,
+                loaded.image.width().max(loaded.image.height()) as f32 * scale_for_gpu,
+            ),
         },
         "auto_adjust_analysis",
     )

@@ -1,5 +1,9 @@
 import { create } from 'zustand';
+import { invoke } from '@tauri-apps/api/core';
+import i18n from 'i18next';
+import { toast } from 'react-toastify';
 import {
+  Invokes,
   ImageFile,
   Panel,
   UiVisibility,
@@ -9,6 +13,7 @@ import {
   CollapsibleSectionsState,
 } from '../components/ui/AppProperties';
 import { useEditorStore } from './useEditorStore';
+import { pickCropGeometry } from '../utils/adjustments';
 
 export type SwitcherPlacement = 'bottom' | 'right' | 'left' | 'top';
 
@@ -107,6 +112,10 @@ const DEFAULT_PANEL_DEFAULT_REGIONS: Record<Panel, PanelRegion> = {
 export const DEFAULT_PANEL_WIDTH = 350;
 export const DEFAULT_PANEL_SECTION_HEIGHT = 450;
 export const DEFAULT_BOTTOM_PANEL_HEIGHT = 144;
+const MIN_REOPENED_PANEL_WIDTH = 250;
+
+export const getReopenedPanelWidth = (width: number) =>
+  width < MIN_REOPENED_PANEL_WIDTH ? DEFAULT_PANEL_WIDTH : width;
 
 export function reconcileWorkspace(
   savedWorkspace: WorkspaceState | undefined,
@@ -215,6 +224,7 @@ export interface UIState {
   // adjustment can be judged on the photo itself; the mask tools stay usable.
   showMaskOverlay: boolean;
   toggleMaskOverlay: () => void;
+  isViewerOpen: boolean;
   isInstantTransition: boolean;
   isLayoutReady: boolean;
   uiVisibility: UiVisibility;
@@ -243,6 +253,8 @@ export interface UIState {
   renderedPanel: Panel | null;
   slideDirection: number;
   collapsibleSectionsState: CollapsibleSectionsState;
+  isColorGradingExpanded: boolean;
+  isColorMixerExpanded: boolean;
   cropSectionsState: CropSectionsState;
 
   isCreateFolderModalOpen: boolean;
@@ -276,6 +288,7 @@ export interface UIState {
   searchFocusRequest: number;
   requestSearchFocus: () => void;
   toggleFullScreen: () => void;
+  toggleViewerWindow: () => void;
   resetWorkspaceLayout: (isTetheringSupported?: boolean) => WorkspaceState;
 }
 
@@ -286,6 +299,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   isWindowFullScreen: false,
   showMaskOverlay: true,
   toggleMaskOverlay: () => set({ showMaskOverlay: !get().showMaskOverlay }),
+  isViewerOpen: false,
   isInstantTransition: false,
   isLayoutReady: false,
   uiVisibility: { filmstrip: true, leftPanel: true, rightPanel: true, quickFilter: false },
@@ -330,6 +344,8 @@ export const useUIStore = create<UIState>((set, get) => ({
   renderedPanel: Panel.Adjustments,
   slideDirection: 1,
   collapsibleSectionsState: { basic: true, color: false, curves: true, details: false, effects: false, film: true },
+  isColorGradingExpanded: false,
+  isColorMixerExpanded: false,
   cropSectionsState: { transform: false, lens: false },
 
   isCreateFolderModalOpen: false,
@@ -511,6 +527,17 @@ export const useUIStore = create<UIState>((set, get) => ({
     }
   },
 
+  toggleViewerWindow: () => {
+    if (get().isViewerOpen) {
+      set({ isViewerOpen: false });
+      invoke(Invokes.CloseViewerWindow).catch(console.error);
+      return;
+    }
+    invoke(Invokes.OpenViewerWindow, { title: i18n.t('editor.viewer.windowTitle') })
+      .then(() => set({ isViewerOpen: true }))
+      .catch((err) => toast.error(i18n.t('editor.viewer.openFailed', { error: String(err) })));
+  },
+
   resetWorkspaceLayout: (isTetheringSupported = false) => {
     const defaultWorkspace = reconcileWorkspace(undefined, isTetheringSupported);
     set({
@@ -535,3 +562,15 @@ export const useUIStore = create<UIState>((set, get) => ({
   searchFocusRequest: 0,
   requestSearchFocus: () => set((state) => ({ searchFocusRequest: state.searchFocusRequest + 1 })),
 }));
+
+useUIStore.subscribe((state, prev) => {
+  if (state.activePanel === prev.activePanel) return;
+  const { selectedImage, adjustments, setEditor } = useEditorStore.getState();
+  if (state.activePanel === Panel.Crop) {
+    setEditor({
+      cropSessionSnapshot: { path: selectedImage?.path ?? null, geometry: pickCropGeometry(adjustments) },
+    });
+  } else if (prev.activePanel === Panel.Crop) {
+    setEditor({ cropSessionSnapshot: null });
+  }
+});

@@ -22,8 +22,9 @@ import { useEditorStore } from '../../store/useEditorStore';
 import { useLibraryStore } from '../../store/useLibraryStore';
 import { useTetherStore } from '../../store/useTetherStore';
 import { useLibraryActions } from '../../hooks/useLibraryActions';
-import { useUIStore } from '../../store/useUIStore';
+import { getReopenedPanelWidth, useUIStore } from '../../store/useUIStore';
 import { COLOR_LABELS } from '../../utils/adjustments';
+import { getDevicePixelRatio } from '../../utils/displayScale';
 
 interface BottomBarProps {
   filmstripHeight?: number;
@@ -211,7 +212,7 @@ export default function BottomBar({
       const isOpening = !s.uiVisibility.leftPanel;
       return {
         uiVisibility: { ...s.uiVisibility, leftPanel: isOpening },
-        leftPanelWidth: isOpening && s.leftPanelWidth < 250 ? 350 : s.leftPanelWidth,
+        leftPanelWidth: isOpening ? getReopenedPanelWidth(s.leftPanelWidth) : s.leftPanelWidth,
       };
     });
 
@@ -220,7 +221,7 @@ export default function BottomBar({
       const isOpening = !s.uiVisibility.rightPanel;
       return {
         uiVisibility: { ...s.uiVisibility, rightPanel: isOpening },
-        rightPanelWidth: isOpening && s.rightPanelWidth < 250 ? 350 : s.rightPanelWidth,
+        rightPanelWidth: isOpening ? getReopenedPanelWidth(s.rightPanelWidth) : s.rightPanelWidth,
       };
     });
 
@@ -245,9 +246,7 @@ export default function BottomBar({
   const [isZoomLabelHovered, setIsZoomLabelHovered] = useState(false);
   const isZoomReady = !isLoading && originalSize && originalSize.width > 0 && displaySize && displaySize.width > 0;
 
-  const currentOriginalPercent = isZoomReady
-    ? (displaySize.width * (typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1)) / originalSize.width
-    : 1.0;
+  const currentOriginalPercent = isZoomReady ? (displaySize.width * getDevicePixelRatio()) / originalSize.width : 1.0;
 
   const [latchedSliderValue, setLatchedSliderValue] = useState(1.0);
   const [latchedDisplayPercent, setLatchedDisplayPercent] = useState(100);

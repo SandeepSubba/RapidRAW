@@ -1311,9 +1311,6 @@ fn render_preview(
 
     let path_str = tif.to_string_lossy().to_string();
     let state = app_handle.state::<crate::AppState>();
-    // Slider changes alter conversion params but not geometry; the engine's
-    // geometry cache would otherwise serve the previously converted base.
-    state.thumbnail_geometry_cache.lock().unwrap().remove(&path_str);
     let context = crate::gpu_processing::get_or_init_gpu_context(&state, app_handle).ok();
     let img = crate::file_management::generate_thumbnail_data(&path_str, context.as_ref(), None, app_handle)
         .map_err(|e| e.to_string())?;

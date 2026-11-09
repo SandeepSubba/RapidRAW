@@ -71,6 +71,11 @@ Rules:
   `negative*` keys (`negative_conversion/inline.rs`). Upstream's stands down when
   the fork's is enabled — keep that guard if either changes. Auto strength is
   `AutoAdjustOptions.strength`. See FORK_NOTES.md "v1.6.7 sync notes".
+- Upstream v1.6.9 dropped the clarity/structure blur textures; the fork's skin
+  smoothing owns shader bindings 8/16 (blur slots 2/3). `GlobalAdjustments` in
+  image_processing.rs and shader.wgsl must match field-for-field (pads included).
+  Fork display fixes (pending resize, redraw retry) sit on upstream's
+  `WgpuDisplay`. See FORK_NOTES.md "v1.6.9 sync notes".
 - The `claudecode` assistant provider shells out to the `claude` CLI (absolute
   path in settings); prompts go via stdin — never argv (E2BIG with mask-laden
   adjustments).

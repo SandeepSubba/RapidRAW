@@ -19,6 +19,7 @@ import {
   Smile,
   TextSearch,
   ScanFace,
+  Magnet,
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
@@ -38,6 +39,7 @@ export enum Mask {
   All = 'all',
   Brush = 'brush',
   Flow = 'flow',
+  MatchBrush = 'match-brush',
   Color = 'color',
   Linear = 'linear',
   Luminance = 'luminance',
@@ -95,6 +97,7 @@ export function formatMaskTypeName(type: string) {
   if (type === Mask.QuickEraser) return i18n.t('masks.types.quickEraser');
   if (type === Mask.Brush) return i18n.t('masks.types.brush');
   if (type === Mask.Flow) return i18n.t('masks.types.flow');
+  if (type === Mask.MatchBrush) return i18n.t('masks.types.matchBrush');
   if (type === Mask.Color) return i18n.t('masks.types.color');
   if (type === Mask.Linear) return i18n.t('masks.types.linear');
   if (type === Mask.Luminance) return i18n.t('masks.types.luminance');
@@ -135,6 +138,7 @@ export const MASK_ICON_MAP: Record<Mask, any> = {
   [Mask.All]: RectangleHorizontal,
   [Mask.Brush]: Brush,
   [Mask.Flow]: Droplets,
+  [Mask.MatchBrush]: Magnet,
   [Mask.Color]: Droplet,
   [Mask.Linear]: TriangleRight,
   [Mask.Luminance]: Sun,
@@ -175,6 +179,7 @@ export const MASK_BASIC_TYPES: Array<MaskType> = [
   { disabled: false, icon: TriangleRight, name: 'Linear', type: Mask.Linear },
   { disabled: false, icon: Circle, name: 'Radial', type: Mask.Radial },
   { disabled: false, icon: Droplets, name: 'Flow', type: Mask.Flow },
+  { disabled: false, icon: Magnet, name: 'Match Brush', type: Mask.MatchBrush },
 ];
 
 export const MASK_RANGE_TYPES: Array<MaskType> = [

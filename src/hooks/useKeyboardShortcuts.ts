@@ -11,10 +11,14 @@ import {
 import { useEditorStore } from '../store/useEditorStore';
 import { useLibraryStore } from '../store/useLibraryStore';
 import { useSettingsStore } from '../store/useSettingsStore';
-import { useUIStore } from '../store/useUIStore';
+import { getReopenedPanelWidth, useUIStore } from '../store/useUIStore';
 import { useProcessStore } from '../store/useProcessStore';
-import { useEditorActions } from './useEditorActions';
+import { applyCrop, cancelCrop, useEditorActions } from './useEditorActions';
 import { useLibraryActions } from './useLibraryActions';
+import { getDevicePixelRatio } from '../utils/displayScale';
+
+const SPEED_EDIT_IMAGE_DIRECTIONS: Record<string, number> = { KeyQ: -1, KeyE: 1 };
+const NON_TEXT_INPUT_TYPES = new Set(['checkbox', 'radio', 'range', 'button', 'submit', 'reset', 'color', 'file']);
 
 const getParentFolder = (path: string) => {
   const physicalPath = path.split('?vc=')[0];
@@ -50,9 +54,11 @@ export const useKeyboardShortcuts = ({
     handleAutoStraighten,
     handleCopyAdjustments,
     handlePasteAdjustments,
+    handleEnableAdjustments,
     toggleCompare,
   } = useEditorActions();
-  const { handleRate, handleSetFlag, handleToggleFlag, handleSetColorLabel } = useLibraryActions();
+  const { handleRate, handleSetFlag, handleToggleFlag, handleSetColorLabel, handleClearSelection } =
+    useLibraryActions();
 
   // Same path as the crop-panel buttons: it picks editor state vs. sidecar per
   // image, so the library and the editor behave alike.
@@ -120,6 +126,18 @@ export const useKeyboardShortcuts = ({
     // Leader keys currently held down. `used` marks that a chord already fired,
     // so the leader's own tap action isn't triggered when it's released.
     const heldLeaders = heldLeadersRef.current;
+
+    // Fork: honours "wrap image navigation" (upstream always wraps).
+    const selectAdjacentImage = (s: ShortcutState, direction: number) => {
+      const list = sortedListRef.current;
+      const currentIndex = list.findIndex((img) => img.path === s.editor.selectedImage!.path);
+      if (currentIndex === -1) return;
+      const wrap = s.settings.appSettings?.wrapImageNavigation ?? true;
+      const target = currentIndex + direction;
+      if (!wrap && (target < 0 || target >= list.length)) return;
+      handleImageSelect(list[(target + list.length) % list.length].path, true);
+    };
+
     const getImagePathsForCopy = (s: any): Array<string> => {
       if (s.editor.selectedImage) {
         return [s.editor.selectedImage.path];
@@ -182,6 +200,11 @@ export const useKeyboardShortcuts = ({
         shouldFire: () => sortedListRef.current.length > 0,
         execute: (e: any, s: any) => {
           e.preventDefault();
+          const selected = new Set(s.library.multiSelectedPaths);
+          if (sortedListRef.current.every((f: ImageFile) => selected.has(f.path))) {
+            handleClearSelection();
+            return;
+          }
           s.library.setLibrary({ multiSelectedPaths: sortedListRef.current.map((f: ImageFile) => f.path) });
           if (s.ui.activeView === 'library') {
             const lastPath = sortedListRef.current[sortedListRef.current.length - 1].path;
@@ -208,31 +231,21 @@ export const useKeyboardShortcuts = ({
         shouldFire: (s: any) => s.ui.activeView === 'editor' && !!s.editor.selectedImage,
         execute: (e: any, s: any) => {
           e.preventDefault();
-          const currentIndex = sortedListRef.current.findIndex((img) => img.path === s.editor.selectedImage!.path);
-          if (currentIndex === -1) return;
-          const wrap = s.settings.appSettings?.wrapImageNavigation ?? true;
-          if (currentIndex - 1 < 0 && !wrap) return;
-          let nextIndex = currentIndex - 1 < 0 ? sortedListRef.current.length - 1 : currentIndex - 1;
-          handleImageSelect(sortedListRef.current[nextIndex].path, true);
+          selectAdjacentImage(s, -1);
         },
       },
       preview_next: {
         shouldFire: (s: any) => s.ui.activeView === 'editor' && !!s.editor.selectedImage,
         execute: (e: any, s: any) => {
           e.preventDefault();
-          const currentIndex = sortedListRef.current.findIndex((img) => img.path === s.editor.selectedImage!.path);
-          if (currentIndex === -1) return;
-          const wrap = s.settings.appSettings?.wrapImageNavigation ?? true;
-          if (currentIndex + 1 >= sortedListRef.current.length && !wrap) return;
-          let nextIndex = currentIndex + 1 >= sortedListRef.current.length ? 0 : currentIndex + 1;
-          handleImageSelect(sortedListRef.current[nextIndex].path, true);
+          selectAdjacentImage(s, 1);
         },
       },
       zoom_in_step: {
         shouldFire: (s: any) => s.ui.activeView === 'editor' && !!s.editor.selectedImage,
         execute: (e: any, s: any) => {
           e.preventDefault();
-          const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+          const dpr = getDevicePixelRatio();
           const currentPercent =
             s.editor.originalSize?.width > 0 && s.editor.displaySize?.width > 0
               ? (s.editor.displaySize.width * dpr) / s.editor.originalSize.width
@@ -244,7 +257,7 @@ export const useKeyboardShortcuts = ({
         shouldFire: (s: any) => s.ui.activeView === 'editor' && !!s.editor.selectedImage,
         execute: (e: any, s: any) => {
           e.preventDefault();
-          const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+          const dpr = getDevicePixelRatio();
           const currentPercent =
             s.editor.originalSize?.width > 0 && s.editor.displaySize?.width > 0
               ? (s.editor.displaySize.width * dpr) / s.editor.originalSize.width
@@ -256,7 +269,7 @@ export const useKeyboardShortcuts = ({
         shouldFire: (s: any) => s.ui.activeView === 'editor' && !!s.editor.selectedImage,
         execute: (e: any, s: any) => {
           e.preventDefault();
-          const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+          const dpr = getDevicePixelRatio();
           const { originalSize, displaySize, baseRenderSize } = s.editor;
           const currentPercent =
             originalSize?.width > 0 && displaySize?.width > 0
@@ -287,7 +300,7 @@ export const useKeyboardShortcuts = ({
         shouldFire: (s: any) => s.ui.activeView === 'editor' && !!s.editor.selectedImage,
         execute: (e: any, s: any) => {
           e.preventDefault();
-          const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+          const dpr = getDevicePixelRatio();
           const currentPercent =
             s.editor.originalSize?.width > 0 && s.editor.displaySize?.width > 0
               ? (s.editor.displaySize.width * dpr) / s.editor.originalSize.width
@@ -299,7 +312,7 @@ export const useKeyboardShortcuts = ({
         shouldFire: (s: any) => s.ui.activeView === 'editor' && !!s.editor.selectedImage,
         execute: (e: any, s: any) => {
           e.preventDefault();
-          const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+          const dpr = getDevicePixelRatio();
           const currentPercent =
             s.editor.originalSize?.width > 0 && s.editor.displaySize?.width > 0
               ? (s.editor.displaySize.width * dpr) / s.editor.originalSize.width
@@ -344,7 +357,10 @@ export const useKeyboardShortcuts = ({
         },
       },
       undo: {
-        shouldFire: (s: any) => s.ui.activeView === 'editor' && !!s.editor.selectedImage && s.editor.historyIndex > 0,
+        shouldFire: (s: any) =>
+          s.ui.activeView === 'editor' &&
+          !!s.editor.selectedImage &&
+          (s.editor.historyIndex > 0 || s.editor.adjustments !== s.editor.history[s.editor.historyIndex]),
         execute: (e: any, s: any) => {
           e.preventDefault();
           s.editor.undo();
@@ -373,6 +389,13 @@ export const useKeyboardShortcuts = ({
         execute: (e: any, s: any) => {
           e.preventDefault();
           s.ui.toggleFullScreen();
+        },
+      },
+      toggle_viewer_window: {
+        shouldFire: (s: ShortcutState) => s.settings.osPlatform !== 'android',
+        execute: (e: KeyboardEvent, s: ShortcutState) => {
+          e.preventDefault();
+          s.ui.toggleViewerWindow();
         },
       },
       show_original: {
@@ -457,7 +480,7 @@ export const useKeyboardShortcuts = ({
           const isOpening = !s.ui.uiVisibility.leftPanel;
           s.ui.setUI((state: any) => ({
             uiVisibility: { ...state.uiVisibility, leftPanel: isOpening },
-            leftPanelWidth: isOpening && state.leftPanelWidth < 250 ? 350 : state.leftPanelWidth,
+            leftPanelWidth: isOpening ? getReopenedPanelWidth(state.leftPanelWidth) : state.leftPanelWidth,
           }));
         },
       },
@@ -468,7 +491,7 @@ export const useKeyboardShortcuts = ({
           const isOpening = !s.ui.uiVisibility.rightPanel;
           s.ui.setUI((state: any) => ({
             uiVisibility: { ...state.uiVisibility, rightPanel: isOpening },
-            rightPanelWidth: isOpening && state.rightPanelWidth < 250 ? 350 : state.rightPanelWidth,
+            rightPanelWidth: isOpening ? getReopenedPanelWidth(state.rightPanelWidth) : state.rightPanelWidth,
           }));
         },
       },
@@ -543,6 +566,15 @@ export const useKeyboardShortcuts = ({
             s.ui.setPanel(Panel.Crop);
           }
           handleAutoStraighten();
+        },
+      },
+      toggle_black_white: {
+        shouldFire: (s: ShortcutState) => s.ui.activeView === 'editor' && !!s.editor.selectedImage,
+        execute: (e: KeyboardEvent, s: ShortcutState) => {
+          e.preventDefault();
+          handleEnableAdjustments([s.editor.selectedImage!.path], {
+            monochromeEnabled: !s.editor.adjustments.monochromeEnabled,
+          });
         },
       },
       rate_0: {
@@ -657,8 +689,8 @@ export const useKeyboardShortcuts = ({
           (s.ui.activePanel === Panel.Masks || s.ui.activePanel === Panel.Ai),
         execute: (e: any, s: any) => {
           e.preventDefault();
-          const currentSettings = s.editor.brushSettings || { size: 50 };
-          const newSize = Math.min((currentSettings.size || 50) + 10, 200);
+          const currentSettings = s.editor.brushSettings || { size: 100 };
+          const newSize = Math.min((currentSettings.size || 100) + 10, 200);
           s.editor.setEditor({
             brushSettings: { ...currentSettings, size: newSize },
           });
@@ -671,8 +703,8 @@ export const useKeyboardShortcuts = ({
           (s.ui.activePanel === Panel.Masks || s.ui.activePanel === Panel.Ai),
         execute: (e: any, s: any) => {
           e.preventDefault();
-          const currentSettings = s.editor.brushSettings || { size: 50 };
-          const newSize = Math.max((currentSettings.size || 50) - 10, 1);
+          const currentSettings = s.editor.brushSettings || { size: 100 };
+          const newSize = Math.max((currentSettings.size || 100) - 10, 1);
           s.editor.setEditor({
             brushSettings: { ...currentSettings, size: newSize },
           });
@@ -725,6 +757,16 @@ export const useKeyboardShortcuts = ({
 
     const builtinShortcuts = [
       {
+        match: (e: KeyboardEvent, s: ShortcutState) =>
+          s.editor.isSpeedEditActive &&
+          !!s.editor.selectedImage &&
+          (normalizeCombo(e, s.settings.osPlatform).at(-1) ?? '') in SPEED_EDIT_IMAGE_DIRECTIONS,
+        execute: (e: KeyboardEvent, s: ShortcutState) => {
+          e.preventDefault();
+          selectAdjacentImage(s, SPEED_EDIT_IMAGE_DIRECTIONS[normalizeCombo(e, s.settings.osPlatform).at(-1)!]);
+        },
+      },
+      {
         match: (e: KeyboardEvent) => e.code === 'Escape',
         execute: (e: KeyboardEvent, s: any) => {
           e.preventDefault();
@@ -734,7 +776,7 @@ export const useKeyboardShortcuts = ({
           else if (s.editor.activeAiPatchContainerId) s.editor.setEditor({ activeAiPatchContainerId: null });
           else if (s.editor.activeMaskId) s.editor.setEditor({ activeMaskId: null });
           else if (s.editor.activeMaskContainerId) s.editor.setEditor({ activeMaskContainerId: null });
-          else if (s.ui.activePanel === Panel.Crop) s.ui.setPanel(Panel.Adjustments);
+          else if (s.ui.activePanel === Panel.Crop) cancelCrop();
           else if (s.ui.isFullScreen) s.ui.toggleFullScreen();
           else if (s.ui.activeView === 'editor') handleBackToLibrary();
           else if (s.ui.activeView === 'library' && s.library.rootPaths?.length > 0) handleGoHome();
@@ -748,23 +790,17 @@ export const useKeyboardShortcuts = ({
         execute: (e: KeyboardEvent, s: any) => {
           e.preventDefault();
           if (s.editor.activeMaskContainerId) {
-            s.editor.setEditor((state: any) => ({
-              adjustments: {
-                ...state.adjustments,
-                masks: state.adjustments.masks.filter((c: any) => c.id !== s.editor.activeMaskContainerId),
-              },
-              activeMaskContainerId: null,
-              activeMaskId: null,
+            setAdjustments((prev: any) => ({
+              ...prev,
+              masks: prev.masks.filter((c: any) => c.id !== s.editor.activeMaskContainerId),
             }));
+            s.editor.setEditor({ activeMaskContainerId: null, activeMaskId: null });
           } else if (s.editor.activeAiPatchContainerId) {
-            s.editor.setEditor((state: any) => ({
-              adjustments: {
-                ...state.adjustments,
-                aiPatches: state.adjustments.aiPatches.filter((c: any) => c.id !== s.editor.activeAiPatchContainerId),
-              },
-              activeAiPatchContainerId: null,
-              activeAiSubMaskId: null,
+            setAdjustments((prev: any) => ({
+              ...prev,
+              aiPatches: prev.aiPatches.filter((c: any) => c.id !== s.editor.activeAiPatchContainerId),
             }));
+            s.editor.setEditor({ activeAiPatchContainerId: null, activeAiSubMaskId: null });
           }
         },
       },
@@ -830,6 +866,19 @@ export const useKeyboardShortcuts = ({
           }
           // The open image deliberately stays put: these are selection-building
           // gestures, and loading a new frame would reset the anchor.
+        },
+      },
+      {
+        match: (e: KeyboardEvent, s: any) =>
+          (e.code === 'Enter' || e.code === 'NumpadEnter') &&
+          !e.ctrlKey &&
+          !e.metaKey &&
+          !e.altKey &&
+          s.ui.activeView === 'editor' &&
+          s.ui.activePanel === Panel.Crop,
+        execute: (e: KeyboardEvent) => {
+          e.preventDefault();
+          applyCrop();
         },
       },
       {
@@ -978,9 +1027,11 @@ export const useKeyboardShortcuts = ({
         return;
       }
 
-      const isInputFocused =
-        document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA';
-      if (isInputFocused) return;
+      const target = event.target;
+      const isInputTarget =
+        target instanceof HTMLTextAreaElement ||
+        (target instanceof HTMLInputElement && !NON_TEXT_INPUT_TYPES.has(target.type));
+      if (isInputTarget) return;
 
       // Highlighted text means a plain copy is intended — assistant replies are
       // select-text, and selecting one leaves focus on the body rather than an
@@ -1073,10 +1124,13 @@ export const useKeyboardShortcuts = ({
     handleCopyAdjustments,
     handleCopyImagePaths,
     handlePasteAdjustments,
+    handleEnableAdjustments,
     handleRate,
     handleSetFlag,
     handleToggleFlag,
     handleSetColorLabel,
+    setAdjustments,
+    handleClearSelection,
     toggleCompare,
   ]);
 };

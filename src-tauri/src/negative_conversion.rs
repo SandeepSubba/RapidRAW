@@ -274,16 +274,11 @@ fn clear_decode_caches(state: &AppState) {
     if let Ok(mut c) = state.decoded_image_cache.lock() {
         c.clear();
     }
-    if let Ok(mut c) = state.geometry_cache.lock() {
-        c.clear();
+    for target in crate::app_state::PreviewTarget::ALL {
+        crate::cache_utils::clear_preview_slot(state, target);
     }
-    if let Ok(mut c) = state.cached_preview.lock() {
-        *c = None;
-    }
+    crate::cache_utils::clear_preview_stage_caches(state);
     if let Ok(mut c) = state.full_warped_cache.lock() {
-        *c = None;
-    }
-    if let Ok(mut c) = state.full_transformed_cache.lock() {
         *c = None;
     }
 }

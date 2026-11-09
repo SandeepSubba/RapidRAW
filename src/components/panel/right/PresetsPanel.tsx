@@ -859,11 +859,14 @@ export default function PresetsPanel({ onNavigateToCommunity }: PresetsPanelProp
       resolvePresetAiMasks(presetMasks);
     }
 
-    setAdjustments((prevAdjustments: Adjustments) => ({
-      ...prevAdjustments,
-      ...preset.adjustments,
-      ...(hasAiMasks ? { masks: stripAiMaskResults(presetMasks) } : {}),
-    }));
+    setAdjustments(
+      (prevAdjustments: Adjustments) => ({
+        ...prevAdjustments,
+        ...preset.adjustments,
+        ...(hasAiMasks ? { masks: stripAiMaskResults(presetMasks) } : {}),
+      }),
+      `${t('editor.presets.types.preset')}: ${preset.name}`,
+    );
     applyToOtherSelected(preset.adjustments);
   };
 

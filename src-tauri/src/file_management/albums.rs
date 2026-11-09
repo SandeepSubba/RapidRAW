@@ -66,7 +66,7 @@ pub fn save_albums(mut tree: Vec<AlbumItem>, app_handle: AppHandle) -> Result<()
     let path = get_albums_path(&app_handle)?;
     sort_album_tree(&mut tree);
     let json_string = serde_json::to_string_pretty(&tree).map_err(|e| e.to_string())?;
-    fs::write(path, json_string).map_err(|e| e.to_string())
+    write_file_atomic(&path, json_string.as_bytes()).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -75,6 +75,9 @@ pub fn add_to_album(
     paths: Vec<String>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
+    if let Some(result) = crate::immich::add_to_album(&app_handle, &album_id, &paths) {
+        return result;
+    }
     let mut tree = get_albums(app_handle.clone())?;
 
     fn add_recursive(items: &mut [AlbumItem], target_id: &str, paths_to_add: &Vec<String>) -> bool {

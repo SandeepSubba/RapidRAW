@@ -5,7 +5,6 @@ use rawler::decoders::RawDecodeParams;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
-use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tauri::{AppHandle, Emitter};
@@ -28,7 +27,10 @@ fn load_for_analysis(
     path: &str,
     settings: &crate::app_settings::AppSettings,
 ) -> Result<DynamicImage, String> {
-    if crate::file_management::is_cloud_placeholder(Path::new(path)) {
+    let (source_path, _) = crate::file_management::parse_virtual_path(path);
+    let source = source_path.to_string_lossy();
+    let path: &str = &source;
+    if crate::file_management::is_cloud_placeholder(&source_path) {
         return Err(format!("'{}' is stored in iCloud and not downloaded", path));
     }
     if is_raw_file(path) {
@@ -854,6 +856,7 @@ pub fn group_analyses(
         ..Default::default()
     };
     let mut processed_indices = vec![false; successful_analyses.len()];
+    let mut grouped_indices = vec![false; successful_analyses.len()];
 
     if settings.group_similar {
         for i in 0..successful_analyses.len() {
@@ -892,6 +895,9 @@ pub fn group_analyses(
                         .unwrap_or(std::cmp::Ordering::Equal)
                 });
 
+                for &idx in &current_group_indices {
+                    grouped_indices[idx] = true;
+                }
                 let representative_idx = current_group_indices[0];
                 let duplicate_indices = &current_group_indices[1..];
                 suggestions.similar_groups.push(CullGroup {
@@ -907,7 +913,7 @@ pub fn group_analyses(
 
     if settings.filter_blurry {
         for i in 0..successful_analyses.len() {
-            if !processed_indices[i] {
+            if !grouped_indices[i] {
                 let item = &successful_analyses[i];
                 if item.result.sharpness_metric < settings.blur_threshold {
                     suggestions.blurry_images.push(item.result.clone());

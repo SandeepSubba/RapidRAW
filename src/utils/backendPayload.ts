@@ -2,7 +2,7 @@ import { useEditorStore } from '../store/useEditorStore';
 import { Adjustments } from './adjustments';
 
 const CACHED_EFFECT_MAP_PREFIX = '__cached__:';
-const EFFECT_MAP_KEYS = ['lensBlurDepthMap', 'fogDepthMap', 'relightNormalMap'] as const;
+const EFFECT_MAP_KEYS = ['lensBlurDepthMap', 'fogDepthMap', 'motionBlurDepthMap', 'relightNormalMap'] as const;
 const MAX_TRACKED_EFFECT_MAPS = 16;
 
 const effectMapIds = new Map<string, number>();
@@ -31,7 +31,15 @@ export const prepareAdjustmentsPayload = (adjustments: Adjustments): Adjustments
   // the renderer never reads them. Drop them before cloning so a growing list —
   // each a full edit state, possibly with base64 mask/patch data — isn't
   // structuredClone'd and shipped over IPC on every interactive tick.
-  const { lensBlurDepthMap, fogDepthMap, relightNormalMap, aiPatches, snapshots: _snapshots, ...rest } = adjustments;
+  const {
+    lensBlurDepthMap,
+    fogDepthMap,
+    motionBlurDepthMap,
+    relightNormalMap,
+    aiPatches,
+    snapshots: _snapshots,
+    ...rest
+  } = adjustments;
   const payload: any = structuredClone(rest);
   payload.aiPatches = Array.isArray(aiPatches)
     ? aiPatches.map(({ patchData, ...patch }: any) => ({ ...structuredClone(patch), patchData }))
@@ -40,7 +48,7 @@ export const prepareAdjustmentsPayload = (adjustments: Adjustments): Adjustments
   const { patchesSentToBackend } = useEditorStore.getState();
   const newlySent = new Set<string>();
 
-  const effectMaps: Record<string, unknown> = { lensBlurDepthMap, fogDepthMap, relightNormalMap };
+  const effectMaps: Record<string, unknown> = { lensBlurDepthMap, fogDepthMap, motionBlurDepthMap, relightNormalMap };
   const sentEffectMapIds: Record<string, number> = {};
   for (const key of EFFECT_MAP_KEYS) {
     const value = effectMaps[key];

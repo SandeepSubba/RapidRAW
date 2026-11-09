@@ -71,7 +71,7 @@ export default function FilmPanel({ adjustments }: any) {
   const reloadImage = useCallback(async () => {
     const { selectedImage: img, setEditor } = useEditorStore.getState();
     if (!img) return;
-    setEditor({ hasRenderedFirstFrame: false });
+    setEditor({ wgpuPhase: 'hidden' });
     // Re-decode only — history untouched, unlike the enable/disable toggle.
     await invoke(Invokes.LoadImage, { path: img.path });
   }, []);

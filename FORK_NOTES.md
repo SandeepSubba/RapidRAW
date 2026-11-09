@@ -182,6 +182,60 @@ npm run typecheck  # note: upstream has pre-existing strict-tsc errors; the
 npm start          # tauri dev — builds the Rust backend and launches the app
 ```
 
+### v1.6.9 sync notes
+
+Upstream v1.6.8 + v1.6.9 (+165 commits: geometry/relight/fog/lens blur on the
+GPU, viewport-sized mask + crop overlays, lensfun-exact lens correction resolved
+per image, rebuilt clone/heal (`clone_heal.rs`, draggable source overlay),
+liquify/retouch rework, match-brush mask, motion blur, light-pyramid
+glow/halation/flare, rebuilt grain, expanded colour mixer + pipette, B&W mix and
+toning, "Edit In" external apps, second viewer window, speed edit, interface
+scale, image preloading, embedded-ICC conversion, history labels, Wayland WGPU,
+camera tethering). How the fork fits:
+
+- **Skin smoothing.** Upstream dropped the 8 px / 40 px clarity/structure blur
+  textures (guided-filter clarity and the light pyramid replaced them). The
+  fork's frequency-separation skin smoothing keeps its own two blurs: shader
+  bindings 8 (`skin_mid_blur_texture`) and 16 (`skin_broad_blur_texture`),
+  blur slots 2/3, computed only when skin smoothing is non-zero (dummy view
+  otherwise). `GlobalAdjustments` lost one pad (`_pad_lut7`) to fit upstream's
+  `grain_softness` — Rust and WGSL must stay field-for-field identical.
+- **Point Color** runs after the HSL panel in the non-monochrome branch (upstream
+  moved hue/creative colour there); hidden for B&W images like Color Calibration.
+- **ICC.** Profiled CMYK still goes through the fork's `crate::icc` path first;
+  RGB profiles (and EXIF-tagged Adobe RGB) use upstream's moxcms conversion. The
+  fork's alpha-over-white flatten is kept.
+- **Decoding.** `decode_pristine` returns the embedded-preview fallback flag; the
+  pristine cache and upstream's new background preloader never cache a fallback.
+- **Display.** Upstream's rewritten `WgpuDisplay` (viewer window, content keys)
+  is used as is. Fork robustness re-applied on top: the main window's resize is
+  recorded in `pending_surface_size` before the try-lock (applied by the next lock
+  holder), `ScaleFactorChanged` and focus regain repaint, and a frame that can't
+  present schedules `schedule_redraw_retry`.
+- **Tethering.** The fork keeps its own `tethering` module (folder watch +
+  `tether-usb` gphoto2); upstream's `camera_tethering` stays out of the build.
+- **Lens correction.** Upstream resolves the lensfun profile from EXIF at render
+  time (`lens_correction::lens_profile`), so `lensDistortionParams` is no longer
+  stored. The fork's import-time auto lens correction now only writes the `auto`
+  mode + toggles, and only when `lens_profile` finds a match.
+- **Thumbnails.** `regenerate_thumbnails_for_paths` (negative conversion) is a thin
+  wrapper over upstream's `regenerate_thumbnails`; the CPU geometry cache is gone.
+- **Clone/heal.** Upstream's rebuilt clone/heal with its draggable source overlay
+  supersedes the fork's source-drag code (removed).
+- **Crop UI** moved into upstream's viewport overlay. Fork behaviour ported in:
+  crop handles only when the crop tool is activated, drag-outside-the-crop to
+  rotate (zones in % of the crop box so they follow zoom), the rotation readout,
+  and the guided-perspective labels/handles/draft preview/hint (sizes divided by
+  zoom since the overlay group is zoom-scaled).
+- **Export names.** Upstream now never overwrites an existing file (adds `_1`,
+  `_2`…, also for "export original"); the fork's per-run claim set is that
+  mechanism's set.
+- **History.** Upstream's labelled history; the fork's `amendHistory` keeps the
+  label array in step. Auto adjust records a labelled step.
+- **Settings.** Fork layout kept; upstream's speed edit section, Edit In apps,
+  interface scale, hide collapsed panels, Wayland WGPU toggle and new languages
+  were slotted in; the static preview resolution setting is gone (upstream).
+
 ### v1.6.7 sync notes
 
 Upstream v1.6.7 (+ ~100 commits: Immich library, ESAM3/BiRefNet AI masks with text

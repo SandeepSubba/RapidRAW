@@ -26,7 +26,7 @@ import Switch from '../../ui/Switch';
 import Text from '../../ui/Text';
 import { TextVariants, TextColors, TextWeights } from '../../../types/typography';
 import { useShallow } from 'zustand/react/shallow';
-import { useEditorStore } from '../../../store/useEditorStore';
+import { canvasToolState, useEditorStore } from '../../../store/useEditorStore';
 import { useSettingsStore } from '../../../store/useSettingsStore';
 import { useTetherStore } from '../../../store/useTetherStore';
 import { CameraSection } from '../library/TetherMenu';
@@ -286,12 +286,7 @@ export default function Controls() {
   );
 
   const toggleWbPicker = useCallback(
-    () =>
-      setEditor((state) => ({
-        isWbPickerActive: !state.isWbPickerActive,
-        isRelightPickerActive: false,
-        activeCenterMarker: null,
-      })),
+    () => setEditor((state) => canvasToolState({ isWbPickerActive: !state.isWbPickerActive })),
     [setEditor],
   );
 
@@ -324,16 +319,19 @@ export default function Controls() {
   );
 
   const handleResetAdjustments = () => {
-    setAdjustments((prev: Adjustments) => ({
-      ...prev,
-      ...Object.keys(ADJUSTMENT_SECTIONS)
-        .flatMap((s) => ADJUSTMENT_SECTIONS[s])
-        .reduce((acc: any, key: string) => {
-          acc[key] = INITIAL_ADJUSTMENTS[key as keyof Adjustments];
-          return acc;
-        }, {}),
-      activeTools: { ...INITIAL_ADJUSTMENTS.activeTools },
-    }));
+    setAdjustments(
+      (prev: Adjustments) => ({
+        ...prev,
+        ...Object.keys(ADJUSTMENT_SECTIONS)
+          .flatMap((s) => ADJUSTMENT_SECTIONS[s])
+          .reduce((acc: any, key: string) => {
+            acc[key] = INITIAL_ADJUSTMENTS[key as keyof Adjustments];
+            return acc;
+          }, {}),
+        activeTools: { ...INITIAL_ADJUSTMENTS.activeTools },
+      }),
+      t('contextMenus.editor.resetAdjustments'),
+    );
   };
 
   const handleAutoAdjustContextMenu = (event: React.MouseEvent) => {
