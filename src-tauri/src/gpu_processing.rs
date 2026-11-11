@@ -840,11 +840,8 @@ pub fn wgpu_display_failed() -> bool {
     WGPU_DISPLAY_FAILED.load(Ordering::Acquire)
 }
 
-pub fn get_or_init_gpu_context(
-    state: &tauri::State<AppState>,
-    #[cfg_attr(target_os = "android", allow(unused_variables))] app_handle: &tauri::AppHandle,
-) -> Result<GpuContext, String> {
-    let mut context_lock = match state.gpu_context.lock() {
+fn lock_gpu_context(state: &AppState) -> std::sync::MutexGuard<'_, Option<GpuContext>> {
+    match state.gpu_context.lock() {
         Ok(guard) => guard,
         Err(poisoned) => {
             log::warn!(
@@ -854,34 +851,61 @@ pub fn get_or_init_gpu_context(
             *guard = None;
             guard
         }
-    };
+    }
+}
+
+/// Serialises context creation without holding `state.gpu_context`.
+static GPU_INIT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+pub fn get_or_init_gpu_context(
+    state: &tauri::State<AppState>,
+    #[cfg_attr(target_os = "android", allow(unused_variables))] app_handle: &tauri::AppHandle,
+) -> Result<GpuContext, String> {
+    // `state.gpu_context` is only ever held for a quick read or swap. Building a
+    // context creates and configures the window surface, which on Windows waits
+    // for the window's (main) thread — and the main thread takes this lock in its
+    // resize/focus handlers. Holding it across creation deadlocked the app after
+    // the GPU ran out of memory: the recreate started, the user clicked back into
+    // the window, and both threads waited on each other forever.
     #[cfg(target_os = "linux")]
     let mut reused_wayland = None;
-    if GPU_DEVICE_LOST.load(Ordering::Acquire) {
-        log::warn!("Recreating GPU context after the device was lost.");
-        if let Some(context) = context_lock.take() {
-            #[cfg(target_os = "linux")]
-            {
-                reused_wayland = context
-                    .display
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .take()
-                    .and_then(|mut display| display.wayland.take());
-            }
-            *context.display.lock().unwrap_or_else(|e| e.into_inner()) = None;
-            *context
-                .viewer_display
-                .lock()
-                .unwrap_or_else(|e| e.into_inner()) = None;
+    let mut old_context = None;
+    {
+        let mut context_lock = lock_gpu_context(state);
+        if GPU_DEVICE_LOST.load(Ordering::Acquire) {
+            log::warn!("Recreating GPU context after the device was lost.");
+            old_context = context_lock.take();
+            GPU_DEVICE_LOST.store(false, Ordering::Release);
+        } else if let Some(context) = &*context_lock {
+            return Ok(context.clone());
         }
+    }
+    if let Some(context) = old_context.take() {
+        // Tear the lost device's surfaces down outside the context lock, too.
+        #[cfg(target_os = "linux")]
+        {
+            reused_wayland = context
+                .display
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .take()
+                .and_then(|mut display| display.wayland.take());
+        }
+        *context.display.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        *context
+            .viewer_display
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = None;
+        drop(context);
         *lock_or_reset(&state.gpu_processor, "GPU processor") = None;
         for target in PreviewTarget::ALL {
             *lock_or_reset(state.gpu_image_cache_for(target), "GPU image cache") = None;
         }
-        GPU_DEVICE_LOST.store(false, Ordering::Release);
     }
-    if let Some(context) = &*context_lock {
+
+    let _init_guard = GPU_INIT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    // Another thread may have built it while we waited.
+    if let Some(context) = &*lock_gpu_context(state) {
         return Ok(context.clone());
     }
 
@@ -1042,7 +1066,7 @@ pub fn get_or_init_gpu_context(
             .get_or_init(|| crate::gpu_compute::ComputePipelines::new(&device))
             .warm(&device);
     });
-    *context_lock = Some(new_context.clone());
+    *lock_gpu_context(state) = Some(new_context.clone());
     Ok(new_context)
 }
 
