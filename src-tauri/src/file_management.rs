@@ -2993,13 +2993,16 @@ fn update_sidecars_and_thumbnails(
 const RAM_PER_BATCH_DECODE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 
 fn run_batch_workers<T: Send>(items: impl Iterator<Item = T> + Send, work: impl Fn(T) + Sync) {
-    static WORKERS: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
-    let workers = *WORKERS.get_or_init(|| {
+    // Sized per batch from the memory that is free *now*, not installed RAM: each
+    // worker decodes a full RAW (~1-2 GB peak), and with other apps holding most
+    // of the commit (a leaking background app did on a 16 GB machine) seven
+    // parallel decodes after a crop paste failed an allocation and aborted the app.
+    let workers = {
         let mut sys = sysinfo::System::new();
         sys.refresh_memory();
-        let ram_limit = (sys.total_memory() / RAM_PER_BATCH_DECODE_BYTES).max(1) as usize;
+        let ram_limit = (sys.available_memory() / RAM_PER_BATCH_DECODE_BYTES).max(1) as usize;
         rayon::current_num_threads().min(ram_limit).max(1)
-    });
+    };
 
     let items = std::sync::Mutex::new(items);
     std::thread::scope(|scope| {
