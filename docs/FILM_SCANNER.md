@@ -90,6 +90,24 @@ lower depths quantise away bits that hold only sensor noise (film grain dithers
 any banding), so 12-bit halves the file with no visible loss. See
 [Bit depth & compression](#bit-depth--compression).
 
+### File format & compression
+What the finished scan is saved as:
+
+| Format | Compression | Size (3600 dpi, 12-bit) | Notes |
+| ------ | ----------- | ----------------------- | ----- |
+| **TIFF** (default) | Deflate | ~55 MB | lossless; opens everywhere |
+| TIFF | None | ~110 MB | for old software that can't read compressed TIFFs |
+| **JPEG XL** | Lossless | ~41 MB | bit-exact, ~25% smaller than TIFF |
+| JPEG XL | High quality | ~9 MB | grain very slightly softened |
+| JPEG XL | Medium quality | ~4 MB | visible on close inspection |
+
+JPEG XL stays 16-bit even when lossy, so the negative inversion's tone stretch
+doesn't band. The lossy levels sit far below JPEG XL's usual "visually
+lossless" setting because inverting a negative magnifies compression
+artifacts along with the tones. JPEG XL files carry the same EXIF tags in an
+`Exif` box and open in RapidRAW, Lightroom, Photoshop and macOS; not every
+application reads them yet.
+
 ### Dust removal (IR)
 An **infrared cleaning pass** (Digital ICE–style). Shown only when the scanner
 exposes an infrared source. An extra IR scan sees dust, hair, and surface

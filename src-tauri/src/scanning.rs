@@ -694,33 +694,137 @@ fn ir_clean_scan(vis_path: &Path, ir_path: &Path, dpi: u32, sensitivity: f32) ->
     Ok(count)
 }
 
-// Store scans in a deflate+predictor TIFF, keeping `keep_bits` significant
+// Store scans as a TIFF or JPEG XL (see ScanFormat), keeping `keep_bits` significant
 // bits (16 = lossless; at 12 the discarded bits sit ~100x below the scanner's
 // measured noise floor and the file lands at about half the raw size —
 // 109MB -> 55MB at 3600dpi). The scan date and scanner make/model are embedded
 // as real TIFF tags so any application can read them, not just the sidecar.
 // Encodes to memory and renames over the original, so a failure never costs
 // the scan.
-fn compress_scan(path: &Path, keep_bits: u8, scanner_model: &str, meta: &FilmMeta) -> Result<u64, String> {
+// What the finished scan is saved as. JPEG XL lossless is bit-exact like
+// TIFF but ~25% smaller on real negatives; the lossy levels keep 16-bit
+// precision, so the negative inversion's tone stretch doesn't band.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(crate) enum ScanFormat {
+    Tiff { deflate: bool },
+    JxlLossless,
+    // Butteraugli distance. Kept far below the usual "visually lossless" 1.0:
+    // inverting a negative stretches its tones and with them the artifacts.
+    JxlLossy(f32),
+}
+
+impl ScanFormat {
+    pub(crate) fn parse(format: &str, compression: &str) -> Self {
+        match (format, compression) {
+            ("jxl", "high") => Self::JxlLossy(0.1),
+            ("jxl", "medium") => Self::JxlLossy(0.25),
+            ("jxl", _) => Self::JxlLossless,
+            (_, "none") => Self::Tiff { deflate: false },
+            _ => Self::Tiff { deflate: true },
+        }
+    }
+
+    pub(crate) fn ext(self) -> &'static str {
+        match self {
+            Self::Tiff { .. } => "tif",
+            _ => "jxl",
+        }
+    }
+}
+
+// EXIF for the JXL `Exif` box — the same tags compress_scan writes into TIFFs.
+fn scan_exif(date: &str, scanner_model: &str, meta: &FilmMeta) -> Option<Vec<u8>> {
+    use little_exif::exif_tag::ExifTag;
+    let mut m = little_exif::metadata::Metadata::new();
+    m.set_tag(ExifTag::ModifyDate(date.to_string()));
+    m.set_tag(ExifTag::DateTimeOriginal(date.to_string()));
+    m.set_tag(ExifTag::Software("RapidRAW film scanner".to_string()));
+    let device = FilmMeta::field(&meta.camera).unwrap_or(scanner_model);
+    if let Some((make, model)) = device.split_once(' ') {
+        m.set_tag(ExifTag::Make(make.to_string()));
+        m.set_tag(ExifTag::Model(model.to_string()));
+    } else if !device.is_empty() {
+        m.set_tag(ExifTag::Model(device.to_string()));
+    }
+    if let Some(iso) = meta.iso {
+        m.set_tag(ExifTag::ISO(vec![iso as u16]));
+    }
+    if let Some(lens) = FilmMeta::field(&meta.lens) {
+        m.set_tag(ExifTag::LensModel(lens.to_string()));
+    }
+    if let Some(stock) = FilmMeta::field(&meta.film_stock) {
+        m.set_tag(ExifTag::ImageDescription(stock.to_string()));
+    }
+    m.encode().ok()
+}
+
+fn encode_jxl(
+    (w, h): (u32, u32),
+    data: &[u16],
+    gray: bool,
+    format: ScanFormat,
+    exif: Option<&[u8]>,
+) -> Result<Vec<u8>, String> {
+    use jxl_encoder::{ImageMetadata, LosslessConfig, LossyConfig, PixelLayout};
+    let layout = if gray { PixelLayout::Gray16 } else { PixelLayout::Rgb16 };
+    let pixels: &[u8] = bytemuck::cast_slice(data);
+    let mut md = ImageMetadata::new();
+    if let Some(e) = exif {
+        md = md.with_exif(e);
+    }
+    let out = match format {
+        ScanFormat::JxlLossy(distance) => {
+            LossyConfig::new(distance).encode_request(w, h, layout).with_metadata(&md).encode(pixels)
+        }
+        _ => {
+            // Stock e7 spends ~3 min per 18MP scan learning its MA tree from 65%
+            // of the pixels on one core. A 5% sample and 2 colour transforms
+            // (not 7) land within 1% of that size (39.9 vs 39.5 MB) in ~35s.
+            // ponytail: needs jxl-encoder's unstable `__expert` feature; a
+            // version bump that renames these fails the build, not silently.
+            let mut p = jxl_encoder::LosslessInternalParams::default();
+            p.nb_rcts_to_try = Some(2);
+            p.tree_sample_fraction = Some(0.05);
+            LosslessConfig::new()
+                .with_internal_params(p)
+                .encode_request(w, h, layout)
+                .with_metadata(&md)
+                .encode(pixels)
+        }
+    };
+    out.map_err(|e| format!("JPEG XL encode failed: {e}"))
+}
+
+fn compress_scan(
+    path: &Path,
+    keep_bits: u8,
+    format: ScanFormat,
+    date: &str,
+    scanner_model: &str,
+    meta: &FilmMeta,
+) -> Result<u64, String> {
     use tiff::encoder::{colortype::ColorType, compression::DeflateLevel, Compression, TiffEncoder};
     use tiff::tags::Tag;
 
     let img = open_image(path)?;
     let mask = !(((1u32 << (16 - keep_bits.clamp(10, 16) as u32)) - 1) as u16);
-    let date = chrono::Local::now().format("%Y:%m:%d %H:%M:%S").to_string();
 
     fn write<C: ColorType<Inner = u16>>(
         buf: &mut std::io::Cursor<Vec<u8>>,
         (w, h): (u32, u32),
         data: &[u16],
+        deflate: bool,
         date: &str,
         scanner_model: &str,
         meta: &FilmMeta,
     ) -> Result<(), String> {
-        let mut enc = TiffEncoder::new(buf)
-            .map_err(|e| e.to_string())?
-            .with_compression(Compression::Deflate(DeflateLevel::default()))
-            .with_predictor(tiff::tags::Predictor::Horizontal);
+        let enc = TiffEncoder::new(buf).map_err(|e| e.to_string())?;
+        let mut enc = if deflate {
+            enc.with_compression(Compression::Deflate(DeflateLevel::default()))
+                .with_predictor(tiff::tags::Predictor::Horizontal)
+        } else {
+            enc
+        };
         let mut image = enc.new_image::<C>(w, h).map_err(|e| e.to_string())?;
         let d = image.encoder();
         let _ = d.write_tag(Tag::DateTime, date);
@@ -749,27 +853,28 @@ fn compress_scan(path: &Path, keep_bits: u8, scanner_model: &str, meta: &FilmMet
         image.write_data(data).map_err(|e| e.to_string())
     }
 
-    let mut buf = std::io::Cursor::new(Vec::new());
-    match img {
-        image::DynamicImage::ImageLuma16(g) => {
-            let (w, h) = g.dimensions();
-            let mut data = g.into_raw();
-            for v in &mut data {
-                *v &= mask;
-            }
-            write::<tiff::encoder::colortype::Gray16>(&mut buf, (w, h), &data, &date, scanner_model, meta)?;
-        }
+    let (dims, mut data, gray) = match img {
+        image::DynamicImage::ImageLuma16(g) => (g.dimensions(), g.into_raw(), true),
         other => {
             let rgb = other.to_rgb16();
-            let (w, h) = rgb.dimensions();
-            let mut data = rgb.into_raw();
-            for v in &mut data {
-                *v &= mask;
-            }
-            write::<tiff::encoder::colortype::RGB16>(&mut buf, (w, h), &data, &date, scanner_model, meta)?;
+            (rgb.dimensions(), rgb.into_raw(), false)
         }
+    };
+    for v in &mut data {
+        *v &= mask;
     }
-    let bytes = buf.into_inner();
+    let bytes = match format {
+        ScanFormat::Tiff { deflate } => {
+            let mut buf = std::io::Cursor::new(Vec::new());
+            if gray {
+                write::<tiff::encoder::colortype::Gray16>(&mut buf, dims, &data, deflate, date, scanner_model, meta)?;
+            } else {
+                write::<tiff::encoder::colortype::RGB16>(&mut buf, dims, &data, deflate, date, scanner_model, meta)?;
+            }
+            buf.into_inner()
+        }
+        _ => encode_jxl(dims, &data, gray, format, scan_exif(date, scanner_model, meta).as_deref())?,
+    };
     let size = bytes.len() as u64;
     let tmp = path.with_file_name(".rapidraw-scan.compress");
     std::fs::write(&tmp, bytes).map_err(|e| e.to_string())?;
@@ -1460,6 +1565,8 @@ pub async fn scan_start(
     auto_crop: bool,
     crop_override: Option<(f32, f32, f32, f32)>,
     bit_depth: u32,
+    file_format: Option<String>,
+    compression: Option<String>,
     scan_depth: u32,
     source_visible: String,
     source_infrared: Option<String>,
@@ -1485,6 +1592,9 @@ pub async fn scan_start(
     let look = look.unwrap_or_default();
     let (flip_h, flip_v) = (flip_h.unwrap_or(false), flip_v.unwrap_or(false));
     log::info!("[scan] starting {file_name} @ {dpi}dpi into {dest_folder}");
+    let format = ScanFormat::parse(file_format.as_deref().unwrap_or("tiff"), compression.as_deref().unwrap_or(""));
+    // The scanner always hands over a TIFF; stays .tif unless re-encoding succeeds.
+    let mut saved_ext = "tif";
 
     std::thread::spawn(move || {
         // Unsupported extension keeps the partial file out of library listings;
@@ -1552,14 +1662,19 @@ pub async fn scan_start(
         }
         if scan_result.is_ok() && !cancelled.load(Ordering::SeqCst) {
             let keep_bits = if matches!(bit_depth, 10 | 12 | 16) { bit_depth as u8 } else { 12 };
-            match compress_scan(&tmp, keep_bits, &scanner_model, &film_meta) {
-                Ok(size) => log::info!("[scan] compressed to {} MB ({keep_bits}-bit)", size / 1_000_000),
+            let date = chrono::Local::now().format("%Y:%m:%d %H:%M:%S").to_string();
+            match compress_scan(&tmp, keep_bits, format, &date, &scanner_model, &film_meta) {
+                Ok(size) => {
+                    saved_ext = format.ext();
+                    log::info!("[scan] compressed to {} MB ({keep_bits}-bit {format:?})", size / 1_000_000)
+                }
                 Err(e) => log::warn!("[scan] compression skipped, keeping raw TIFF: {e}"),
             }
         }
         match scan_result {
             Ok(()) => {
-                let target = unique_path(&dest, &file_name);
+                let target =
+                    unique_path(&dest, &Path::new(&file_name).with_extension(saved_ext).to_string_lossy());
                 if let Err(e) = std::fs::rename(&tmp, &target) {
                     let _ = std::fs::remove_file(&tmp);
                     log::error!("[scan] rename to {} failed: {e}", target.display());
@@ -1737,7 +1852,7 @@ mod tests {
         let orig = img.clone();
         img.save_with_format(&p, image::ImageFormat::Tiff).unwrap();
         let raw_size = std::fs::metadata(&p).unwrap().len();
-        super::compress_scan(&p, 12, "PLUSTEK OpticFilm 7600i (v1)", &super::FilmMeta::default()).unwrap();
+        super::compress_scan(&p, 12, super::ScanFormat::Tiff { deflate: true }, DATE, "PLUSTEK OpticFilm 7600i (v1)", &super::FilmMeta::default()).unwrap();
         assert!(std::fs::metadata(&p).unwrap().len() < raw_size, "no size reduction");
         // Round-trip through the app's own decoder: proves deflate+predictor
         // 16-bit TIFFs stay readable, and only sub-noise bits changed.
@@ -1755,9 +1870,57 @@ mod tests {
 
         // 16-bit mode: bit-exact lossless.
         img.save_with_format(&p, image::ImageFormat::Tiff).unwrap();
-        super::compress_scan(&p, 16, "", &super::FilmMeta::default()).unwrap();
+        super::compress_scan(&p, 16, super::ScanFormat::Tiff { deflate: true }, DATE, "", &super::FilmMeta::default()).unwrap();
         let back = super::open_image(&p).unwrap().to_rgb16();
         assert_eq!(orig.as_raw(), back.as_raw(), "16-bit mode must be lossless");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    const DATE: &str = "2026:11:12 22:26:18";
+
+    #[test]
+    fn compress_scan_writes_jpeg_xl() {
+        use super::ScanFormat;
+        jxl_oxide::integration::register_image_decoding_hook(); // lib.rs does this at app startup
+        let dir = std::env::temp_dir().join(format!("rr-jxl-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join(".rapidraw-scan.partial");
+        let mut rng: u32 = 999;
+        let mut img = image::ImageBuffer::<image::Rgb<u16>, Vec<u16>>::new(96, 64);
+        for (x, y, px) in img.enumerate_pixels_mut() {
+            rng = rng.wrapping_mul(1664525).wrapping_add(1013904223);
+            let n = (rng >> 22) as u16;
+            *px = image::Rgb([(x * 600) as u16 + n, (y * 900) as u16 + n, 30000 + n]);
+        }
+        let meta = super::FilmMeta { camera: Some("Nikon FM2".into()), ..Default::default() };
+
+        // Lossless: bit-exact after the 12-bit quantization, through the app's decoder.
+        img.save_with_format(&p, image::ImageFormat::Tiff).unwrap();
+        super::compress_scan(&p, 12, ScanFormat::JxlLossless, DATE, "PLUSTEK OpticFilm 7600i (v1)", &meta).unwrap();
+        let bytes = std::fs::read(&p).unwrap();
+        let back = super::open_image(&p).unwrap();
+        assert!(matches!(back, image::DynamicImage::ImageRgb16(_)), "must decode at 16 bits");
+        for (a, b) in img.as_raw().iter().zip(back.to_rgb16().as_raw()) {
+            assert_eq!(a & 0xFFF0, *b, "JXL lossless mismatch");
+        }
+        // Exif box readable by a standard EXIF reader.
+        let at = bytes.windows(4).position(|w| w == b"Exif").expect("no Exif box");
+        let exif = exif::Reader::new().read_raw(bytes[at + 8..].to_vec()).expect("Exif box unreadable");
+        let get = |t| exif.get_field(t, exif::In::PRIMARY).map(|f| f.display_value().to_string());
+        assert!(get(exif::Tag::Model).unwrap().contains("FM2"));
+        assert!(get(exif::Tag::DateTimeOriginal).unwrap().contains("2026"));
+
+        // Lossy high: close, not exact.
+        img.save_with_format(&p, image::ImageFormat::Tiff).unwrap();
+        super::compress_scan(&p, 16, ScanFormat::JxlLossy(0.1), DATE, "", &meta).unwrap();
+        let back = super::open_image(&p).unwrap().to_rgb16();
+        let mean_err = img.as_raw().iter().zip(back.as_raw()).map(|(a, b)| a.abs_diff(*b) as f64).sum::<f64>()
+            / img.as_raw().len() as f64;
+        // Real scans measured ~120/65535 mean at this level.
+        assert!(mean_err < 400.0, "lossy error too large: {mean_err}");
+
+        assert_eq!(ScanFormat::parse("jxl", "lossless").ext(), "jxl");
+        assert_eq!(ScanFormat::parse("tiff", "none"), ScanFormat::Tiff { deflate: false });
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1776,7 +1939,7 @@ mod tests {
             lens: Some("50mm f/1.8".into()),
             notes: None,
         };
-        super::compress_scan(&p, 12, "PLUSTEK OpticFilm 7600i (v1)", &meta).unwrap();
+        super::compress_scan(&p, 12, super::ScanFormat::Tiff { deflate: true }, DATE, "PLUSTEK OpticFilm 7600i (v1)", &meta).unwrap();
         let file = std::fs::File::open(&p).unwrap();
         let exif = exif::Reader::new().read_from_container(&mut std::io::BufReader::new(file)).unwrap();
         let get = |t| exif.get_field(t, exif::In::PRIMARY).map(|f| f.display_value().to_string());

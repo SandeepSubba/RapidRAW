@@ -30,6 +30,9 @@ interface ScannerState {
   irSensitivity: number; // 0..100, 50 = default IR dust-removal aggressiveness
   showDefects: boolean; // B&W: highlight detected specks on the preview
   bitDepth: number;
+  fileFormat: 'tiff' | 'jxl';
+  // tiff: deflate | none · jxl: lossless | high | medium
+  compression: string;
   autoCrop: boolean;
   cropRect: [number, number, number, number] | null;
   cropManual: boolean; // true once the user drags an edge — stops re-renders re-detecting
@@ -82,6 +85,8 @@ export const useScannerStore = create<ScannerState>()(
       irSensitivity: 50,
       showDefects: false,
       bitDepth: 12,
+      fileFormat: 'tiff',
+      compression: 'deflate',
       autoCrop: false,
       cropRect: null,
       cropManual: false,
@@ -122,6 +127,8 @@ export const useScannerStore = create<ScannerState>()(
         irClean: state.irClean,
         irSensitivity: state.irSensitivity,
         bitDepth: state.bitDepth,
+        fileFormat: state.fileFormat,
+        compression: state.compression,
         autoCrop: state.autoCrop,
         exposureOffset: state.exposureOffset,
         contrast: state.contrast,

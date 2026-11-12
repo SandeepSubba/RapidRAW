@@ -69,6 +69,8 @@ and dated.
   and writes a non-destructive crop; the preview dims what will be trimmed.
 - **10 / 12 / 16-bit compressed TIFF** — deflate + predictor; 12-bit halves the
   file with no visible loss.
+- **TIFF or JPEG XL output** — JPEG XL lossless is ~25% smaller than TIFF and
+  bit-exact; high/medium lossy levels stay 16-bit for ~85–93% savings.
 - **Embedded metadata** — scan date and scanner make/model as TIFF/EXIF tags for
   cross-application date sorting.
 - **Background scanning** with an inactivity watchdog and graceful (SIGTERM)

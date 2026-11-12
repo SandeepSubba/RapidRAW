@@ -430,6 +430,8 @@ export default function ScannerPane() {
         autoCrop: s.autoCrop,
         cropOverride: s.autoCrop && s.cropRect ? s.cropRect : null,
         bitDepth: s.bitDepth,
+        fileFormat: s.fileFormat,
+        compression: s.compression,
         scanDepth,
         sourceVisible: s.caps?.sourceVisible ?? '',
         sourceInfrared: s.caps?.sourceInfrared ?? null,
@@ -699,6 +701,62 @@ export default function ScannerPane() {
             {[10, 12, 16].map((b) => (
               <option key={b} value={b}>
                 {b}-bit
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="flex items-center justify-between gap-3">
+          <span
+            className={rowLabel}
+            data-tooltip="TIFF opens everywhere · JPEG XL: same quality, smaller files; opens in RapidRAW, Lightroom, Photoshop and macOS"
+          >
+            File Format
+          </span>
+          <select
+            value={s.fileFormat}
+            disabled={busy}
+            onChange={(e) => {
+              const fileFormat = e.target.value as 'tiff' | 'jxl';
+              s.setScanner({ fileFormat, compression: fileFormat === 'jxl' ? 'lossless' : 'deflate' });
+            }}
+            className={selectCls}
+          >
+            <option value="tiff">TIFF</option>
+            <option value="jxl">JPEG XL</option>
+          </select>
+        </div>
+
+        <div className="flex items-center justify-between gap-3">
+          <span
+            className={rowLabel}
+            data-tooltip={
+              s.fileFormat === 'jxl'
+                ? 'Lossless: exact pixels, ~25% smaller than TIFF · High: ~85% smaller, grain very slightly softened · Medium: ~93% smaller'
+                : 'Deflate: lossless, about half size · None: largest, fastest to open in old software'
+            }
+          >
+            Compression
+          </span>
+          <select
+            value={s.compression}
+            disabled={busy}
+            onChange={(e) => s.setScanner({ compression: e.target.value })}
+            className={selectCls}
+          >
+            {(s.fileFormat === 'jxl'
+              ? [
+                  ['lossless', 'Lossless'],
+                  ['high', 'High quality'],
+                  ['medium', 'Medium quality'],
+                ]
+              : [
+                  ['deflate', 'Deflate (lossless)'],
+                  ['none', 'None'],
+                ]
+            ).map(([v, label]) => (
+              <option key={v} value={v}>
+                {label}
               </option>
             ))}
           </select>

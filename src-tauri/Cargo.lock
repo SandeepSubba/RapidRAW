@@ -3500,6 +3500,7 @@ dependencies = [
  "imgref",
  "jxl-encoder-simd",
  "once_cell",
+ "rayon",
  "rgb",
  "thiserror 2.0.20",
  "whereat",
