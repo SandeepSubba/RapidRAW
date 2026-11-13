@@ -429,6 +429,7 @@ export default function ScannerPane() {
         irSensitivity: s.irSensitivity,
         autoCrop: s.autoCrop,
         cropOverride: s.autoCrop && s.cropRect ? s.cropRect : null,
+        basePoint: s.basePoint,
         bitDepth: s.bitDepth,
         fileFormat: s.fileFormat,
         compression: s.compression,

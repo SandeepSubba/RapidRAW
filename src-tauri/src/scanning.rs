@@ -9,9 +9,7 @@ use tauri::{AppHandle, Emitter};
 
 use crate::tethering::unique_path;
 
-// Tone solve from the last preview: (bounds, exposure, gain). Scan frame reuses
-// it once so the saved render matches the tuned preview exactly instead of
-// re-solving on a fresh pass that can land slightly differently.
+// (bounds, base exposure, gain, post-conversion EV) — see solve_scan_tone.
 type ToneSolve = ([crate::negative_conversion::ChannelBounds; 3], f32, f32, f32);
 
 // Optional shooting metadata the user enters in the scan pane. scanimage TIFFs
@@ -42,7 +40,6 @@ impl FilmMeta {
 pub struct ScanState {
     child: Arc<Mutex<Option<Child>>>,
     cancelled: Arc<AtomicBool>,
-    preview_tone: Arc<Mutex<Option<ToneSolve>>>,
 }
 
 #[derive(Serialize, Clone)]
@@ -860,8 +857,11 @@ fn compress_scan(
             (rgb.dimensions(), rgb.into_raw(), false)
         }
     };
+    // Round to the nearest kept level; truncating biased every pixel denser,
+    // which the inversion turned into a lift (+2% blue at 10-bit on dense C-41).
+    let half = (!mask as u32 + 1) / 2;
     for v in &mut data {
-        *v &= mask;
+        *v = ((*v as u32 + half).min(0xFFFF) as u16) & mask;
     }
     let bytes = match format {
         ScanFormat::Tiff { deflate } => {
@@ -1304,6 +1304,58 @@ pub fn sample_base_density(img: &image::DynamicImage, nx: f32, ny: f32, rotation
 // same sidecar a real scan gets, then push it through the app's own thumbnail
 // engine (load → negative conversion → GPU pipeline). Preview == library by
 // construction — a hand-rolled lookalike renderer kept drifting from it.
+// Density bounds + auto tone for a negative, solved on the image itself. The
+// saved scan must re-solve on its own pixels rather than reuse the preview's:
+// genesys reads dense blue denser at 3600dpi than at the 1800dpi preview
+// (measured on a 7600i: blue max 2.20 vs 1.98), so preview bounds applied to
+// the full scan over-stretch blue into a cast. Green, which drives the tone
+// solve, matches across resolutions, so the result still matches the preview.
+fn solve_scan_tone(
+    img: &image::DynamicImage,
+    look: &ScanLook,
+    base_point: Option<(f32, f32)>,
+    rotation_steps: u32,
+    flip_h: bool,
+    flip_v: bool,
+    hue_safe: bool,
+) -> ToneSolve {
+    let crop = detect_frame_crop(img);
+    let pin_base = |bounds: &mut [crate::negative_conversion::ChannelBounds; 3]| {
+        if let Some((bx, by)) = base_point {
+            // Pin each channel's base (bounds min) to the sampled rebate; keep the
+            // auto white point but guard the divisor stays positive. The click is
+            // in displayed (post-flip) space; un-flip back to rotated space.
+            let bx = if flip_h { 1.0 - bx } else { bx };
+            let by = if flip_v { 1.0 - by } else { by };
+            let base = sample_base_density(img, bx, by, rotation_steps);
+            for c in 0..3 {
+                bounds[c].min = base[c];
+                if bounds[c].max <= bounds[c].min + 0.05 {
+                    bounds[c].max = bounds[c].min + 0.5;
+                }
+            }
+        }
+    };
+    let mut bounds = crate::negative_conversion::analyze_bounds_for_clipped(&crop, look.clip_black, look.clip_white);
+    pin_base(&mut bounds);
+    // Solve tone against DEFAULT-clip bounds: the solver anchors the frame's
+    // median, so solving on the user-clipped bounds would compensate the
+    // clip right back out and the sliders would appear dead. Solving on the
+    // default bounds and rendering with the user bounds keeps the clip
+    // visible as a black/white-point move.
+    let default_clips = (look.clip_black, look.clip_white)
+        == (crate::negative_conversion::DEFAULT_CLIP_BLACK, crate::negative_conversion::DEFAULT_CLIP_WHITE);
+    let tone_bounds = if default_clips {
+        bounds
+    } else {
+        let mut b = crate::negative_conversion::analyze_bounds_for(&crop);
+        pin_base(&mut b);
+        b
+    };
+    let (exposure, gain, ev) = auto_tone_for(&crop, tone_bounds, look.curve_contrast, hue_safe);
+    (bounds, exposure, gain, ev)
+}
+
 fn render_preview(
     tif: &Path,
     film_type: &str,
@@ -1318,7 +1370,6 @@ fn render_preview(
     base_point: Option<(f32, f32)>,
     show_defects: bool,
     app_handle: &AppHandle,
-    tone_slot: &Arc<Mutex<Option<ToneSolve>>>,
 ) -> Result<PreviewResult, String> {
     use base64::{engine::general_purpose::STANDARD, Engine};
     use tauri::Manager;
@@ -1329,50 +1380,14 @@ fn render_preview(
     // `raw` shows the un-inverted negative (gamma-lifted) so the eyedropper can
     // target the orange rebate; returned directly since it needs no conversion.
     if raw {
-        *tone_slot.lock().unwrap() = None;
         return Ok(PreviewResult { data: raw_preview_data(tif, rotation_steps, flip_h, flip_v)?, crop: None, histogram: None });
     }
     // Loaded for tone (converting negatives) and/or the auto-crop overlay rect.
     let convert = film_type != "e6";
     let src = if convert || auto_crop { Some(open_image(tif)?) } else { None };
     if convert {
-        let img = src.as_ref().unwrap();
-        let crop = detect_frame_crop(img);
-        let pin_base = |bounds: &mut [crate::negative_conversion::ChannelBounds; 3]| {
-            if let Some((bx, by)) = base_point {
-                // Pin each channel's base (bounds min) to the sampled rebate; keep the
-                // auto white point but guard the divisor stays positive. The click is
-                // in displayed (post-flip) space; un-flip back to rotated space.
-                let bx = if flip_h { 1.0 - bx } else { bx };
-                let by = if flip_v { 1.0 - by } else { by };
-                let base = sample_base_density(img, bx, by, rotation_steps);
-                for c in 0..3 {
-                    bounds[c].min = base[c];
-                    if bounds[c].max <= bounds[c].min + 0.05 {
-                        bounds[c].max = bounds[c].min + 0.5;
-                    }
-                }
-            }
-        };
-        let mut bounds =
-            crate::negative_conversion::analyze_bounds_for_clipped(&crop, look.clip_black, look.clip_white);
-        pin_base(&mut bounds);
-        // Solve tone against DEFAULT-clip bounds: the solver anchors the frame's
-        // median, so solving on the user-clipped bounds would compensate the
-        // clip right back out and the sliders would appear dead. Solving on the
-        // default bounds and rendering with the user bounds keeps the clip
-        // visible as a black/white-point move.
-        let default_clips = (look.clip_black, look.clip_white)
-            == (crate::negative_conversion::DEFAULT_CLIP_BLACK, crate::negative_conversion::DEFAULT_CLIP_WHITE);
-        let tone_bounds = if default_clips {
-            bounds
-        } else {
-            let mut b = crate::negative_conversion::analyze_bounds_for(&crop);
-            pin_base(&mut b);
-            b
-        };
-        let (base_exposure, auto_gain, auto_ev) = auto_tone_for(&crop, tone_bounds, look.curve_contrast, false);
-        *tone_slot.lock().unwrap() = Some((bounds, base_exposure, auto_gain, auto_ev));
+        let (bounds, base_exposure, auto_gain, auto_ev) =
+            solve_scan_tone(src.as_ref().unwrap(), look, base_point, rotation_steps, flip_h, flip_v, false);
         write_scan_sidecar(
             tif,
             Some((bounds, base_exposure, auto_gain)),
@@ -1387,7 +1402,6 @@ fn render_preview(
         )?;
     } else {
         // Slide (E-6) — positive film, no inversion.
-        *tone_slot.lock().unwrap() = None;
         write_scan_sidecar(tif, None, look, rotation_steps, flip_h, flip_v, exposure_offset, contrast, None, &FilmMeta::default())?;
     }
 
@@ -1500,7 +1514,6 @@ pub async fn scan_preview(
     let source = if source_visible.is_empty() { SRC_VISIBLE.to_string() } else { source_visible };
     let child_slot = state.child.clone();
     let cancelled = state.cancelled.clone();
-    let tone_slot = state.preview_tone.clone();
     tauri::async_runtime::spawn_blocking(move || {
         // Kept on disk so the exposure/contrast sliders can re-render without rescanning.
         let tmp = preview_tif_path();
@@ -1512,7 +1525,7 @@ pub async fn scan_preview(
                 ScanFail::Error(m) => m,
             },
         )?;
-        render_preview(&tmp, &film_type, exposure_offset, contrast, &look.unwrap_or_default(), rotation_steps, flip_h.unwrap_or(false), flip_v.unwrap_or(false), auto_crop, raw, base_point, show_defects.unwrap_or(false), &app_handle, &tone_slot)
+        render_preview(&tmp, &film_type, exposure_offset, contrast, &look.unwrap_or_default(), rotation_steps, flip_h.unwrap_or(false), flip_v.unwrap_or(false), auto_crop, raw, base_point, show_defects.unwrap_or(false), &app_handle)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1541,9 +1554,8 @@ pub async fn scan_rerender_preview(
     if !tif.exists() {
         return Err("No preview scanned yet".into());
     }
-    let tone_slot = state.preview_tone.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        render_preview(&tif, &film_type, exposure_offset, contrast, &look.unwrap_or_default(), rotation_steps, flip_h.unwrap_or(false), flip_v.unwrap_or(false), auto_crop, raw, base_point, show_defects.unwrap_or(false), &app_handle, &tone_slot)
+        render_preview(&tif, &film_type, exposure_offset, contrast, &look.unwrap_or_default(), rotation_steps, flip_h.unwrap_or(false), flip_v.unwrap_or(false), auto_crop, raw, base_point, show_defects.unwrap_or(false), &app_handle)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1564,6 +1576,7 @@ pub async fn scan_start(
     ir_sensitivity: f32,
     auto_crop: bool,
     crop_override: Option<(f32, f32, f32, f32)>,
+    base_point: Option<(f32, f32)>,
     bit_depth: u32,
     file_format: Option<String>,
     compression: Option<String>,
@@ -1586,9 +1599,6 @@ pub async fn scan_start(
     }
     let child_slot = state.child.clone();
     let cancelled = state.cancelled.clone();
-    // Consume-once: the very next Scan frame gets the previewed tone exactly;
-    // later frames (holder advanced, no fresh preview) re-solve on their own scan.
-    let preview_tone = state.preview_tone.lock().unwrap().take();
     let look = look.unwrap_or_default();
     let (flip_h, flip_v) = (flip_h.unwrap_or(false), flip_v.unwrap_or(false));
     log::info!("[scan] starting {file_name} @ {dpi}dpi into {dest_folder}");
@@ -1720,29 +1730,10 @@ pub async fn scan_start(
                 // Sidecar is written before scan-complete, so the library's first
                 // sight of the file (and its first thumbnail) is already converted.
                 let result = if film_type != "e6" {
-                    // The 1800dpi preview's cached solve can't represent the skewed
-                    // 7200 response — at 7200 always re-solve on the actual scan.
-                    let tone = match preview_tone {
-                        Some(t) if dpi != 7200 => Ok(t),
-                        _ => open_image(&target).map(|img| {
-                            let crop = detect_frame_crop(&img);
-                            let bounds = crate::negative_conversion::analyze_bounds_for_clipped(
-                                &crop, look.clip_black, look.clip_white,
-                            );
-                            // Solve on default-clip bounds; see render_preview.
-                            let tone_bounds = if (look.clip_black, look.clip_white)
-                                == (crate::negative_conversion::DEFAULT_CLIP_BLACK,
-                                    crate::negative_conversion::DEFAULT_CLIP_WHITE)
-                            {
-                                bounds
-                            } else {
-                                crate::negative_conversion::analyze_bounds_for(&crop)
-                            };
-                            let (exposure, gain, ev) =
-                                auto_tone_for(&crop, tone_bounds, look.curve_contrast, dpi == 7200);
-                            (bounds, exposure, gain, ev)
-                        }),
-                    };
+                    // At 7200 genesys skews per channel, so stay hue-neutral there.
+                    let tone = open_image(&target).map(|img| {
+                        solve_scan_tone(&img, &look, base_point, rotation_steps, flip_h, flip_v, dpi == 7200)
+                    });
                     tone.and_then(|(bounds, exposure, gain, ev)| {
                         write_scan_sidecar(
                             &target,
@@ -1858,8 +1849,9 @@ mod tests {
         // 16-bit TIFFs stay readable, and only sub-noise bits changed.
         let back = super::open_image(&p).unwrap().to_rgb16();
         assert_eq!(back.dimensions(), (128, 128));
+        let q = |a: u16| ((a as u32 + 8).min(0xFFFF) as u16) & 0xFFF0;
         for (a, b) in orig.as_raw().iter().zip(back.as_raw()) {
-            assert_eq!(a & 0xFFF0, *b, "quantized value mismatch");
+            assert_eq!(q(*a), *b, "quantized value mismatch");
         }
         // Embedded tags must be readable by a standard EXIF reader.
         let file = std::fs::File::open(&p).unwrap();
@@ -1901,7 +1893,7 @@ mod tests {
         let back = super::open_image(&p).unwrap();
         assert!(matches!(back, image::DynamicImage::ImageRgb16(_)), "must decode at 16 bits");
         for (a, b) in img.as_raw().iter().zip(back.to_rgb16().as_raw()) {
-            assert_eq!(a & 0xFFF0, *b, "JXL lossless mismatch");
+            assert_eq!(((*a as u32 + 8).min(0xFFFF) as u16) & 0xFFF0, *b, "JXL lossless mismatch");
         }
         // Exif box readable by a standard EXIF reader.
         let at = bytes.windows(4).position(|w| w == b"Exif").expect("no Exif box");

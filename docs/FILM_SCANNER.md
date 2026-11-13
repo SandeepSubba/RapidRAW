@@ -136,8 +136,15 @@ leave a residual cast. **Sample base** shows the raw orange negative and lets yo
 click the clear film edge (the rebate between frames) to pin the mask base point
 exactly, instead of the automatic percentile estimate. The conversion re-renders
 immediately; **✕** returns to automatic. The pinned base is per-roll — it carries
-to the next frames of the same strip (the rebate sits at the same spot), and it
-rides the previewed tone into the scan. Not shown for slide (E-6) film.
+to the next frames of the same strip (the rebate sits at the same spot), and the
+scan re-samples it from its own pixels. Not shown for slide (E-6) film.
+
+The saved scan always solves its conversion (density bounds and auto tone) on
+its own pixels, never reusing the preview's numbers: the 7600i reads dense blue
+noticeably denser at 3600 dpi than at the 1800 dpi preview (blue max density
+2.20 vs 1.98 on the same frame), so preview bounds applied to the full scan
+gave dense frames a blue cast. Green, which drives the tone solve, agrees
+across resolutions, so the saved frame still matches the preview.
 
 ### Exposure & Contrast
 These are convenience offsets on top of the automatic tone. They are written as
