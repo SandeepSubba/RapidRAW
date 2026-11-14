@@ -34,6 +34,7 @@ interface ScannerState {
   // tiff: deflate | none · jxl: lossless | high | medium
   compression: string;
   autoCrop: boolean;
+  fastPreview: boolean;
   cropRect: [number, number, number, number] | null;
   cropManual: boolean; // true once the user drags an edge — stops re-renders re-detecting
   // Film-base eyedropper: pinned rebate point (normalized, in the displayed
@@ -88,6 +89,7 @@ export const useScannerStore = create<ScannerState>()(
       fileFormat: 'tiff',
       compression: 'deflate',
       autoCrop: false,
+      fastPreview: false,
       cropRect: null,
       cropManual: false,
       basePoint: null,
@@ -130,6 +132,7 @@ export const useScannerStore = create<ScannerState>()(
         fileFormat: state.fileFormat,
         compression: state.compression,
         autoCrop: state.autoCrop,
+        fastPreview: state.fastPreview,
         exposureOffset: state.exposureOffset,
         contrast: state.contrast,
         scanAdvanced: state.scanAdvanced,

@@ -25,6 +25,12 @@ the scan controls on the right.
 2. **Preview** does a fast low-resolution pass so you can check framing and
    exposure. The Exposure / Contrast / Orientation / Auto-crop controls re-render
    the preview instantly **without rescanning**.
+   **Fast preview** drops the pass from 1800 to 900 dpi on a 7600i (~33s →
+   ~27s). That is the only lever: even a 2×2mm scan takes ~20s of fixed
+   scan-head travel (out to the frame, then parked home after every scan) and
+   driver start-up, independent of resolution, bit depth or `--preview`. At the
+   lowest resolution fine grain can show a faint periodic pattern in the
+   preview; the saved scan is unaffected.
 3. **Scan frame** does the full-resolution scan. The frame is inverted, tuned,
    optionally dust-cleaned and cropped, compressed, and saved to the library.
 4. Advance the holder to the next frame and scan again — the filename counter

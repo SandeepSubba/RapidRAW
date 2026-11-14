@@ -105,10 +105,15 @@ function resolveScanName(pattern: string, frameNo: number): string {
 
 // A low-but-not-lowest resolution for framing previews; the true minimum often
 // carries decimation noise the negative stretch amplifies.
-function previewDpi(caps: ScannerCaps | null): number {
+// Fast: the next resolution down (900 on a 7600i). Only ~6s of a ~33s preview is
+// reading film — the rest is fixed head travel and driver overhead — so this is
+// the only lever, at the cost of that decimation noise in the preview alone.
+function previewDpi(caps: ScannerCaps | null, fast = false): number {
   const r = caps?.resolutions ?? [];
-  if (!r.length) return 1800;
-  return r.find((x) => x >= 1500) ?? r[r.length - 1];
+  if (!r.length) return fast ? 900 : 1800;
+  const i = r.findIndex((x) => x >= 1500);
+  const normal = i < 0 ? r.length - 1 : i;
+  return r[fast ? Math.max(0, normal - 1) : normal];
 }
 
 export default function ScannerPane() {
@@ -256,7 +261,7 @@ export default function ScannerPane() {
         flipV: s.flipV,
         autoCrop: s.autoCrop,
         sourceVisible: s.caps?.sourceVisible ?? '',
-        previewDpi: previewDpi(s.caps),
+        previewDpi: previewDpi(s.caps, s.fastPreview),
         scanDepth,
         raw: false,
         basePoint: s.basePoint,
@@ -1044,6 +1049,14 @@ export default function ScannerPane() {
             ))}
           </div>
         </div>
+
+        <Switch
+          label="Fast preview"
+          checked={s.fastPreview}
+          disabled={busy}
+          onChange={(on) => s.setScanner({ fastPreview: on })}
+          tooltip="Preview at half resolution — about 6s quicker. Framing and colour stay accurate; fine grain may show a faint pattern in the preview only, never in the saved scan."
+        />
 
         <Switch
           label="Auto crop"
