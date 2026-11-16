@@ -376,6 +376,22 @@ fn develop_internal(
             .retain(|&step| step != ProcessingStep::CropDefault);
     }
 
+    // Full-quality 2x2 Bayer decodes use RCD instead of rawler's PPG (PPG puts
+    // false colour on fine woven textures). rawler then only rescales and hands
+    // back the raw mosaic; RCD fills the same active area PPG would have, so the
+    // white-balance branch below sees an identical layout.
+    let rcd_input = match (&raw_image.photometric, cfa_balance) {
+        (RawPhotometricInterpretation::Cfa(config), Some(wb))
+            if !fast_demosaic && config.cfa.width == 2 && config.cfa.height == 2 =>
+        {
+            developer
+                .steps
+                .retain(|&step| step != ProcessingStep::Demosaic);
+            Some((config.cfa.clone(), raw_image.active_area, wb))
+        }
+        _ => None,
+    };
+
     check_cancel()?;
     let mut developed_intermediate = developer.develop_intermediate(&raw_image)?;
 
@@ -392,6 +408,26 @@ fn develop_internal(
 
     let denominator = (original_white_level - original_black_level).max(1.0);
     let rescale_factor = (u32::MAX as f32 - original_black_level) / denominator;
+
+    if let (Some((cfa, active_area, wb)), Intermediate::Monochrome(mosaic)) =
+        (&rcd_input, &developed_intermediate)
+    {
+        check_cancel()?;
+        let roi = active_area.unwrap_or_else(|| mosaic.rect());
+        let start = std::time::Instant::now();
+        // RCD wants white-balanced samples near 0..1: rescale to the sensor's
+        // white and apply the as-shot multipliers; it divides them back out.
+        let scale = wb.map(|c| c * rescale_factor);
+        let rgb = crate::rcd_demosaic::demosaic(&mosaic.data, mosaic.width, cfa, roi, scale);
+        log::info!(
+            "RCD demosaic {}x{} took {:?}",
+            roi.width(),
+            roi.height(),
+            start.elapsed()
+        );
+        developed_intermediate =
+            Intermediate::ThreeColor(Color2D::new_with(rgb, roi.width(), roi.height()));
+    }
 
     let safe_highlight_compression = 1000.0;
 

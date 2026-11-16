@@ -69,6 +69,18 @@ and the `{token}` string to `FILENAME_VARIABLES`.
 See the `code-analysis-fixes` branch / the open PR to upstream. These are
 candidates to be merged upstream; if they are, drop them from the fork.
 
+### 4. RCD demosaic for Bayer RAWs  (`feat(raw):` commit)
+`src-tauri/src/rcd_demosaic.rs` replaces rawler's PPG for full-quality decodes
+of 2x2 Bayer RAWs (RCD v2.3, darktable/RawTherapee's default). `develop_internal`
+in raw_processing.rs drops rawler's `Demosaic` step and runs RCD on the rescaled
+mosaic over the active area, white-balanced by the as-shot multipliers (divided
+back out), so the existing `cfa_balance` branch sees the same layout PPG gave.
+Not used for: the fast/thumbnail decode (superpixel), X-Trans, 4-colour CFAs,
+linear DNGs, Apple RAW. Measured on a 5D III fabric shot: ~25% less colour
+speckle at 100% than PPG, same speed (~0.35 s / 22 MP). Unit tests compare it
+against PPG; `compare_on_real_raw` (ignored) writes PPG/RCD crops of a real file.
+If upstream's rawler gains RCD, switch to it and drop the module.
+
 ## Updating when upstream releases a new version
 
 The branch now carries hundreds of commits including merge commits, so upstream

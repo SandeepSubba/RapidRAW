@@ -75,6 +75,7 @@ mod panorama_utils;
 mod preset_converter;
 mod preview_jpeg;
 mod raw_processing;
+mod rcd_demosaic;
 mod relight;
 mod render_source;
 mod scanning;
