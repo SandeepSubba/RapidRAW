@@ -81,6 +81,17 @@ speckle at 100% than PPG, same speed (~0.35 s / 22 MP). Unit tests compare it
 against PPG; `compare_on_real_raw` (ignored) writes PPG/RCD crops of a real file.
 If upstream's rawler gains RCD, switch to it and drop the module.
 
+Fujifilm X-Trans (6x6 CFA) takes the same path with
+`src-tauri/src/xtrans_markesteijn.rs` (Markesteijn 1-pass, ported from dcraw's
+`xtrans_interpolate` as used by darktable/RawTherapee) instead of rawler's
+simple 4-pass X-Trans interpolation, which mottled grey cloth purple/green.
+Tiles mirror their border with a phase shift (X-Trans is not mirror-symmetric).
+One deliberate deviation from dcraw: in the "2x2 green block" step the two
+diagonal direction buffers are filled too (dcraw's 1-pass leaves them at 0 there).
+Rotated SuperCCD-style frames (`fuji_rotation_width`) keep rawler's path.
+Measured on an X-T5 jacket shot: colour blotching 4.93 -> 2.30 (Fuji's own JPEG
+2.37); ~19x less false colour than rawler's on an off-angle test texture.
+
 ## Updating when upstream releases a new version
 
 The branch now carries hundreds of commits including merge commits, so upstream

@@ -380,9 +380,16 @@ fn develop_internal(
     // false colour on fine woven textures). rawler then only rescales and hands
     // back the raw mosaic; RCD fills the same active area PPG would have, so the
     // white-balance branch below sees an identical layout.
+    // Fujifilm X-Trans (6x6) gets Markesteijn the same way, instead of rawler's
+    // simple X-Trans interpolation (purple/green mottling on cloth). Rotated
+    // SuperCCD-style frames keep rawler's path, which also un-rotates them.
     let rcd_input = match (&raw_image.photometric, cfa_balance) {
         (RawPhotometricInterpretation::Cfa(config), Some(wb))
-            if !fast_demosaic && config.cfa.width == 2 && config.cfa.height == 2 =>
+            if !fast_demosaic
+                && ((config.cfa.width == 2 && config.cfa.height == 2)
+                    || (config.cfa.width == 6
+                        && config.cfa.height == 6
+                        && raw_image.fuji_rotation_width.is_none())) =>
         {
             developer
                 .steps
@@ -418,9 +425,20 @@ fn develop_internal(
         // RCD wants white-balanced samples near 0..1: rescale to the sensor's
         // white and apply the as-shot multipliers; it divides them back out.
         let scale = wb.map(|c| c * rescale_factor);
-        let rgb = crate::rcd_demosaic::demosaic(&mosaic.data, mosaic.width, cfa, roi, scale);
+        let (rgb, name) = if cfa.width == 6 {
+            (
+                crate::xtrans_markesteijn::demosaic(&mosaic.data, mosaic.width, cfa, roi, scale),
+                "Markesteijn",
+            )
+        } else {
+            (
+                crate::rcd_demosaic::demosaic(&mosaic.data, mosaic.width, cfa, roi, scale),
+                "RCD",
+            )
+        };
         log::info!(
-            "RCD demosaic {}x{} took {:?}",
+            "{} demosaic {}x{} took {:?}",
+            name,
             roi.width(),
             roi.height(),
             start.elapsed()
@@ -684,3 +702,4 @@ pub fn get_fast_demosaic_scale_factor(
     }
     1.0
 }
+
