@@ -2199,8 +2199,12 @@ fn apply_auto_lens_correction(dest_path: &Path) {
     let sidecar_path = crate::exif_processing::get_primary_sidecar_path(dest_path);
     let result = crate::exif_processing::update_sidecar(&sidecar_path, dest_path, |metadata| {
         crate::exif_processing::fill_missing_exif(metadata, dest_path);
+        // Start from the defaults (they carry `baselineExposure: true`), not `{}`:
+        // a sidecar without that flag reads as an old edit, so the camera's own
+        // exposure compensation (Fuji RawExposureBias, DR modes, Canon HTP, ...)
+        // was silently skipped for every photo imported with lens correction.
         if metadata.adjustments.is_null() {
-            metadata.adjustments = serde_json::json!({});
+            metadata.adjustments = default_adjustments();
         }
         if let Some(map) = metadata.adjustments.as_object_mut() {
             map.insert("lensCorrectionMode".to_string(), serde_json::json!("auto"));

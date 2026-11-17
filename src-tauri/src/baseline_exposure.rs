@@ -99,10 +99,39 @@ fn highlight_preservation(format: FormatHint, file_bytes: &[u8]) -> f32 {
         }
         FormatHint::PEF => tiff_makernote(file_bytes).map(|makernote| pentax(&makernote)),
         FormatHint::ORF => olympus_camera_settings(file_bytes).map(|settings| olympus(&settings)),
-        FormatHint::RAF => fuji_makernote(file_bytes).map(|makernote| fuji(&makernote)),
+        FormatHint::RAF => Some(
+            fuji_makernote(file_bytes).map_or(0.0, |makernote| fuji(&makernote))
+                + fuji_raw_exposure_bias(file_bytes).map_or(0.0, |bias| -bias),
+        ),
         _ => None,
     }
     .unwrap_or(0.0)
+}
+
+const RAF_META_OFFSET_POSITION: usize = 92;
+const RAF_RAW_EXPOSURE_BIAS: u16 = 0x9650;
+
+/// Fuji's RawExposureBias (RAF metadata tag 0x9650): how much darker the camera
+/// recorded the RAW than its own JPEG rendering — e.g. -0.72 EV on an X-T5 at
+/// DR100. Adobe's Fuji profiles add it back as baseline exposure, so without it
+/// RAFs open that much darker than the camera JPEG (and Lightroom/Affinity).
+/// The RAF metadata block is big-endian: a record count, then tag/size/data.
+fn fuji_raw_exposure_bias(file_bytes: &[u8]) -> Option<f32> {
+    let be_u32 = |at: usize| Some(u32::from_be_bytes(file_bytes.get(at..at + 4)?.try_into().ok()?));
+    let be_u16 = |at: usize| Some(u16::from_be_bytes(file_bytes.get(at..at + 2)?.try_into().ok()?));
+    let meta = be_u32(RAF_META_OFFSET_POSITION)? as usize;
+    let count = be_u32(meta)?;
+    let mut at = meta + 4;
+    for _ in 0..count.min(256) {
+        let (tag, size) = (be_u16(at)?, be_u16(at + 2)? as usize);
+        if tag == RAF_RAW_EXPOSURE_BIAS && size >= 4 {
+            let numerator = be_u16(at + 4)? as i16 as f32;
+            let denominator = be_u16(at + 6)? as f32;
+            return (denominator > 0.0).then(|| numerator / denominator);
+        }
+        at += 4 + size;
+    }
+    None
 }
 
 fn exif_with_makernote(cursor: &mut Cursor<&[u8]>, tiff_offset: u32) -> Option<IFD> {
@@ -239,5 +268,48 @@ fn pentax(makernote: &IFD) -> f32 {
     {
         Some(Value::Undefined(data)) if data.first() == Some(&1) => 1.0,
         _ => 0.0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn raf_with_meta(records: &[(u16, Vec<u8>)]) -> Vec<u8> {
+        let mut bytes = vec![0u8; 100];
+        let meta = bytes.len() as u32;
+        bytes[RAF_META_OFFSET_POSITION..RAF_META_OFFSET_POSITION + 4].copy_from_slice(&meta.to_be_bytes());
+        bytes.extend((records.len() as u32).to_be_bytes());
+        for (tag, data) in records {
+            bytes.extend(tag.to_be_bytes());
+            bytes.extend((data.len() as u16).to_be_bytes());
+            bytes.extend(data);
+        }
+        bytes
+    }
+
+    #[test]
+    fn reads_fuji_raw_exposure_bias_after_other_records() {
+        let bias = [(-72i16).to_be_bytes(), 100u16.to_be_bytes()].concat();
+        let bytes = raf_with_meta(&[(0x0100, vec![0, 1, 2, 3, 4, 5]), (RAF_RAW_EXPOSURE_BIAS, bias)]);
+        assert!((fuji_raw_exposure_bias(&bytes).unwrap() + 0.72).abs() < 1e-6);
+    }
+
+    #[test]
+    fn missing_or_truncated_bias_is_none() {
+        assert_eq!(fuji_raw_exposure_bias(&raf_with_meta(&[(0x0100, vec![1, 2])])), None);
+        assert_eq!(fuji_raw_exposure_bias(&[0u8; 40]), None);
+        let mut cut = raf_with_meta(&[(RAF_RAW_EXPOSURE_BIAS, vec![0xff, 0xb8, 0, 100])]);
+        cut.truncate(cut.len() - 2);
+        assert_eq!(fuji_raw_exposure_bias(&cut), None);
+    }
+
+    /// `RAF_SAMPLE=<file.RAF> cargo test --lib baseline_exposure -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn real_raf() {
+        let bytes = std::fs::read(std::env::var("RAF_SAMPLE").unwrap()).unwrap();
+        println!("RawExposureBias {:?}", fuji_raw_exposure_bias(&bytes));
+        println!("highlight preservation {:+.2} EV", highlight_preservation(FormatHint::RAF, &bytes));
     }
 }
