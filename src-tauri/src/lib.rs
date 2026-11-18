@@ -1807,6 +1807,15 @@ fn saved_window_state_is_usable(state: &WindowState, monitors: &[MonitorBounds])
         return true;
     }
 
+    // A window larger than every monitor can't be right (and hides the UI
+    // off-screen); it's what the old Linux scaling bug saved.
+    let fits_a_monitor = monitors
+        .iter()
+        .any(|monitor| state.width <= monitor.width && state.height <= monitor.height);
+    if !fits_a_monitor {
+        return false;
+    }
+
     let window_left = state.x as i64;
     let window_top = state.y as i64;
     let window_right = window_left + state.width as i64;
@@ -1825,6 +1834,13 @@ fn saved_window_state_is_usable(state: &WindowState, monitors: &[MonitorBounds])
     })
 }
 
+/// Monitor bounds in the units the saved window state uses.
+///
+/// On Linux that's logical pixels. The size is restored before the window is
+/// mapped, while GTK still reports a scale factor of 1.0; with fractional
+/// scaling (e.g. 150%, which GTK rounds up to 2) a size saved in physical
+/// pixels came back twice as large on every launch (1280×720, 2560×1440,
+/// 5120×2880, …). Logical pixels don't depend on the scale factor.
 #[cfg(not(target_os = "android"))]
 fn available_monitor_bounds(window: &tauri::WebviewWindow) -> Vec<MonitorBounds> {
     window
@@ -1833,8 +1849,12 @@ fn available_monitor_bounds(window: &tauri::WebviewWindow) -> Vec<MonitorBounds>
             monitors
                 .into_iter()
                 .map(|monitor| {
-                    let position = monitor.position();
-                    let size = monitor.size();
+                    #[cfg(target_os = "linux")]
+                    let scale = monitor.scale_factor();
+                    #[cfg(not(target_os = "linux"))]
+                    let scale = 1.0;
+                    let position = monitor.position().to_logical::<i32>(scale);
+                    let size = monitor.size().to_logical::<u32>(scale);
                     MonitorBounds {
                         x: position.x,
                         y: position.y,
@@ -1945,58 +1965,7 @@ fn frontend_ready(
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
-/// Bundle identifier from tauri.conf.json; Tauri's app data dir on Linux is
-/// `$XDG_DATA_HOME/<identifier>` (default `~/.local/share/<identifier>`).
-#[cfg(target_os = "linux")]
-const APP_IDENTIFIER: &str = "io.github.CyberTimon.RapidRAW";
-
-/// Reads `linuxGpuOptimization` straight from settings.json, before Tauri (and
-/// its path resolver) exists. `None` if the file or key is missing or invalid.
-#[cfg(target_os = "linux")]
-fn read_linux_gpu_optimization_setting() -> Option<bool> {
-    let data_dir = std::env::var_os("XDG_DATA_HOME")
-        .filter(|dir| !dir.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| {
-            std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/share"))
-        })?;
-    let content =
-        std::fs::read_to_string(data_dir.join(APP_IDENTIFIER).join("settings.json")).ok()?;
-    let json: serde_json::Value = serde_json::from_str(&content).ok()?;
-    json.get("linuxGpuOptimization")?.as_bool()
-}
-
-/// These must be set before Tauri initializes GTK and WebKitGTK, which happens
-/// while the app is built, before the `setup` hook runs. Setting them in
-/// `setup` had no effect, even though the main window is created there: on
-/// NVIDIA + KDE Wayland the window rendered only a stray thumbnail instead of
-/// the UI. Setting them here, at the very start of `run()`, fixes it.
-///
-/// Variables the user already set are left alone, so they can still be
-/// overridden from the command line.
-#[cfg(target_os = "linux")]
-fn apply_linux_gpu_workarounds() {
-    if !read_linux_gpu_optimization_setting().unwrap_or(true) {
-        return;
-    }
-    for (key, value) in [
-        ("WEBKIT_DISABLE_DMABUF_RENDERER", "1"),
-        ("WEBKIT_DISABLE_COMPOSITING_MODE", "1"),
-        ("NODEVICE_SELECT", "1"),
-    ] {
-        if std::env::var_os(key).is_none() {
-            // SAFETY: called first thing in `run()`, before the rayon pool,
-            // Tauri or any other thread exists, so nothing reads the
-            // environment concurrently.
-            unsafe { std::env::set_var(key, value) };
-        }
-    }
-}
-
 pub fn run() {
-    #[cfg(target_os = "linux")]
-    apply_linux_gpu_workarounds();
-
     let _ = rayon::ThreadPoolBuilder::new()
         .stack_size(8 * 1024 * 1024)
         .build_global();
@@ -2094,8 +2063,14 @@ pub fn run() {
                         std::env::set_var("WGPU_BACKEND", backend);
                     }
 
-                // The Linux WebKit/GPU variables are set in `apply_linux_gpu_workarounds`
-                // at the start of `run()`: by now GTK/WebKitGTK is initialized, so it's too late.
+                if settings.linux_gpu_optimization.unwrap_or(true) {
+                    #[cfg(target_os = "linux")]
+                    {
+                        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+                        std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
+                        std::env::set_var("NODEVICE_SELECT", "1");
+                    }
+                }
 
                 #[cfg(not(target_os = "android"))]
                 {
@@ -2162,6 +2137,18 @@ pub fn run() {
                 window_builder = window_builder.decorations(decorations).visible(false);
             }
 
+            // The window is transparent so the WGPU renderer can draw beneath the
+            // webview, but that renderer is always off on Linux (see
+            // `use_wgpu_renderer`). On NVIDIA + KDE Plasma a transparent window
+            // only showed the regions WebKit had just repainted (a stray
+            // thumbnail, part of a panel) with the rest see-through, on Wayland
+            // and XWayland alike and with WebKit's CPU renderer too. An opaque
+            // window fixes it and costs nothing here.
+            #[cfg(target_os = "linux")]
+            {
+                window_builder = window_builder.transparent(false);
+            }
+
             let window = window_builder.build().expect("Failed to build window");
 
             #[cfg(target_os = "android")]
@@ -2183,12 +2170,29 @@ pub fn run() {
                         if let Ok(state) = serde_json::from_str::<WindowState>(&contents) {
                             let monitor_bounds = available_monitor_bounds(&window);
                             if saved_window_state_is_usable(&state, &monitor_bounds) {
-                                let _ = window.set_size(tauri::Size::Physical(
-                                    tauri::PhysicalSize::new(state.width, state.height),
-                                ));
-                                let _ = window.set_position(tauri::Position::Physical(
-                                    tauri::PhysicalPosition::new(state.x, state.y),
-                                ));
+                                // On Linux the state is saved in logical pixels; see
+                                // `available_monitor_bounds`.
+                                #[cfg(target_os = "linux")]
+                                {
+                                    let _ = window.set_size(tauri::Size::Logical(
+                                        tauri::LogicalSize::new(
+                                            state.width as f64,
+                                            state.height as f64,
+                                        ),
+                                    ));
+                                    let _ = window.set_position(tauri::Position::Logical(
+                                        tauri::LogicalPosition::new(state.x as f64, state.y as f64),
+                                    ));
+                                }
+                                #[cfg(not(target_os = "linux"))]
+                                {
+                                    let _ = window.set_size(tauri::Size::Physical(
+                                        tauri::PhysicalSize::new(state.width, state.height),
+                                    ));
+                                    let _ = window.set_position(tauri::Position::Physical(
+                                        tauri::PhysicalPosition::new(state.x, state.y),
+                                    ));
+                                }
                             } else {
                                 log::warn!(
                                     "Saved window state was unusable ({}x{} at {},{}), centering instead.",
@@ -2275,7 +2279,15 @@ pub fn run() {
                             fullscreen,
                         };
 
+                        // Linux saves logical pixels (see `available_monitor_bounds`);
+                        // other platforms keep physical pixels.
+                        #[cfg(target_os = "linux")]
+                        let scale = window_for_handler.scale_factor().unwrap_or(1.0);
+                        #[cfg(not(target_os = "linux"))]
+                        let scale = 1.0;
+
                         if let Ok(position) = window_for_handler.outer_position() {
+                            let position = position.to_logical::<i32>(scale);
                             state.x = position.x;
                             state.y = position.y;
                         }
@@ -2283,11 +2295,12 @@ pub fn run() {
                         if !maximized
                             && !fullscreen
                             && let Ok(size) = window_for_handler.outer_size()
-                            && size.width >= 800
-                            && size.height >= 600
                         {
-                            state.width = size.width;
-                            state.height = size.height;
+                            let size = size.to_logical::<u32>(scale);
+                            if size.width >= 800 && size.height >= 600 {
+                                state.width = size.width;
+                                state.height = size.height;
+                            }
                         }
 
                         *pending_state_for_handler.lock().unwrap() = Some(state);
