@@ -16,8 +16,11 @@
 use rawler::{CFA, imgop::Rect};
 use rayon::prelude::*;
 
-/// Output pixels per tile edge.
-const CORE: usize = 240;
+
+/// Output pixels per tile edge. Small tiles keep each tile's working set
+/// (~110 bytes/px) in cache: on a 40 MP X-T5 frame 96 px ran in ~1.2 s,
+/// 240 px in ~1.8 s and 480 px in ~2.6 s, despite the larger share of border.
+const CORE: usize = 96;
 /// Padding around each tile: the final step reads up to `TOP + 8` px in from the
 /// patch edge (and green interpolation up to 6 rows/cols from `TOP`).
 const BORDER: usize = 16;
@@ -64,22 +67,32 @@ pub fn demosaic(raw: &[f32], raw_width: usize, cfa: &CFA, roi: Rect, scale: [f32
         return out;
     }
 
+    // Bands of rows in parallel, and each band's tiles in parallel too: a
+    // 40 MP frame is only ~22 bands, which left cores idle at the end.
     out.par_chunks_mut(CORE * w).enumerate().for_each(|(band, rows)| {
         let y0 = band * CORE;
         let th = rows.len() / w;
-        let mut tile = Tile::default();
-        let mut x0 = 0;
-        while x0 < w {
-            let tw = CORE.min(w - x0);
-            tile.run(raw, raw_width, (rx, ry), (w, h), (x0, y0), (tw, th), &pattern, scale);
-            let pw = tw + 2 * BORDER;
-            for y in 0..th {
-                for x in 0..tw {
-                    let p = tile.result[(y + BORDER) * pw + x + BORDER];
-                    rows[y * w + x0 + x] = std::array::from_fn(|c| p[c].max(0.0) * inv_scale[c]);
+        let tiles: Vec<usize> = (0..w).step_by(CORE).collect();
+        let cores: Vec<(usize, usize, Vec<[f32; 3]>)> = tiles
+            .par_iter()
+            .map_init(Tile::default, |tile, &x0| {
+                let tw = CORE.min(w - x0);
+                tile.run(raw, raw_width, (rx, ry), (w, h), (x0, y0), (tw, th), &pattern, scale);
+                let pw = tw + 2 * BORDER;
+                let mut core = Vec::with_capacity(tw * th);
+                for y in 0..th {
+                    for x in 0..tw {
+                        let p = tile.result[(y + BORDER) * pw + x + BORDER];
+                        core.push(std::array::from_fn(|c| p[c].max(0.0) * inv_scale[c]));
+                    }
                 }
+                (x0, tw, core)
+            })
+            .collect();
+        for (x0, tw, core) in cores {
+            for y in 0..th {
+                rows[y * w + x0..y * w + x0 + tw].copy_from_slice(&core[y * tw..(y + 1) * tw]);
             }
-            x0 += tw;
         }
     });
     out
@@ -101,10 +114,19 @@ const XYZ_RGB: [[f32; 3]; 3] = {
     ]
 };
 
+fn lab_f_exact(t: f32) -> f32 {
+    if t > 0.008856 { t.cbrt() } else { 7.787 * t + 16.0 / 116.0 }
+}
+
+/// CIELab's f(t) from a 65536-entry table over 0..1, as dcraw does — the cube
+/// roots (12 per pixel) were most of the demosaic time. Brighter values (rare,
+/// highlights past white) fall back to the exact function.
 #[inline]
 fn lab_f(t: f32) -> f32 {
+    static TABLE: std::sync::OnceLock<Box<[f32]>> = std::sync::OnceLock::new();
+    let table = TABLE.get_or_init(|| (0..=0xFFFF).map(|i| lab_f_exact(i as f32 / 65535.0)).collect());
     let t = t.max(0.0);
-    if t > 0.008856 { t.cbrt() } else { 7.787 * t + 16.0 / 116.0 }
+    if t <= 1.0 { table[(t * 65535.0 + 0.5) as usize] } else { lab_f_exact(t) }
 }
 
 /// dcraw's CIELab scaling (x64), so its derivative weights apply unchanged.
@@ -133,7 +155,19 @@ struct Tile {
     lab: Vec<[f32; 3]>,
     drv: [Vec<f32>; NDIR],
     homo: [Vec<u8>; NDIR],
+    /// 5-wide horizontal sums of `homo`, for the separable 5x5 window.
+    homo_row: [Vec<u16>; NDIR],
     result: Vec<[f32; 3]>,
+}
+
+/// Size a scratch buffer without clearing it: every element a stage reads is
+/// written by an earlier stage of the same tile, so zero-filling 8 MB per tile
+/// (most of the "copy" time) is unnecessary.
+fn ensure_len<T: Clone + Default>(buf: &mut Vec<T>, n: usize) {
+    if buf.len() != n {
+        buf.clear();
+        buf.resize(n, T::default());
+    }
 }
 
 impl Tile {
@@ -155,10 +189,8 @@ impl Tile {
         let (oy, ox) = (y0 as isize - BORDER as isize, x0 as isize - BORDER as isize);
         let fcol = |r: isize, c: isize| pattern[(oy + r).rem_euclid(6) as usize][(ox + c).rem_euclid(6) as usize] as usize;
         let spw = pw as isize;
-
         // Load the padded tile, white balanced.
-        self.img.clear();
-        self.img.resize(n, [0.0; 4]);
+        ensure_len(&mut self.img, n);
         for py in 0..ph {
             let sy = reflect6(oy + py as isize, h);
             let row = &raw[(ry + sy) * raw_width + rx..];
@@ -166,10 +198,11 @@ impl Tile {
                 let sx = reflect6(ox + px as isize, w);
                 let c = fcol(py as isize, px as isize);
                 debug_assert_eq!(c, pattern[sy % 6][sx % 6] as usize);
-                self.img[py * pw + px][c] = (row[sx] * scale[c]).max(0.0);
+                let mut px4 = [0.0f32; 4];
+                px4[c] = (row[sx] * scale[c]).max(0.0);
+                self.img[py * pw + px] = px4;
             }
         }
-
         // Map a green hexagon around each non-green pixel and vice versa.
         const ORTH: [isize; 12] = [1, 0, 0, 1, -1, 0, 0, -1, 1, 0, 0, 1];
         const PATT: [[isize; 16]; 2] = [
@@ -203,7 +236,6 @@ impl Tile {
             }
         }
         let hex_at = |row: isize, col: isize| &allhex[row.rem_euclid(3) as usize][col.rem_euclid(3) as usize];
-
         // Green minimum / maximum of each red/blue site's hexagon.
         for row in 2..ph as isize - 2 {
             for col in 2..pw as isize - 2 {
@@ -222,12 +254,10 @@ impl Tile {
                 self.img[p as usize][3] = hi;
             }
         }
-
         let top = TOP as isize;
         let (mrow, mcol) = (ph as isize - top, pw as isize - top);
         for buf in &mut self.rgb {
-            buf.clear();
-            buf.resize(n, [0.0; 3]);
+            ensure_len(buf, n);
         }
         for row in top..mrow {
             for col in top..mcol {
@@ -236,11 +266,15 @@ impl Tile {
                 self.rgb[0][p] = [s[0], s[1], s[2]];
             }
         }
-        let first = self.rgb[0].clone();
-        for buf in &mut self.rgb[1..] {
-            buf.copy_from_slice(&first);
+        {
+            let (first, rest) = self.rgb.split_at_mut(1);
+            for row in top..mrow {
+                let range = (row * spw + top) as usize..(row * spw + mcol) as usize;
+                for buf in rest.iter_mut() {
+                    buf[range.clone()].copy_from_slice(&first[0][range.clone()]);
+                }
+            }
         }
-
         // Interpolate green horizontally, vertically and along both diagonals.
         for row in top..mrow {
             let flip = ((row - sgrow).rem_euclid(3) == 0) as usize;
@@ -266,7 +300,6 @@ impl Tile {
                 }
             }
         }
-
         // Red and blue for solitary green pixels.
         let mut row = (top - sgrow + 4) / 3 * 3 + sgrow;
         while row < mrow - 2 {
@@ -308,7 +341,6 @@ impl Tile {
             }
             row += 3;
         }
-
         // Red at blue sites and blue at red sites.
         for row in top + 3..mrow - 3 {
             let vertical = (row - sgrow).rem_euclid(3) != 0;
@@ -339,7 +371,6 @@ impl Tile {
                 }
             }
         }
-
         // Red and blue for 2x2 blocks of green. dcraw's 1-pass fills only the
         // first two buffers here; the diagonal buffers reuse the same neighbour
         // pairs (with their own greens) so every direction stays a valid
@@ -376,11 +407,9 @@ impl Tile {
                 }
             }
         }
-
         // Convert to CIELab and differentiate in each direction.
         let dirs = [1isize, spw, spw + 1, spw - 1];
-        self.lab.clear();
-        self.lab.resize(n, [0.0; 3]);
+        ensure_len(&mut self.lab, n);
         for d in 0..NDIR {
             for row in top + 2..mrow - 2 {
                 for col in top + 2..mcol - 2 {
@@ -389,8 +418,7 @@ impl Tile {
                 }
             }
             let drv = &mut self.drv[d];
-            drv.clear();
-            drv.resize(n, 0.0);
+            ensure_len(drv, n);
             let f = dirs[d];
             for row in top + 3..mrow - 3 {
                 for col in top + 3..mcol - 3 {
@@ -403,11 +431,9 @@ impl Tile {
                 }
             }
         }
-
         // Homogeneity maps from the derivatives.
         for homo in &mut self.homo {
-            homo.clear();
-            homo.resize(n, 0);
+            ensure_len(homo, n);
         }
         for row in top + 4..mrow - 4 {
             for col in top + 4..mcol - 4 {
@@ -426,19 +452,28 @@ impl Tile {
                 }
             }
         }
-
         // Average the most homogeneous directions (only the core is kept).
-        self.result.clear();
-        self.result.resize(n, [0.0; 3]);
+        ensure_len(&mut self.result, n);
+        // Separable 5x5 window: horizontal 5-sums first, then 5 of those vertically.
+        let (b0, b1) = (BORDER as isize, (BORDER + th) as isize);
+        let (c0, c1) = (BORDER as isize, (BORDER + tw) as isize);
+        for d in 0..NDIR {
+            ensure_len(&mut self.homo_row[d], n);
+            let (homo, rows) = (&self.homo[d], &mut self.homo_row[d]);
+            for row in b0 - 2..b1 + 2 {
+                for col in c0..c1 {
+                    let p = (row * spw + col) as usize;
+                    rows[p] = homo[p - 2..=p + 2].iter().map(|&v| v as u16).sum();
+                }
+            }
+        }
         for row in BORDER as isize..(BORDER + th) as isize {
             for col in BORDER as isize..(BORDER + tw) as isize {
                 let p = row * spw + col;
                 let mut hm = [0u32; NDIR];
                 for (d, sum) in hm.iter_mut().enumerate() {
                     for v in -2..=2 {
-                        for hz in -2..=2 {
-                            *sum += self.homo[d][(p + v * spw + hz) as usize] as u32;
-                        }
+                        *sum += self.homo_row[d][(p + v * spw) as usize] as u32;
                     }
                 }
                 let mut best = *hm.iter().max().unwrap();
