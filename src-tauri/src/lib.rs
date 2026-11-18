@@ -1945,7 +1945,58 @@ fn frontend_ready(
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// Bundle identifier from tauri.conf.json; Tauri's app data dir on Linux is
+/// `$XDG_DATA_HOME/<identifier>` (default `~/.local/share/<identifier>`).
+#[cfg(target_os = "linux")]
+const APP_IDENTIFIER: &str = "io.github.CyberTimon.RapidRAW";
+
+/// Reads `linuxGpuOptimization` straight from settings.json, before Tauri (and
+/// its path resolver) exists. `None` if the file or key is missing or invalid.
+#[cfg(target_os = "linux")]
+fn read_linux_gpu_optimization_setting() -> Option<bool> {
+    let data_dir = std::env::var_os("XDG_DATA_HOME")
+        .filter(|dir| !dir.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/share"))
+        })?;
+    let content =
+        std::fs::read_to_string(data_dir.join(APP_IDENTIFIER).join("settings.json")).ok()?;
+    let json: serde_json::Value = serde_json::from_str(&content).ok()?;
+    json.get("linuxGpuOptimization")?.as_bool()
+}
+
+/// These must be set before Tauri initializes GTK and WebKitGTK, which happens
+/// while the app is built, before the `setup` hook runs. Setting them in
+/// `setup` had no effect, even though the main window is created there: on
+/// NVIDIA + KDE Wayland the window rendered only a stray thumbnail instead of
+/// the UI. Setting them here, at the very start of `run()`, fixes it.
+///
+/// Variables the user already set are left alone, so they can still be
+/// overridden from the command line.
+#[cfg(target_os = "linux")]
+fn apply_linux_gpu_workarounds() {
+    if !read_linux_gpu_optimization_setting().unwrap_or(true) {
+        return;
+    }
+    for (key, value) in [
+        ("WEBKIT_DISABLE_DMABUF_RENDERER", "1"),
+        ("WEBKIT_DISABLE_COMPOSITING_MODE", "1"),
+        ("NODEVICE_SELECT", "1"),
+    ] {
+        if std::env::var_os(key).is_none() {
+            // SAFETY: called first thing in `run()`, before the rayon pool,
+            // Tauri or any other thread exists, so nothing reads the
+            // environment concurrently.
+            unsafe { std::env::set_var(key, value) };
+        }
+    }
+}
+
 pub fn run() {
+    #[cfg(target_os = "linux")]
+    apply_linux_gpu_workarounds();
+
     let _ = rayon::ThreadPoolBuilder::new()
         .stack_size(8 * 1024 * 1024)
         .build_global();
@@ -2043,14 +2094,8 @@ pub fn run() {
                         std::env::set_var("WGPU_BACKEND", backend);
                     }
 
-                if settings.linux_gpu_optimization.unwrap_or(true) {
-                    #[cfg(target_os = "linux")]
-                    {
-                        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
-                        std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
-                        std::env::set_var("NODEVICE_SELECT", "1");
-                    }
-                }
+                // The Linux WebKit/GPU variables are set in `apply_linux_gpu_workarounds`
+                // at the start of `run()`: by now GTK/WebKitGTK is initialized, so it's too late.
 
                 #[cfg(not(target_os = "android"))]
                 {
