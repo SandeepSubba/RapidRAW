@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { useUIStore } from '../store/useUIStore';
+import { closePanoramaModal, useUIStore } from '../store/useUIStore';
 import { useSettingsStore } from '../store/useSettingsStore';
 
 export function useAndroidBackHandler() {
@@ -47,16 +47,7 @@ export function useAndroidBackHandler() {
         return;
       }
       if (ui.panoramaModalState.isOpen) {
-        ui.setUI({
-          panoramaModalState: {
-            isOpen: false,
-            isProcessing: false,
-            progressMessage: '',
-            finalImageBase64: null,
-            error: null,
-            stitchingSourcePaths: [],
-          },
-        });
+        closePanoramaModal();
         return;
       }
       if (ui.hdrModalState.isOpen) {
@@ -83,7 +74,9 @@ export function useAndroidBackHandler() {
         return;
       }
 
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true }));
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true }),
+      );
     };
 
     return () => {

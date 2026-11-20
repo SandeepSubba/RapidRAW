@@ -4,7 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { Pipette, Plus, RotateCcw, Trash2, X } from 'lucide-react';
 import Slider from '../ui/Slider';
 import Switch from '../ui/Switch';
-import { Invokes } from '../ui/AppProperties';
+import { Invokes } from '../../types/invokes';
 import Dropdown from '../ui/Dropdown';
 import { useEditorStore } from '../../store/useEditorStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
@@ -74,6 +74,11 @@ export default function FilmPanel({ adjustments }: any) {
     setEditor({ wgpuPhase: 'hidden' });
     // Re-decode only — history untouched, unlike the enable/disable toggle.
     await invoke(Invokes.LoadImage, { path: img.path });
+    // Adjustments are unchanged, so nothing else asks for a new frame: bump the
+    // render revision so the editor re-renders the re-decoded image (and the
+    // wgpu view re-arms from 'hidden' on that frame).
+    const { displayRevision } = useEditorStore.getState();
+    setEditor({ displayRevision: displayRevision + 1 });
   }, []);
 
   const commit = useCallback(

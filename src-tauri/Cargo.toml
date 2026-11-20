@@ -83,6 +83,7 @@ jpeg-encoder = { version = "0.7.1", features = ["simd"] }
 jpeg-decoder = "0.3"
 tauri-plugin-http = "2.8.0"
 tauri-plugin-store = "2.5.0"
+zstd = "0.13"
 
 [features]
 # Direct USB tethering needs libgphoto2 on the build machine
@@ -110,7 +111,15 @@ tauri-plugin-clerk = "0.1.1"
 reqwest = { version = "0.13", default-features = false, features = ["json", "multipart", "native-tls"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-windows = { version = "0.62", features = ["Win32_Graphics_Dxgi", "Win32_System_Threading"] }
+windows = { version = "0.62", features = [
+    "Win32_Devices_Display",
+    "Win32_Foundation",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Graphics_Gdi",
+    "Win32_System_Threading",
+    "Win32_UI_ColorSystem",
+] }
 windows-native-keyring-store = "1"
 
 # Upstream's git gphoto2 (for its camera_tethering.rs) is not used: the fork's
@@ -130,6 +139,12 @@ objc2-foundation = { version = "0.3.2", features = [
 ] }
 objc2-core-foundation = { version = "0.3.2", features = ["CFCGTypes"] }
 objc2-core-graphics = { version = "0.3.2", features = ["CGColorSpace"] }
+objc2-quartz-core = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "CALayer",
+    "CAMetalLayer",
+    "objc2-core-graphics",
+] }
 objc2-core-image = { version = "0.3.2", features = [
     "CIContext",
     "CIFilter",
@@ -156,6 +171,7 @@ reqwest = { version = "0.13", default-features = false, features = ["json", "mul
 wayland-client = "0.31"
 wayland-backend = { version = "0.3", features = ["client_system"] }
 wayland-protocols = { version = "0.32", features = ["client"] }
+zbus = { version = "5", default-features = false, features = ["blocking-api", "tokio"] }
 
 [build-dependencies]
 tauri-build = { version = "2.6", features = [] }

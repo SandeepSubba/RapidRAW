@@ -3,7 +3,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { ArrowDownUp, Check, ChevronDown, ChevronUp, Filter, Star, X } from 'lucide-react';
 import { useImportStore, ImportSortKey } from '../../../store/useImportStore';
 import { useSdImportActions } from '../../../hooks/useSdImportActions';
-import { SortDirection } from '../../../components/ui/AppProperties';
+import { SortDirection } from '../../../types/library';
 import { FILE_TYPE_OPTIONS, LABEL_COLORS, COLOR_HEX, FileTypeFilter } from './importFilters';
 
 const SORT_OPTIONS: { key: ImportSortKey; label: string; needsScores?: boolean }[] = [

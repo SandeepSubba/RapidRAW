@@ -5,7 +5,8 @@ import { Check, FileEdit, History, Plus, RefreshCw, Trash2 } from 'lucide-react'
 import { useEditorStore } from '../../../store/useEditorStore';
 import { useEditorActions } from '../../../hooks/useEditorActions';
 import { useContextMenu } from '../../../context/ContextMenuContext';
-import { OPTION_SEPARATOR, Preset } from '../../ui/AppProperties';
+import { OPTION_SEPARATOR } from '../../../types/ui';
+import { Preset } from '../../../types/editor';
 import { Adjustments, AdjustmentSnapshot, INITIAL_ADJUSTMENTS } from '../../../utils/adjustments';
 import PresetItemDisplay from './PresetItemDisplay';
 import Text from '../../ui/Text';
@@ -16,7 +17,7 @@ export const snapshotPreviewId = (s: AdjustmentSnapshot) => `snapshot-${s.id}-${
 
 interface SnapshotsSectionProps {
   previews: Record<string, string | null>;
-  isGeneratingPreviews: boolean;
+  isGeneratingPreviews?: boolean;
 }
 
 export default function SnapshotsSection({ previews, isGeneratingPreviews }: SnapshotsSectionProps) {

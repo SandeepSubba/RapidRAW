@@ -11,6 +11,7 @@ import {
   useSensors,
 } from '@dnd-kit/core';
 import { useTranslation } from 'react-i18next';
+import { toast } from 'react-toastify';
 import { PresetImportFailure, PresetListType, usePresets, UserPreset } from '../../../hooks/usePresets';
 import { useContextMenu } from '../../../context/ContextMenuContext';
 import {
@@ -28,6 +29,8 @@ import {
   Users,
   Save,
   Settings2,
+  Star,
+  Camera as CameraIcon,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import ConfigurePresetModal from '../../modals/ConfigurePresetModal';
@@ -45,8 +48,13 @@ import {
   ADJUSTMENT_GROUPS,
   MaskContainer,
 } from '../../../utils/adjustments';
+import { cameraDisplayName, getDefaultAdjustments, isSameCamera } from '../../../utils/developDefaults';
+import { useSettingsStore } from '../../../store/useSettingsStore';
+import type { CameraDefaults, DevelopDefaultsSettings } from '../../../types/settings';
 import { hasAiSubMasks, mergeAiMaskResults, stripAiMaskResults } from '../../../utils/maskUtils';
-import { Invokes, OPTION_SEPARATOR, Panel, Preset, SelectedImage } from '../../ui/AppProperties';
+import { Invokes } from '../../../types/invokes';
+import { OPTION_SEPARATOR, type Option } from '../../../types/ui';
+import { Preset } from '../../../types/editor';
 import { useEditorStore } from '../../../store/useEditorStore';
 import { useLibraryStore } from '../../../store/useLibraryStore';
 import { globalImageCache } from '../../../utils/ImageLRUCache';
@@ -62,7 +70,6 @@ interface DroppableFolderItemProps {
 }
 
 interface DraggablePresetItemProps {
-  isGeneratingPreviews: boolean;
   onApply(preset: any): void;
   onContextMenu(event: any, preset: any): void;
   preset: any;
@@ -275,7 +282,6 @@ function DraggablePresetItem({
   onApply,
   onContextMenu,
   previewUrl,
-  isGeneratingPreviews,
   isActive,
   intensity,
   onIntensityChange,
@@ -329,7 +335,6 @@ function DraggablePresetItem({
         <PresetItemDisplay
           preset={preset}
           previewUrl={previewUrl}
-          isGeneratingPreviews={isGeneratingPreviews}
           isActive={isActive}
           intensity={intensity}
           onIntensityChange={onIntensityChange}
@@ -469,7 +474,6 @@ export default function PresetsPanel({ onNavigateToCommunity }: PresetsPanelProp
   } = usePresets(adjustments);
   const { showContextMenu } = useContextMenu();
   const [previews, setPreviews] = useState<Record<string, string | null>>({});
-  const [isGeneratingPreviews, setIsGeneratingPreviews] = useState(false);
   const [configureModalState, setConfigureModalState] = useState<ModalState>({ isOpen: false, preset: null });
   const [isAddFolderModalOpen, setIsAddFolderModalOpen] = useState(false);
   const [renameFolderState, setRenameFolderState] = useState<FolderState>({ isOpen: false, folder: null });
@@ -585,7 +589,6 @@ export default function PresetsPanel({ onNavigateToCommunity }: PresetsPanelProp
     }
 
     isProcessingQueue.current = true;
-    setIsGeneratingPreviews(true);
 
     while (previewQueue.current.length > 0) {
       const itemPath = currentImagePathRef.current;
@@ -639,7 +642,6 @@ export default function PresetsPanel({ onNavigateToCommunity }: PresetsPanelProp
     }
 
     isProcessingQueue.current = false;
-    setIsGeneratingPreviews(false);
   }, []);
 
   const enqueuePreviews = useCallback(
@@ -676,7 +678,6 @@ export default function PresetsPanel({ onNavigateToCommunity }: PresetsPanelProp
         return;
       }
 
-      setIsGeneratingPreviews(true);
       const pathAtStart = currentImagePathRef.current;
 
       try {
@@ -704,10 +705,6 @@ export default function PresetsPanel({ onNavigateToCommunity }: PresetsPanelProp
           if (pathAtStart === currentImagePathRef.current) {
             setPreviews((prev: Record<string, string | null>) => ({ ...prev, [preset.id]: null }));
           }
-        }
-      } finally {
-        if (pathAtStart === currentImagePathRef.current) {
-          setIsGeneratingPreviews(false);
         }
       }
     },
@@ -877,7 +874,7 @@ export default function PresetsPanel({ onNavigateToCommunity }: PresetsPanelProp
     (preset: Preset, intensity: number) => {
       setPresetIntensity(intensity);
       const { masks: presetMasks, ...presetAdjustments } = preset.adjustments;
-      const mixed = mixAdjustments(presetAdjustments, intensity);
+      const mixed = mixAdjustments(presetAdjustments, intensity, getDefaultAdjustments());
 
       if (presetMasks !== undefined) {
         const currentMasks = useEditorStore.getState().adjustments.masks;
@@ -1020,12 +1017,15 @@ export default function PresetsPanel({ onNavigateToCommunity }: PresetsPanelProp
 
   const handleImportPresets = async () => {
     try {
+      const isAndroid = useSettingsStore.getState().osPlatform === 'android';
       const selectedPaths = await openDialog({
-        filters: [
-          { name: t('editor.presets.dialog.allPresetFiles'), extensions: ['rrpreset', 'xmp', 'lrtemplate'] },
-          { name: t('editor.presets.dialog.rapidRawPreset'), extensions: ['rrpreset'] },
-          { name: t('editor.presets.dialog.legacyPreset'), extensions: ['xmp', 'lrtemplate'] },
-        ],
+        filters: isAndroid
+          ? []
+          : [
+              { name: t('editor.presets.dialog.allPresetFiles'), extensions: ['rrpreset', 'xmp', 'lrtemplate'] },
+              { name: t('editor.presets.dialog.rapidRawPreset'), extensions: ['rrpreset'] },
+              { name: t('editor.presets.dialog.legacyPreset'), extensions: ['xmp', 'lrtemplate'] },
+            ],
         multiple: true,
         title: t('editor.presets.dialog.importPresetsTitle'),
       });
@@ -1044,9 +1044,10 @@ export default function PresetsPanel({ onNavigateToCommunity }: PresetsPanelProp
       setFolderPreviewsGenerated(new Set<string>());
       setPreviews({});
 
-      failures.forEach((failure: PresetImportFailure) =>
-        console.error(`Failed to import ${failure.fileName}: ${failure.error}`),
-      );
+      failures.forEach((failure: PresetImportFailure) => {
+        console.error(`Failed to import ${failure.fileName}: ${failure.error}`);
+        toast.error(t('editor.presets.toasts.importFailed', { fileName: failure.fileName, error: failure.error }));
+      });
     } catch (error) {
       console.error('Failed to import presets:', error);
     }
@@ -1093,6 +1094,52 @@ export default function PresetsPanel({ onNavigateToCommunity }: PresetsPanelProp
     }
   };
 
+  const defaultPresetOptions = (presetId: string | undefined): Option[] => {
+    const { appSettings, handleSettingsChange } = useSettingsStore.getState();
+    if (!presetId || !appSettings) return [];
+    const developDefaults: DevelopDefaultsSettings = appSettings.developDefaults ?? {};
+    const saveDefaults = (patch: Partial<DevelopDefaultsSettings>) =>
+      handleSettingsChange({ ...appSettings, developDefaults: { ...developDefaults, ...patch } });
+
+    const isAllCamerasDefault = developDefaults.presetId === presetId;
+    const options: Option[] = [
+      {
+        icon: Star,
+        label: isAllCamerasDefault
+          ? t('editor.presets.menu.unsetDefaultAllCameras')
+          : t('editor.presets.menu.setDefaultAllCameras'),
+        onClick: () => saveDefaults({ presetId: isAllCamerasDefault ? null : presetId }),
+      },
+    ];
+
+    const camera = useEditorStore.getState().imageDefaults?.camera;
+    if (camera) {
+      const rules = developDefaults.cameras ?? [];
+      const ruleIndex = rules.findIndex((rule) => isSameCamera(rule, camera));
+      const rule: CameraDefaults | undefined = rules[ruleIndex];
+      const isCameraDefault = rule?.presetId === presetId;
+      const name = cameraDisplayName(camera);
+      options.push({
+        icon: CameraIcon,
+        label: isCameraDefault
+          ? t('editor.presets.menu.unsetDefaultForCamera', { camera: name })
+          : t('editor.presets.menu.setDefaultForCamera', { camera: name }),
+        onClick: () => {
+          let cameras: CameraDefaults[];
+          if (!rule) {
+            cameras = [...rules, { ...camera, presetId }];
+          } else if (isCameraDefault) {
+            cameras = rules.filter((_, i) => i !== ruleIndex);
+          } else {
+            cameras = rules.map((r, i) => (i === ruleIndex ? { ...r, presetId } : r));
+          }
+          saveDefaults({ cameras });
+        },
+      });
+    }
+    return options;
+  };
+
   const handleContextMenu = (event: any, item: UserPreset) => {
     event.preventDefault();
     event.stopPropagation();
@@ -1100,7 +1147,7 @@ export default function PresetsPanel({ onNavigateToCommunity }: PresetsPanelProp
     const isFolder = !!item.folder;
     const data = isFolder ? item.folder : item.preset;
 
-    let options = [];
+    let options: Option[];
     if (isFolder) {
       options = [
         {
@@ -1138,6 +1185,8 @@ export default function PresetsPanel({ onNavigateToCommunity }: PresetsPanelProp
           label: t('editor.presets.menu.configurePreset'),
           onClick: () => setConfigureModalState({ isOpen: true, preset: data as Preset }),
         },
+        { type: OPTION_SEPARATOR },
+        ...defaultPresetOptions(data?.id),
         { type: OPTION_SEPARATOR },
         {
           icon: CopyPlus,
@@ -1252,7 +1301,7 @@ export default function PresetsPanel({ onNavigateToCommunity }: PresetsPanelProp
           ) : (
             <>
               {/* Fork feature: snapshots live above the presets list. */}
-              <SnapshotsSection previews={previews} isGeneratingPreviews={isGeneratingPreviews} />
+              <SnapshotsSection previews={previews} />
               {isLoading && presets.length === 0 ? (
                 <Text
                   as="div"
@@ -1302,7 +1351,6 @@ export default function PresetsPanel({ onNavigateToCommunity }: PresetsPanelProp
                                 layout="position"
                               >
                                 <DraggablePresetItem
-                                  isGeneratingPreviews={isGeneratingPreviews}
                                   onApply={handleApplyPreset}
                                   onContextMenu={(e: any) => handleContextMenu(e, { preset })}
                                   preset={preset}
@@ -1333,7 +1381,6 @@ export default function PresetsPanel({ onNavigateToCommunity }: PresetsPanelProp
                       variants={itemVariants}
                     >
                       <DraggablePresetItem
-                        isGeneratingPreviews={isGeneratingPreviews}
                         onApply={handleApplyPreset}
                         onContextMenu={(e: any) => handleContextMenu(e, item)}
                         preset={item.preset}
@@ -1372,11 +1419,7 @@ export default function PresetsPanel({ onNavigateToCommunity }: PresetsPanelProp
       <DragOverlay>
         {activeItem ? (
           activeItem.type === 'preset' ? (
-            <PresetItemDisplay
-              isGeneratingPreviews={false}
-              preset={activeItem.data}
-              previewUrl={previews[activeItem.data.id] || ''}
-            />
+            <PresetItemDisplay preset={activeItem.data} previewUrl={previews[activeItem.data.id] || ''} />
           ) : (
             <FolderItemDisplay folder={activeItem.data} />
           )

@@ -5,7 +5,7 @@ import { toast } from 'react-toastify';
 import { useImportStore } from '../../../store/useImportStore';
 import { useLibraryStore } from '../../../store/useLibraryStore';
 import { useProcessStore } from '../../../store/useProcessStore';
-import { Status } from '../../ui/ExportImportProperties';
+import { Status } from '../../../types/export';
 import { refreshAlreadyImportedNow, useSdImportActions } from '../../../hooks/useSdImportActions';
 import { useImportKeyboard } from '../../../hooks/useImportKeyboard';
 import SourcePicker from './SourcePicker';

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { CullingSettings, CullingSuggestions, SortDirection } from '../components/ui/AppProperties';
+import { CullingSettings, CullingSuggestions, SortDirection } from '../types/library';
 import { FileTypeFilter } from '../components/views/import/importFilters';
 import type { AiDecision } from '../utils/importLearning';
 

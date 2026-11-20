@@ -11,7 +11,6 @@ import AdjustmentSectionsSubMenu from './AdjustmentSectionsSubMenu';
 import {
   ActiveTools,
   Adjustments,
-  INITIAL_ADJUSTMENTS,
   ADJUSTMENT_SECTIONS,
   getActiveTools,
   getVisibleAdjustmentSections,
@@ -21,7 +20,8 @@ import {
 } from '../../../utils/adjustments';
 import { invoke } from '@tauri-apps/api/core';
 import { useContextMenu } from '../../../context/ContextMenuContext';
-import { AutoAdjustOptions, Invokes, OPTION_SEPARATOR, Orientation, resolveAutoAdjust } from '../../ui/AppProperties';
+import { AutoAdjustOptions, OPTION_SEPARATOR, Orientation, resolveAutoAdjust } from '../../../types/ui';
+import { Invokes } from '../../../types/invokes';
 import Switch from '../../ui/Switch';
 import Text from '../../ui/Text';
 import { TextVariants, TextColors, TextWeights } from '../../../types/typography';
@@ -30,9 +30,11 @@ import { canvasToolState, useEditorStore } from '../../../store/useEditorStore';
 import { useSettingsStore } from '../../../store/useSettingsStore';
 import { useTetherStore } from '../../../store/useTetherStore';
 import { CameraSection } from '../library/TetherMenu';
+import { getOpenImageDefaults } from '../../../utils/developDefaults';
 import { useUIStore } from '../../../store/useUIStore';
 import { buildAutoAdjustModeOptions, useEditorActions } from '../../../hooks/useEditorActions';
 import { useWaveformControls } from '../../../hooks/useWaveformControls';
+import type { ParseKeys } from 'i18next';
 
 const AUTO_TOOLS: Array<Exclude<keyof AutoAdjustOptions, 'strength' | 'keepLook'>> = [
   'exposure',
@@ -318,17 +320,18 @@ export default function Controls() {
     [setAdjustments],
   );
 
-  const handleResetAdjustments = () => {
+  const handleResetAdjustments = async () => {
+    const defaults = await getOpenImageDefaults();
     setAdjustments(
       (prev: Adjustments) => ({
         ...prev,
         ...Object.keys(ADJUSTMENT_SECTIONS)
           .flatMap((s) => ADJUSTMENT_SECTIONS[s])
           .reduce((acc: any, key: string) => {
-            acc[key] = INITIAL_ADJUSTMENTS[key as keyof Adjustments];
+            acc[key] = defaults[key as keyof Adjustments];
             return acc;
           }, {}),
-        activeTools: { ...INITIAL_ADJUSTMENTS.activeTools },
+        activeTools: { ...defaults.activeTools },
       }),
       t('contextMenus.editor.resetAdjustments'),
     );
@@ -386,10 +389,11 @@ export default function Controls() {
       }));
     };
 
-    const handleReset = () => {
+    const handleReset = async () => {
+      const defaults = await getOpenImageDefaults();
       const resetValues: any = {};
       for (const key of sectionKeys) {
-        resetValues[key] = JSON.parse(JSON.stringify(INITIAL_ADJUSTMENTS[key as keyof Adjustments]));
+        resetValues[key] = defaults[key as keyof Adjustments];
       }
       setAdjustments((prev: Adjustments) => ({
         ...prev,
@@ -399,7 +403,7 @@ export default function Controls() {
     };
 
     const isPasteAllowed = copiedSectionAdjustments && copiedSectionAdjustments.section === sectionName;
-    const translatedSection = t(`editor.adjustments.sections.${sectionName}`);
+    const translatedSection = t(`editor.adjustments.sections.${sectionName}` as ParseKeys);
 
     const pasteLabel = copiedSectionAdjustments
       ? t('editor.adjustments.actions.pasteLabel', { section: translatedSection })
@@ -523,7 +527,7 @@ export default function Controls() {
             if (sectionName === 'film' && !isNegative) {
               return null;
             }
-            const title = t(`editor.adjustments.sections.${sectionName}`);
+            const title = t(`editor.adjustments.sections.${sectionName}` as ParseKeys);
 
             return (
               <div className="shrink-0 group" key={sectionName}>

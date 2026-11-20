@@ -5,7 +5,7 @@ import { Loader2, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import Text from '../../ui/Text';
 import { TextColors, TextVariants } from '../../../types/typography';
-import { Invokes } from '../../ui/AppProperties';
+import { Invokes } from '../../../types/invokes';
 import { useTetherStore } from '../../../store/useTetherStore';
 import { CameraSection } from './TetherMenu';
 

@@ -1,16 +1,8 @@
 import { useMemo } from 'react';
 import { useLibraryStore } from '../store/useLibraryStore';
 import { useSettingsStore } from '../store/useSettingsStore';
-import {
-  RawStatus,
-  EditedStatus,
-  FlagStatus,
-  ImageFlag,
-  NegativeStatus,
-  SortDirection,
-  ImageFile,
-  GroupingMode,
-} from '../components/ui/AppProperties';
+import { RawStatus, EditedStatus, FlagStatus, ImageFlag, NegativeStatus, SortDirection, ImageFile } from '../types/library';
+import { GroupingMode } from '../types/settings';
 import { buildImageGroups, GroupBadgeInfo, GroupId } from '../utils/imageGrouping';
 
 export const ADVANCED_QUERY_REGEX =
@@ -45,6 +37,9 @@ const parseFocalLength = (val: string | undefined): number => {
 };
 
 const nameCollator = new Intl.Collator(undefined, { numeric: true });
+
+const normalizeExifDate = (val: string | undefined): string =>
+  val ? val.trim().replace(/^(\d{4})[:-](\d{2})[:-](\d{2})[T ]?/, '$1-$2-$3 ') : '';
 
 const EXIF_SORT_KEYS = new Set(['date_taken', 'iso', 'shutter_speed', 'aperture', 'focal_length']);
 const EXIF_QUERY_FIELDS = new Set([
@@ -296,9 +291,11 @@ function computeGroupedLibrary(
 
   const names = new Map<ImageFile, string>();
   const values = new Map<ImageFile, number>();
+  const dates = new Map<ImageFile, string>();
   for (const image of list) {
     names.set(image, image.path.split(/[\\/]/).pop() || image.path);
     values.set(image, getNumericSortValue(image));
+    if (key === 'date_taken') dates.set(image, normalizeExifDate(exifByPath[image.path]?.DateTimeOriginal));
   }
   const compareNames = (a: ImageFile, b: ImageFile) => {
     const nameA = names.get(a)!;
@@ -307,12 +304,12 @@ function computeGroupedLibrary(
   };
 
   list.sort((a, b) => {
-    let comparison = 0;
+    let comparison: number;
 
     switch (key) {
       case 'date_taken': {
-        const dateA = exifByPath[a.path]?.DateTimeOriginal || '';
-        const dateB = exifByPath[b.path]?.DateTimeOriginal || '';
+        const dateA = dates.get(a)!;
+        const dateB = dates.get(b)!;
         if (dateA !== dateB) comparison = dateA < dateB ? -1 : 1;
         else comparison = a.modified - b.modified;
         break;

@@ -70,6 +70,9 @@ See the `code-analysis-fixes` branch / the open PR to upstream. These are
 candidates to be merged upstream; if they are, drop them from the fork.
 
 ### 4. RCD demosaic for Bayer RAWs  (`feat(raw):` commit)
+**Dropped in the v1.7 sync** — upstream now ships GPU RCD/Markesteijn with a
+CPU fallback. Kept below for history.
+
 `src-tauri/src/rcd_demosaic.rs` replaces rawler's PPG for full-quality decodes
 of 2x2 Bayer RAWs (RCD v2.3, darktable/RawTherapee's default). `develop_internal`
 in raw_processing.rs drops rawler's `Demosaic` step and runs RCD on the rescaled
@@ -200,10 +203,78 @@ The v1.6.4 merge again retired fork code where upstream shipped an equivalent:
 
 ```bash
 npm install        # Node.js LTS + Rust toolchain required
-npm run typecheck  # note: upstream has pre-existing strict-tsc errors; the
-                   # Vite/esbuild build does not gate on them
+npm run typecheck  # 0 errors since the v1.7 sync; the Vite/esbuild build
+                   # does not gate on them
 npm start          # tauri dev — builds the Rust backend and launches the app
 ```
+
+### v1.7 sync notes
+
+Upstream v1.7.0 (+86 commits past the v1.6.9 merge base). The big one: the Rust
+backend was split into module directories (`adjustments/`, `ai/`, `app/`,
+`decode/`, `effects/`, `export/`, `integrations/`, `library/`, `masks/`,
+`merge/`, `metadata/`, `platform/`, `render/` incl. `render/gpu/*`, `retouch/`)
+and `ui/AppProperties.tsx` was split into `src/types/{invokes,settings,ui,library,
+editor,export,masks}.ts`. Also new: Rec.2020 working space, HDR + display colour
+management, GPU RCD/Markesteijn demosaic with CPU fallback, per-camera develop
+defaults (incl. auto lens correction), native panorama rewrite, rotate around
+the crop frame (`CropRotateArea`), export colour spaces, strict i18n key typing.
+How the fork fits:
+
+- **Where fork code lives now.** Film: `adjustments/negative_conversion.rs`
+  (upstream's flat-key converter is `adjustments/negative_conversion/inline.rs`,
+  still standing down when the fork's conversion is enabled). Auto:
+  `adjustments/auto_adjust.rs`. Assistant/labels: `ai/assistant.rs`,
+  `ai/label_detect.rs`; face-region masks in `ai/models.rs`. Culling/order/SD
+  import: `library/{cull_model,manual_order,sd_import}.rs`. Scanner:
+  `integrations/scanning.rs`; tethering: `integrations/tethering/{mod,usb}.rs`
+  (upstream's `tethering.rs` dropped as before). CMYK ICC: `decode/icc.rs`.
+  External edit: `export/external_edit.rs`. Uniforms: `render/uniforms.rs`;
+  settings struct: `app/settings.rs`; sidecar save guard: `library/sidecars.rs`.
+- **Demosaic.** Upstream now ships RCD (Bayer) and Markesteijn (X-Trans) on the
+  GPU with a CPU fallback, so the fork's `rcd_demosaic.rs` /
+  `xtrans_markesteijn.rs` are gone (section 4 above is history).
+- **Film conversion in Rec.2020.** Decode now hands out working-space (Rec.2020)
+  pixels. The film module still works in sRGB primaries: `maybe_apply_negative`
+  converts working→sRGB primaries (keeping the encoding: linear for RAW,
+  gamma for JPEG/TIFF scans), converts, and converts back. Film params changes
+  re-decode via `LoadImage`; FilmPanel then bumps `displayRevision` so the editor
+  asks for a new frame (nothing else changes, so without it the canvas kept the
+  old render).
+- **Skin smoothing.** Bindings 7 (`tonal_blur_texture`, fine), 8
+  (`skin_mid_blur_texture`) and 16 (`skin_broad_blur_texture`); blur slots 1–3.
+  `render/uniforms.rs` has a size test pinning `GlobalAdjustments` (2160 B),
+  `MaskAdjustments` (1368 B) and `AllAdjustments` (45952 B) to the WGSL layout,
+  and `render/gpu/pipelines.rs` has a test that parses + validates the assembled
+  shaders with naga (a dropped brace in the merge only showed as a black canvas).
+- **Point Color** converts with upstream's `working_to_hsv` / `hsv_to_working`,
+  so hue/sat/value are still the sRGB-encoded HSV the reference was picked in.
+- **Auto.** Ported onto upstream's retuned constants (shadow 35/44, highlight
+  92/50) plus the fork's `HIGHLIGHT_RECOVERY_FLOOR` 21 and
+  `CLIPPED_RECOVERY_SCALE` 613 (rescaled for the working-space luma).
+  `render_for_analysis` uses `render::preview::prepare_preview_source`.
+- **Embedded preview.** The fork's `_with_fallback` decode API is replaced by
+  upstream's `is_embedded_preview(path)`; the frontend maps it to
+  `isPreviewFallback` so the auto-crop guard still skips fallback frames.
+- **Lens correction on import.** Upstream's develop defaults can apply auto lens
+  correction to every image. The fork's Import-window toggle is kept
+  (`ImportSettings.auto_lens_correction`, serde default) and now writes upstream's
+  `auto_lens_correction_adjustments()` into the sidecar when Lensfun matches.
+- **Crop.** Upstream's `CropRotateArea` (drag outside the crop / image to rotate)
+  replaces the fork's rotate zones; crop handles are still opt-in via the crop
+  tool button, and the guided-perspective UI is unchanged.
+- **Panorama.** Upstream's native panorama rewrite replaces the fork's
+  (incl. `restraighten_panorama` and auto-crop-to-content).
+- **Export.** Upstream's `RenderedPixels` readback replaces the fork's 8-bit
+  single readback. Fork JPEG encoder (optimised Huffman, 4:4:4, density) kept,
+  now embedding `color_space.icc_profile()`; the fork's own sRGB ICC builder is
+  gone (CMYK decode kept). `{sequence:N}` stems are precomputed and passed
+  through `export_file_stem(.., copy_number)`.
+- **Frontend.** All `ui/AppProperties` imports point at `src/types/*`. Missing
+  fork i18n keys (`modals.negativeConversion.*` used by FilmPanel/App,
+  `settings.data.statuses.processing`) were added to en.json — they never
+  existed, so those labels used to render as raw keys. `npx tsc --noEmit`
+  is at 0 errors (upstream baseline 0, previous fork baseline 64).
 
 ### v1.6.9 sync notes
 

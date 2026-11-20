@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
-import { CullingSuggestions, Invokes } from '../components/ui/AppProperties';
+import { CullingSuggestions } from '../types/library';
+import { Invokes } from '../types/invokes';
 import { useImportStore } from '../store/useImportStore';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { computeVisibleSet } from '../components/views/import/importFilters';

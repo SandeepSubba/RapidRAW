@@ -16,7 +16,6 @@ import {
   pointerWithin,
 } from '@dnd-kit/core';
 import {
-  Ban,
   Circle,
   ClipboardPaste,
   Copy,
@@ -47,22 +46,17 @@ import Dropdown from '../../ui/Dropdown';
 
 import { useContextMenu } from '../../../context/ContextMenuContext';
 import {
-  Mask,
-  MaskType,
-  SubMask,
-  SubMaskMode,
-  ToolType,
   MASK_ICON_MAP,
   AI_DIRECT_PATCH_TYPES,
   AI_TOUCH_UP_TYPES,
   AI_GENERATIVE_CREATION_TYPES,
   AI_SUB_MASK_COMPONENT_TYPES,
-  formatMaskTypeName,
-  getSubMaskName,
   NewMaskDropZone,
 } from './Masks';
+import { Mask, MaskType, SubMask, SubMaskMode, ToolType } from '../../../types/masks';
+import { formatMaskTypeName, getSubMaskName } from '../../../utils/maskNames';
 import { Adjustments, AiPatch, Coord } from '../../../utils/adjustments';
-import { OPTION_SEPARATOR } from '../../ui/AppProperties';
+import { OPTION_SEPARATOR } from '../../../types/ui';
 import { countPatchesOfType, createSubMask } from '../../../utils/maskUtils';
 import Text from '../../ui/Text';
 import { TEXT_COLOR_KEYS, TextColors, TextVariants, TextWeights } from '../../../types/typography';
@@ -100,10 +94,8 @@ const PLACEHOLDER_PATCH: AiPatch = {
 };
 
 const SUB_MASK_CONFIG: any = {
-  [Mask.Radial]: {
-    parameters: [{ key: 'feather', min: 0, max: 100, step: 1, multiplier: 100, defaultValue: 50 }],
-  },
-  [Mask.Brush]: { showBrushTools: true },
+  [Mask.Radial]: { parameters: [] },
+  [Mask.Brush]: { showBrushTools: true, hideFeather: true },
   [Mask.Clone]: { showBrushTools: true, hideToolSwitch: true, defaultFeather: 35 },
   [Mask.Heal]: { showBrushTools: true, hideToolSwitch: true, defaultFeather: 35 },
   [Mask.Liquify]: {
@@ -128,28 +120,16 @@ const SUB_MASK_CONFIG: any = {
     ],
   },
   [Mask.AiSubject]: {
-    parameters: [
-      { key: 'grow', min: -100, max: 100, step: 1, defaultValue: 50 },
-      { key: 'feather', min: 0, max: 100, step: 1, defaultValue: 25 },
-    ],
+    parameters: [{ key: 'grow', min: -100, max: 100, step: 1, defaultValue: 50 }],
   },
   [Mask.AiForeground]: {
-    parameters: [
-      { key: 'grow', min: -100, max: 100, step: 1, defaultValue: 50 },
-      { key: 'feather', min: 0, max: 100, step: 1, defaultValue: 25 },
-    ],
+    parameters: [{ key: 'grow', min: -100, max: 100, step: 1, defaultValue: 50 }],
   },
   [Mask.AiSky]: {
-    parameters: [
-      { key: 'grow', min: -100, max: 100, step: 1, defaultValue: 0 },
-      { key: 'feather', min: 0, max: 100, step: 1, defaultValue: 0 },
-    ],
+    parameters: [{ key: 'grow', min: -100, max: 100, step: 1, defaultValue: 0 }],
   },
   [Mask.QuickEraser]: {
-    parameters: [
-      { key: 'grow', min: -100, max: 200, step: 1, defaultValue: 150 },
-      { key: 'feather', min: 0, max: 100, step: 1, defaultValue: 75 },
-    ],
+    parameters: [{ key: 'grow', min: -100, max: 200, step: 1, defaultValue: 150 }],
   },
 };
 
@@ -158,12 +138,14 @@ const BrushTools = ({
   onSettingsChange,
   onCommit,
   showToolSwitch = true,
+  showFeather = true,
   defaultFeather = 50,
 }: {
   settings: any;
   onSettingsChange: any;
   onCommit?: () => void;
   showToolSwitch?: boolean;
+  showFeather?: boolean;
   defaultFeather?: number;
 }) => {
   const { t } = useTranslation();
@@ -181,17 +163,19 @@ const BrushTools = ({
         value={settings.size}
         fillOrigin="min"
       />
-      <Slider
-        defaultValue={defaultFeather}
-        label={t('editor.ai.brush.feather')}
-        max={100}
-        min={0}
-        onChange={(e: any) => onSettingsChange((s: any) => ({ ...s, feather: Number(e.target.value) }))}
-        onPointerUp={onCommit}
-        step={1}
-        value={settings.feather}
-        fillOrigin="min"
-      />
+      {showFeather && (
+        <Slider
+          defaultValue={defaultFeather}
+          label={t('editor.ai.brush.feather')}
+          max={100}
+          min={0}
+          onChange={(e: any) => onSettingsChange((s: any) => ({ ...s, feather: Number(e.target.value) }))}
+          onPointerUp={onCommit}
+          step={1}
+          value={settings.feather}
+          fillOrigin="min"
+        />
+      )}
       {showToolSwitch && (
         <div className="grid grid-cols-2 gap-2 pt-2">
           <button
@@ -378,10 +362,10 @@ const ConnectionStatus = ({
   const { t } = useTranslation();
   const [isHovered, setIsHovered] = useState(false);
 
-  let statusColor = 'bg-green-500';
-  let statusText = t('editor.ai.connection.ready');
-  let titleText = t('editor.ai.connection.backendLabel');
-  let hoverContent: React.ReactNode = null;
+  let statusColor: string;
+  let statusText: string;
+  let titleText: string;
+  let hoverContent: React.ReactNode;
 
   if (aiProvider === 'cloud') {
     titleText = t('editor.ai.connection.cloudLabel');
@@ -1755,7 +1739,7 @@ function ContainerRow({
               >
                 {isStandalone ? (
                   (() => {
-                    const StandaloneIcon = MASK_ICON_MAP[firstSubMask.type] || Circle;
+                    const StandaloneIcon = MASK_ICON_MAP[firstSubMask.type as Mask] || Circle;
                     return <StandaloneIcon size={18} />;
                   })()
                 ) : isExpanded ? (
@@ -1927,7 +1911,7 @@ function SubMaskRow({
     setNodeRef(node);
     setDroppableRef(node);
   };
-  const MaskIcon = MASK_ICON_MAP[subMask.type] || Circle;
+  const MaskIcon = MASK_ICON_MAP[subMask.type as Mask] || Circle;
   const { showContextMenu } = useContextMenu();
   const [isHovered, setIsHovered] = useState(false);
   const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -2460,6 +2444,7 @@ function SettingsPanel({
                   onSettingsChange={handleBrushSettingsChange}
                   onCommit={handleBrushCommit}
                   showToolSwitch={!subMaskConfig.hideToolSwitch}
+                  showFeather={!subMaskConfig.hideFeather}
                   defaultFeather={subMaskConfig.defaultFeather}
                 />
               )}

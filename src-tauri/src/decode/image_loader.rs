@@ -1,0 +1,1502 @@
+use crate::app::settings::{AppSettings, load_settings};
+use crate::app::state::{AppState, LoadedImage, PreviewTarget};
+use crate::decode::baseline_exposure::BaselineOptions;
+use crate::decode::formats::is_raw_file;
+use crate::decode::white_balance::WhiteBalance;
+
+use crate::library::file_ops::read_file_mapped;
+use crate::library::sidecars::parse_virtual_path;
+use crate::masks::generation::{MaskDefinition, SubMask, generate_mask_bitmap};
+use crate::metadata::sidecar::ImageMetadata;
+use crate::metadata::{exif_processing, sidecar};
+use crate::render::adjustment_utils::effective_baseline_exposure;
+use crate::render::cache_utils::{DecodeFingerprint, FlightRole, clear_preview_slot};
+use crate::render::color_space::{
+    fit_gamut, srgb_decode, srgb_encode, srgb_to_working, srgb_transfer, working_profile,
+};
+use crate::render::geometry::{apply_orientation, inverse_transform_mask};
+use crate::render::image_processing::apply_working_display_to_srgb;
+use anyhow::{Context, Result, anyhow};
+use base64::{Engine as _, engine::general_purpose};
+use exif::{Reader as ExifReader, Tag};
+use glam::{DMat3, Mat3, Vec3};
+use image::{DynamicImage, GenericImageView, ImageDecoder, ImageReader, Rgb32FImage, imageops};
+use moxcms::{
+    CmsError, ColorProfile, DataColorSpace, Layout, RenderingIntent, ToneReprCurve,
+    TransformF32Executor, TransformOptions,
+};
+use rawler::Orientation;
+use rayon::prelude::*;
+use serde::Deserialize;
+use serde_json::Value;
+use std::borrow::Cow;
+use std::collections::{HashMap, HashSet};
+use std::fs;
+use std::io::Cursor;
+use std::panic;
+use std::path::Path;
+use std::sync::{
+    Arc, Mutex, OnceLock,
+    atomic::{AtomicUsize, Ordering},
+};
+use tauri::Manager;
+
+#[derive(serde::Serialize)]
+pub struct LoadImageResult {
+    pub width: u32,
+    pub height: u32,
+    pub metadata: ImageMetadata,
+    pub exif: HashMap<String, String>,
+    pub is_raw: bool,
+    pub as_shot_white_balance: WhiteBalance,
+    pub is_embedded_preview: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PatchMaskInfo {
+    id: String,
+    name: String,
+    #[serde(default)]
+    invert: bool,
+    #[serde(default)]
+    sub_masks: Vec<SubMask>,
+}
+
+pub const PATCH_PRIMARIES: &str = "rec2020";
+
+fn srgb_to_linear_lut() -> &'static [f32; 256] {
+    static LUT: OnceLock<[f32; 256]> = OnceLock::new();
+    LUT.get_or_init(|| std::array::from_fn(|i| srgb_decode(i as f32 / 255.0)))
+}
+
+pub fn load_and_composite(
+    base_image: &[u8],
+    path: &str,
+    adjustments: &Value,
+    use_fast_raw_dev: bool,
+    settings: &AppSettings,
+    cancel_token: Option<(Arc<AtomicUsize>, usize)>,
+) -> Result<(DynamicImage, f32)> {
+    let base_image =
+        load_base_image_from_bytes(base_image, path, use_fast_raw_dev, settings, cancel_token)?;
+    let prepared = match prepare_base_image_cow(&base_image, path, adjustments)? {
+        Cow::Owned(img) => Some(img),
+        Cow::Borrowed(_) => None,
+    };
+    let scale = prepared.as_ref().map_or(1.0, |img| {
+        crate::ai::upscale::scale_between(&base_image, img)
+    });
+    Ok((prepared.unwrap_or(base_image), scale))
+}
+
+pub fn prepare_base_image_cow<'a>(
+    base_image: &'a DynamicImage,
+    path: &str,
+    adjustments: &Value,
+) -> Result<Cow<'a, DynamicImage>> {
+    let has_patches = adjustments
+        .get("aiPatches")
+        .and_then(|v| v.as_array())
+        .is_some_and(|a| !a.is_empty());
+
+    let denoised = crate::ai::denoise::apply_ai_denoise(base_image, path, adjustments);
+    let upscaled = crate::ai::upscale::apply_ai_upscale(base_image, denoised, path, adjustments);
+    match crate::adjustments::negative_conversion::apply_negative_conversion(
+        upscaled,
+        is_raw_file(path),
+        adjustments,
+    ) {
+        Cow::Owned(prepared) if !has_patches => Ok(Cow::Owned(prepared)),
+        prepared => composite_patches_cow(prepared, base_image.dimensions(), path, adjustments),
+    }
+}
+
+/// Decodes the base image and applies the fork's sidecar-owned negative
+/// conversion (`adjustments.negativeConversion`) when the sidecar flags one.
+pub fn load_base_image_from_bytes(
+    bytes: &[u8],
+    path_for_ext_check: &str,
+    use_fast_raw_dev: bool,
+    settings: &AppSettings,
+    cancel_token: Option<(Arc<AtomicUsize>, usize)>,
+) -> Result<DynamicImage> {
+    let image = load_base_image_raw(
+        bytes,
+        path_for_ext_check,
+        use_fast_raw_dev,
+        settings,
+        cancel_token,
+    )?;
+    Ok(crate::adjustments::negative_conversion::maybe_apply_negative(
+        image,
+        path_for_ext_check,
+    ))
+}
+
+/// The decode without the fork's stored negative conversion (the film tools
+/// measure and re-solve on these pixels).
+pub fn load_base_image_raw(
+    bytes: &[u8],
+    path_for_ext_check: &str,
+    use_fast_raw_dev: bool,
+    settings: &AppSettings,
+    cancel_token: Option<(Arc<AtomicUsize>, usize)>,
+) -> Result<DynamicImage> {
+    let highlight_compression = settings.raw_highlight_compression.unwrap_or(2.5);
+    let linear_mode = settings.linear_raw_mode.clone();
+    let color_nr_amount = settings
+        .raw_preprocessing_color_nr
+        .unwrap_or(0.5)
+        .clamp(0.0, 1.0);
+    let sharpening_amount = settings.raw_preprocessing_sharpening.unwrap_or(0.35);
+    let apply_to_non_raws = settings.apply_preprocessing_to_non_raws.unwrap_or(false);
+
+    crate::metadata::sidecar::persist_exif_if_missing(
+        Path::new(path_for_ext_check),
+        path_for_ext_check,
+        bytes,
+    );
+
+    let record_embedded_preview = |used: bool| {
+        if !use_fast_raw_dev {
+            set_embedded_preview(path_for_ext_check, used);
+        }
+    };
+
+    if is_raw_file(path_for_ext_check)
+        && !use_fast_raw_dev
+        && settings.use_apple_raw9.unwrap_or(false)
+    {
+        if let Some((tracker, generation)) = &cancel_token
+            && tracker.load(Ordering::SeqCst) != *generation
+        {
+            return Err(anyhow!("Load cancelled"));
+        }
+
+        match crate::decode::apple_raw::develop_raw9(bytes, path_for_ext_check) {
+            Ok(image) => {
+                record_embedded_preview(false);
+                return Ok(image);
+            }
+            Err(e) => log::warn!(
+                "Apple RAW 9 unavailable for '{}', falling back to rawler: {}",
+                path_for_ext_check,
+                e
+            ),
+        }
+    }
+
+    if is_raw_file(path_for_ext_check) {
+        match panic::catch_unwind(move || {
+            crate::decode::raw_processing::develop_raw_image(
+                bytes,
+                use_fast_raw_dev,
+                highlight_compression,
+                linear_mode,
+                color_nr_amount,
+                sharpening_amount,
+                cancel_token,
+            )
+        }) {
+            Ok(Ok(image)) => {
+                record_embedded_preview(false);
+                Ok(image)
+            }
+            Ok(Err(e)) => {
+                let classified = classify_raw_develop_error(path_for_ext_check, e);
+
+                if classified.to_string().contains("Load cancelled") {
+                    return Err(classified);
+                }
+
+                log::warn!(
+                    "Error developing RAW file '{}': {}",
+                    path_for_ext_check,
+                    classified
+                );
+                embedded_preview_instead(bytes, path_for_ext_check)
+                    .inspect(|_| record_embedded_preview(true))
+                    .ok_or(classified)
+            }
+            Err(_) => {
+                log::error!("Panic while processing RAW file: {}", path_for_ext_check);
+                embedded_preview_instead(bytes, path_for_ext_check)
+                    .inspect(|_| record_embedded_preview(true))
+                    .ok_or_else(|| anyhow!("Failed to process RAW file: {}", path_for_ext_check))
+            }
+        }
+    } else {
+        let image = load_image_with_orientation(bytes, cancel_token)?;
+        Ok(if apply_to_non_raws && !use_fast_raw_dev {
+            crate::decode::develop::enhance(image, color_nr_amount, sharpening_amount)
+        } else {
+            image
+        })
+    }
+}
+
+fn classify_raw_develop_error(path: &str, err: anyhow::Error) -> anyhow::Error {
+    let error_text = err.to_string();
+    let lowered = error_text.to_ascii_lowercase();
+    let unsupported_compression =
+        lowered.contains("nef compression") && lowered.contains("not supported");
+
+    if unsupported_compression {
+        return anyhow!(
+            "Unsupported RAW compression format for '{}'. Original error: {}",
+            path,
+            error_text
+        );
+    }
+
+    err
+}
+
+fn largest_tiff_jpeg_preview(buf: &[u8]) -> Option<DynamicImage> {
+    let le = match buf.get(..4)? {
+        [0x49, 0x49, 0x2A, 0x00] => true,
+        [0x4D, 0x4D, 0x00, 0x2A] => false,
+        _ => return None,
+    };
+    let rd16 = |o: usize| -> Option<u64> {
+        let b: [u8; 2] = buf.get(o..o + 2)?.try_into().ok()?;
+        Some(if le {
+            u16::from_le_bytes(b)
+        } else {
+            u16::from_be_bytes(b)
+        } as u64)
+    };
+    let rd32 = |o: usize| -> Option<u64> {
+        let b: [u8; 4] = buf.get(o..o + 4)?.try_into().ok()?;
+        Some(if le {
+            u32::from_le_bytes(b)
+        } else {
+            u32::from_be_bytes(b)
+        } as u64)
+    };
+
+    let mut candidates: Vec<(u64, u64)> = Vec::new();
+    let mut queue: Vec<u64> = vec![rd32(4)?];
+    let mut seen = HashMap::new();
+
+    while let Some(ifd) = queue.pop() {
+        if seen.insert(ifd, ()).is_some() || seen.len() > 64 {
+            continue;
+        }
+        let Some(n) = rd16(ifd as usize) else {
+            continue;
+        };
+
+        let mut compression: u64 = 0;
+        let mut strip: Option<(u64, u64)> = None;
+        let mut old_jpeg: Option<(u64, u64)> = None;
+
+        for i in 0..n {
+            let e = ifd as usize + 2 + (i as usize) * 12;
+            let (Some(tag), Some(count), Some(val)) = (rd16(e), rd32(e + 4), rd32(e + 8)) else {
+                continue;
+            };
+            match tag {
+                259 => compression = val,
+                273 if count == 1 => strip = Some((val, strip.map_or(0, |s| s.1))),
+                279 if count == 1 => strip = strip.map(|s| (s.0, val)).or(Some((0, val))),
+                513 => old_jpeg = Some((val, old_jpeg.map_or(0, |s| s.1))),
+                514 => old_jpeg = old_jpeg.map(|s| (s.0, val)).or(Some((0, val))),
+                330 => {
+                    if count == 1 {
+                        queue.push(val);
+                    } else {
+                        for j in 0..count.min(8) {
+                            if let Some(p) = rd32(val as usize + (j as usize) * 4) {
+                                queue.push(p);
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if matches!(compression, 6 | 7)
+            && let Some(s) = strip
+        {
+            candidates.push(s);
+        }
+        if let Some(oj) = old_jpeg {
+            candidates.push(oj);
+        }
+        if let Some(next) = rd32(ifd as usize + 2 + (n as usize) * 12)
+            && next != 0
+        {
+            queue.push(next);
+        }
+    }
+
+    candidates.sort_by_key(|&(_, len)| std::cmp::Reverse(len));
+
+    for (off, len) in candidates {
+        if let Some(bytes) = buf.get(off as usize..(off + len) as usize)
+            && let Ok(img) = image::load_from_memory_with_format(bytes, image::ImageFormat::Jpeg)
+        {
+            return Some(img);
+        }
+    }
+
+    None
+}
+
+pub fn tiff_embedded_preview(bytes: &[u8]) -> Option<DynamicImage> {
+    let img = largest_tiff_jpeg_preview(bytes)?;
+
+    let orientation = exif_processing::read_exif(bytes).and_then(|exif| {
+        exif.get_field(Tag::Orientation, exif::In::PRIMARY)?
+            .value
+            .get_uint(0)
+    });
+
+    Some(match orientation {
+        Some(o) if o > 1 => apply_orientation(img, Orientation::from_u16(o as u16)),
+        _ => img,
+    })
+}
+
+fn embedded_preview_fallback(bytes: &[u8]) -> Option<DynamicImage> {
+    tiff_embedded_preview(bytes)
+        .or_else(|| crate::decode::raw_processing::extract_embedded_preview(bytes))
+}
+
+pub fn safe_embedded_preview_fallback(bytes: &[u8], path: &str) -> Option<DynamicImage> {
+    match panic::catch_unwind(panic::AssertUnwindSafe(|| embedded_preview_fallback(bytes))) {
+        Ok(preview) => preview,
+        Err(_) => {
+            log::warn!("Embedded RAW preview extraction panicked for '{}'", path);
+            None
+        }
+    }
+}
+
+fn embedded_preview_paths() -> &'static Mutex<HashSet<String>> {
+    static PATHS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    PATHS.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+fn set_embedded_preview(path: &str, used: bool) {
+    let mut paths = embedded_preview_paths()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    if used {
+        paths.insert(path.to_string());
+    } else {
+        paths.remove(path);
+    }
+}
+
+pub fn is_embedded_preview(path: &str) -> bool {
+    embedded_preview_paths()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .contains(path)
+}
+
+fn embedded_preview_instead(bytes: &[u8], path: &str) -> Option<DynamicImage> {
+    let preview = safe_embedded_preview_fallback(bytes, path)?;
+    log::warn!(
+        "Using embedded preview fallback for '{}' ({}x{})",
+        path,
+        preview.width(),
+        preview.height()
+    );
+    Some(linearize_embedded_preview(preview))
+}
+
+fn linearize_embedded_preview(preview: DynamicImage) -> DynamicImage {
+    const PREVIEW_GAIN: f32 = 0.4;
+    let mut linear_preview = preview.to_rgb32f();
+    let matrix = srgb_to_working() * PREVIEW_GAIN;
+    for pixel in linear_preview.pixels_mut() {
+        pixel.0 = (matrix * Vec3::from_array(pixel.0.map(|c| srgb_decode(c.max(0.0))))).to_array();
+    }
+    DynamicImage::ImageRgb32F(linear_preview)
+}
+
+/// Decodes a CMYK JPEG or TIFF through its embedded press profile. `None`
+/// means "not that kind of file" (not CMYK, no profile, or a LUT shape the
+/// parser doesn't cover) and the caller falls through to the generic decoder,
+/// whose naive ink inversion is the pre-existing behaviour.
+fn try_decode_color_managed_cmyk(bytes: &[u8]) -> Option<DynamicImage> {
+    match image::guess_format(bytes).ok()? {
+        image::ImageFormat::Jpeg => decode_cmyk_jpeg(bytes),
+        image::ImageFormat::Tiff => decode_cmyk_tiff(bytes),
+        _ => None,
+    }
+}
+
+fn cmyk_inks_to_rgb32f(
+    width: u32,
+    height: u32,
+    inks: impl Fn(&[u8]) -> [f32; 4] + Sync,
+    samples: &[u8],
+    transform: &crate::decode::icc::CmykTransform,
+) -> image::Rgb32FImage {
+    use rayon::prelude::*;
+
+    let mut out = image::Rgb32FImage::new(width, height);
+    let pixels: &mut [f32] = out.as_mut();
+    pixels
+        .par_chunks_exact_mut(3)
+        .zip(samples.par_chunks_exact(4))
+        .for_each(|(pixel, stored)| {
+            pixel.copy_from_slice(&transform.to_srgb(inks(stored)));
+        });
+    out
+}
+
+fn decode_cmyk_jpeg(bytes: &[u8]) -> Option<DynamicImage> {
+    use zune_jpeg::JpegDecoder;
+    use zune_jpeg::zune_core::bytestream::ZCursor;
+    use zune_jpeg::zune_core::colorspace::ColorSpace;
+    use zune_jpeg::zune_core::options::DecoderOptions;
+
+    let options = DecoderOptions::default()
+        .set_strict_mode(false)
+        .set_max_width(usize::MAX)
+        .set_max_height(usize::MAX);
+    let mut decoder = JpegDecoder::new_with_options(ZCursor::new(bytes), options);
+    decoder.decode_headers().ok()?;
+    let input_colorspace = decoder.input_colorspace()?;
+    if !matches!(input_colorspace, ColorSpace::CMYK | ColorSpace::YCCK) {
+        return None;
+    }
+    let transform = crate::decode::icc::parse_cmyk_profile(&decoder.icc_profile()?)?;
+
+    // Requesting the input colorspace back gives the raw 4-component samples
+    // instead of the decoder's built-in naive RGB conversion.
+    decoder.set_options(decoder.options().jpeg_set_out_colorspace(input_colorspace));
+    let samples = decoder.decode().ok()?;
+    let (width, height) = decoder.dimensions()?;
+    if samples.len() < width * height * 4 {
+        return None;
+    }
+
+    // Adobe-convention JPEGs store inverted ink (255 = no ink); YCCK addition-
+    // ally runs CMY through the YCbCr transform (BT.601, like the decoder).
+    let image = if input_colorspace == ColorSpace::CMYK {
+        cmyk_inks_to_rgb32f(
+            width as u32,
+            height as u32,
+            |stored| {
+                [
+                    1.0 - stored[0] as f32 / 255.0,
+                    1.0 - stored[1] as f32 / 255.0,
+                    1.0 - stored[2] as f32 / 255.0,
+                    1.0 - stored[3] as f32 / 255.0,
+                ]
+            },
+            &samples,
+            &transform,
+        )
+    } else {
+        cmyk_inks_to_rgb32f(
+            width as u32,
+            height as u32,
+            |stored| {
+                let y = stored[0] as f32;
+                let cb = stored[1] as f32 - 128.0;
+                let cr = stored[2] as f32 - 128.0;
+                let r = (y + 1.402 * cr).clamp(0.0, 255.0);
+                let g = (y - 0.344_136 * cb - 0.714_136 * cr).clamp(0.0, 255.0);
+                let b = (y + 1.772 * cb).clamp(0.0, 255.0);
+                [
+                    1.0 - r / 255.0,
+                    1.0 - g / 255.0,
+                    1.0 - b / 255.0,
+                    1.0 - stored[3] as f32 / 255.0,
+                ]
+            },
+            &samples,
+            &transform,
+        )
+    };
+    Some(DynamicImage::ImageRgb32F(image))
+}
+
+fn decode_cmyk_tiff(bytes: &[u8]) -> Option<DynamicImage> {
+    use rayon::prelude::*;
+    use tiff::decoder::{Decoder, DecodingResult, Limits};
+    use tiff::tags::Tag;
+
+    let mut decoder = Decoder::new(Cursor::new(bytes))
+        .ok()?
+        .with_limits(Limits::unlimited());
+    if !matches!(
+        decoder.colortype().ok()?,
+        tiff::ColorType::CMYK(8) | tiff::ColorType::CMYK(16)
+    ) {
+        return None;
+    }
+    let profile = decoder.get_tag_u8_vec(Tag::IccProfile).ok()?;
+    let transform = crate::decode::icc::parse_cmyk_profile(&profile)?;
+    let (width, height) = decoder.dimensions().ok()?;
+    let pixel_count = width as usize * height as usize;
+
+    // TIFF stores true ink coverage (0 = no ink), no Adobe inversion.
+    let mut out = image::Rgb32FImage::new(width, height);
+    let pixels: &mut [f32] = out.as_mut();
+    match decoder.read_image().ok()? {
+        DecodingResult::U8(samples) if samples.len() >= pixel_count * 4 => {
+            pixels
+                .par_chunks_exact_mut(3)
+                .zip(samples.par_chunks_exact(4))
+                .for_each(|(pixel, ink)| {
+                    pixel.copy_from_slice(&transform.to_srgb([
+                        ink[0] as f32 / 255.0,
+                        ink[1] as f32 / 255.0,
+                        ink[2] as f32 / 255.0,
+                        ink[3] as f32 / 255.0,
+                    ]));
+                });
+        }
+        DecodingResult::U16(samples) if samples.len() >= pixel_count * 4 => {
+            pixels
+                .par_chunks_exact_mut(3)
+                .zip(samples.par_chunks_exact(4))
+                .for_each(|(pixel, ink)| {
+                    pixel.copy_from_slice(&transform.to_srgb([
+                        ink[0] as f32 / 65535.0,
+                        ink[1] as f32 / 65535.0,
+                        ink[2] as f32 / 65535.0,
+                        ink[3] as f32 / 65535.0,
+                    ]));
+                });
+        }
+        _ => return None,
+    }
+    Some(DynamicImage::ImageRgb32F(out))
+}
+
+/// Straight-alpha composite onto a white background, in the image's own
+/// (encoded) space — white stays white through any later profile conversion.
+fn flatten_alpha_over_white(image: &DynamicImage) -> image::Rgb32FImage {
+    use rayon::prelude::*;
+
+    let rgba = image.to_rgba32f();
+    let mut flattened = image::Rgb32FImage::new(rgba.width(), rgba.height());
+    let pixels: &mut [f32] = flattened.as_mut();
+    pixels
+        .par_chunks_exact_mut(3)
+        .zip(rgba.as_raw().par_chunks_exact(4))
+        .for_each(|(rgb, rgba)| {
+            let alpha = rgba[3].clamp(0.0, 1.0);
+            for channel in 0..3 {
+                rgb[channel] = rgba[channel] * alpha + (1.0 - alpha);
+            }
+        });
+    flattened
+}
+
+fn decode_with_orientation(
+    bytes: &[u8],
+    cancel_token: &Option<(Arc<AtomicUsize>, usize)>,
+) -> Result<(Rgb32FImage, Option<ProfileToWorking>)> {
+    let check_cancel = || -> Result<()> {
+        if let Some((tracker, generation)) = cancel_token
+            && tracker.load(Ordering::SeqCst) != *generation
+        {
+            return Err(anyhow!("Load cancelled"));
+        }
+        Ok(())
+    };
+
+    let cursor = Cursor::new(bytes);
+    // Profiled CMYK takes the fork's own path (`crate::icc`): the generic
+    // decoders only expose a naive, unmanaged RGB conversion of the inks. It
+    // yields encoded sRGB, which convert_to_working treats as untagged sRGB.
+    let (image, icc_profile, is_cmyk) = match try_decode_color_managed_cmyk(bytes) {
+        Some(image) => (image, None, true),
+        None => {
+            let mut reader = ImageReader::new(cursor.clone())
+                .with_guessed_format()
+                .context("Failed to guess image format")?;
+
+            reader.no_limits();
+
+            check_cancel()?;
+
+            let mut decoder = reader.into_decoder().context("Failed to decode image")?;
+            let icc_profile = decoder.icc_profile().ok().flatten();
+            let image = DynamicImage::from_decoder(decoder).context("Failed to decode image")?;
+            (image, icc_profile, false)
+        }
+    };
+    check_cancel()?;
+
+    let exif = ExifReader::new()
+        .read_from_container(&mut cursor.clone())
+        .ok();
+    let orientation = exif.as_ref().and_then(|exif| {
+        exif.get_field(Tag::Orientation, exif::In::PRIMARY)?
+            .value
+            .get_uint(0)
+    });
+    let oriented_image = match orientation {
+        Some(orientation) => apply_orientation(image, Orientation::from_u16(orientation as u16)),
+        None => image,
+    };
+
+    // Alpha has nowhere to go in the Rgb32F pipeline: `to_rgb32f` just drops
+    // the channel, so transparent regions showed whatever RGB the file stored
+    // there — usually black. Composite over white instead (fork).
+    let rgb = if oriented_image.color().has_alpha() {
+        flatten_alpha_over_white(&oriented_image)
+    } else {
+        oriented_image.to_rgb32f()
+    };
+    let source_profile = match icc_profile {
+        _ if is_cmyk => None,
+        Some(icc) => ColorProfile::new_from_slice(&icc).ok(),
+        None => exif
+            .as_ref()
+            .is_some_and(is_exif_adobe_rgb)
+            .then(ColorProfile::new_adobe_rgb),
+    };
+    check_cancel()?;
+
+    Ok((rgb, source_profile.as_ref().and_then(ProfileToWorking::new)))
+}
+
+pub fn load_image_with_orientation(
+    bytes: &[u8],
+    cancel_token: Option<(Arc<AtomicUsize>, usize)>,
+) -> Result<DynamicImage> {
+    let (mut rgb, from_profile) = decode_with_orientation(bytes, &cancel_token)?;
+    convert_to_working(&mut rgb, from_profile.as_ref());
+    Ok(DynamicImage::ImageRgb32F(rgb))
+}
+
+pub fn load_display_image(bytes: &[u8], path: &str) -> Result<DynamicImage> {
+    crate::metadata::sidecar::persist_exif_if_missing(Path::new(path), path, bytes);
+    let (mut rgb, from_profile) = decode_with_orientation(bytes, &None)?;
+    if from_profile.is_none() {
+        return Ok(DynamicImage::ImageRgb32F(rgb));
+    }
+    convert_to_working(&mut rgb, from_profile.as_ref());
+    let mut image = DynamicImage::ImageRgb32F(rgb);
+    apply_working_display_to_srgb(&mut image, false);
+    Ok(image)
+}
+
+fn is_exif_adobe_rgb(exif: &exif::Exif) -> bool {
+    let uncalibrated = exif
+        .get_field(Tag::ColorSpace, exif::In::PRIMARY)
+        .and_then(|f| f.value.get_uint(0))
+        == Some(0xFFFF);
+    let interop_r03 = exif
+        .get_field(Tag::InteroperabilityIndex, exif::In::PRIMARY)
+        .is_some_and(|f| f.display_value().to_string().contains("R03"));
+    uncalibrated && interop_r03
+}
+
+fn with_linear_trc(mut profile: ColorProfile) -> ColorProfile {
+    let identity = ToneReprCurve::Lut(Vec::new());
+    profile.red_trc = Some(identity.clone());
+    profile.green_trc = Some(identity.clone());
+    profile.blue_trc = Some(identity);
+    profile.cicp = None;
+    profile
+}
+
+fn colorants(profile: &ColorProfile) -> DMat3 {
+    DMat3::from_cols_array_2d(&profile.colorant_matrix().v).transpose()
+}
+
+fn srgb_to_linear_working(src: &[f32], dst: &mut [f32]) {
+    let transfer = srgb_transfer();
+    let matrix = srgb_to_working();
+    for (out, rgb) in dst
+        .as_chunks_mut::<3>()
+        .0
+        .iter_mut()
+        .zip(src.as_chunks::<3>().0)
+    {
+        *out = (matrix * Vec3::from_array(rgb.map(|c| transfer.decode(c.max(0.0))))).to_array();
+    }
+}
+
+struct ProfileToWorking {
+    linearize: Arc<TransformF32Executor>,
+    matrix: Mat3,
+}
+
+impl ProfileToWorking {
+    fn new(source: &ColorProfile) -> Option<Self> {
+        if source.color_space != DataColorSpace::Rgb {
+            return None;
+        }
+        let working = working_profile();
+        let (target, matrix) = if source.is_matrix_shaper() {
+            let matrix = (colorants(&working).inverse() * colorants(source)).as_mat3();
+            (with_linear_trc(source.clone()), matrix)
+        } else {
+            (with_linear_trc(working), Mat3::IDENTITY)
+        };
+
+        let options = TransformOptions {
+            rendering_intent: RenderingIntent::RelativeColorimetric,
+            ..TransformOptions::default()
+        };
+        let Ok(linearize) = source.create_transform_f32(Layout::Rgb, &target, Layout::Rgb, options)
+        else {
+            log::warn!("Unsupported embedded color profile, assuming sRGB");
+            return None;
+        };
+        let transform = Self { linearize, matrix };
+
+        const STEPS: usize = 16;
+        let probe: Vec<f32> = (0..(STEPS + 1).pow(3))
+            .flat_map(|i| {
+                [
+                    i % (STEPS + 1),
+                    i / (STEPS + 1) % (STEPS + 1),
+                    i / (STEPS + 1).pow(2),
+                ]
+                .map(|c| c as f32 / STEPS as f32)
+            })
+            .collect();
+        let mut from_profile = vec![0.0f32; probe.len()];
+        if transform.apply(&probe, &mut from_profile).is_err() {
+            log::warn!("Failed to apply embedded color profile, assuming sRGB");
+            return None;
+        }
+        let mut from_srgb = vec![0.0f32; probe.len()];
+        srgb_to_linear_working(&probe, &mut from_srgb);
+        let is_srgb = from_profile
+            .iter()
+            .zip(&from_srgb)
+            .all(|(a, b)| (srgb_encode(*a) - srgb_encode(*b)).abs() < 2.0 / 255.0);
+        (!is_srgb).then_some(transform)
+    }
+
+    fn apply(&self, src: &[f32], dst: &mut [f32]) -> Result<(), CmsError> {
+        self.linearize.transform(src, dst)?;
+        for rgb in dst.as_chunks_mut::<3>().0 {
+            *rgb = (self.matrix * Vec3::from_array(*rgb)).to_array();
+        }
+        Ok(())
+    }
+}
+
+fn convert_to_working(image: &mut Rgb32FImage, from_profile: Option<&ProfileToWorking>) {
+    let row_len = image.width() as usize * 3;
+    if row_len == 0 {
+        return;
+    }
+    let transfer = srgb_transfer();
+
+    image.par_chunks_mut(row_len).for_each_init(
+        || vec![0.0f32; row_len],
+        |linear, row| {
+            let converted =
+                from_profile.is_some_and(|transform| transform.apply(row, linear).is_ok());
+            if !converted {
+                srgb_to_linear_working(row, linear);
+            }
+            for (out, rgb) in row
+                .as_chunks_mut::<3>()
+                .0
+                .iter_mut()
+                .zip(linear.as_chunks::<3>().0)
+            {
+                let fitted = fit_gamut(*rgb, &[None; 3]);
+                let scale = fitted[0].max(fitted[1]).max(fitted[2]).max(1.0);
+                *out = fitted.map(|c| transfer.encode(c / scale));
+            }
+        },
+    );
+}
+
+fn composite_patches_cow<'a>(
+    base_image: Cow<'a, DynamicImage>,
+    (canon_w, canon_h): (u32, u32),
+    path: &str,
+    current_adjustments: &Value,
+) -> Result<Cow<'a, DynamicImage>> {
+    let patches_val = match current_adjustments.get("aiPatches") {
+        Some(val) => val,
+        None => return Ok(base_image),
+    };
+
+    let patches_arr = match patches_val.as_array() {
+        Some(arr) if !arr.is_empty() => arr,
+        _ => return Ok(base_image),
+    };
+
+    let visible_patches: Vec<&Value> = patches_arr
+        .par_iter()
+        .filter(|patch_obj| {
+            let is_visible = patch_obj
+                .get("visible")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
+            if !is_visible {
+                return false;
+            }
+            patch_obj
+                .get("patchData")
+                .and_then(|data| data.get("color"))
+                .and_then(|color| color.as_str())
+                .is_some_and(|s| !s.is_empty())
+        })
+        .collect();
+
+    if visible_patches.is_empty() {
+        return Ok(base_image);
+    }
+
+    let (base_w, base_h) = base_image.dimensions();
+    let scale = (base_w / canon_w.max(1)).max(1);
+
+    struct DecodedPatch {
+        offset_x: Option<u32>,
+        offset_y: Option<u32>,
+        mask: image::GrayImage,
+        color: image::RgbImage,
+        is_srgb_encoded: bool,
+        is_working_space: bool,
+    }
+
+    let decoded_patches: Result<Vec<DecodedPatch>> = visible_patches
+        .par_iter()
+        .map(|patch_obj| {
+            let patch_data = patch_obj.get("patchData").context("Missing patchData")?;
+            let offset_x = patch_data
+                .get("offsetX")
+                .and_then(|v| v.as_u64())
+                .map(|v| v as u32);
+            let offset_y = patch_data
+                .get("offsetY")
+                .and_then(|v| v.as_u64())
+                .map(|v| v as u32);
+            let is_cropped = offset_x.is_some() && offset_y.is_some();
+
+            let is_srgb_encoded = patch_data
+                .get("isSrgbEncoded")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let is_working_space =
+                patch_data.get("primaries").and_then(|v| v.as_str()) == Some(PATCH_PRIMARIES);
+
+            let mask_bitmap = if let Some(mask_b64) = patch_data
+                .get("mask")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+            {
+                let mask_bytes = general_purpose::STANDARD.decode(mask_b64)?;
+                let mask_img = image::load_from_memory(&mask_bytes)?.into_luma8();
+                if !is_cropped && (mask_img.width() != canon_w || mask_img.height() != canon_h) {
+                    imageops::resize(&mask_img, canon_w, canon_h, imageops::FilterType::Lanczos3)
+                } else {
+                    mask_img
+                }
+            } else {
+                let patch_info = PatchMaskInfo::deserialize(*patch_obj)
+                    .context("Failed to deserialize patch info for mask generation")?;
+
+                let mask_def = MaskDefinition {
+                    id: patch_info.id,
+                    name: patch_info.name,
+                    visible: true,
+                    invert: patch_info.invert,
+                    opacity: 100.0,
+                    adjustments: Value::Null,
+                    sub_masks: patch_info.sub_masks,
+                };
+
+                let orientation_steps = current_adjustments
+                    .get("orientationSteps")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as u8;
+                let (trans_w, trans_h) = if orientation_steps % 2 == 1 {
+                    (canon_h, canon_w)
+                } else {
+                    (canon_w, canon_h)
+                };
+
+                let mut gen_mask =
+                    generate_mask_bitmap(&mask_def, trans_w, trans_h, 1.0, (0.0, 0.0), None)
+                        .context("Failed to generate mask from sub_masks for compositing")?;
+
+                gen_mask = inverse_transform_mask(gen_mask, path, current_adjustments);
+
+                if let (Some(ox), Some(oy)) = (offset_x, offset_y) {
+                    let w = patch_data
+                        .get("width")
+                        .and_then(|v| v.as_u64())
+                        .map(|v| v as u32)
+                        .unwrap_or(canon_w);
+                    let h = patch_data
+                        .get("height")
+                        .and_then(|v| v.as_u64())
+                        .map(|v| v as u32)
+                        .unwrap_or(canon_h);
+                    let crop_w = w.min(canon_w.saturating_sub(ox));
+                    let crop_h = h.min(canon_h.saturating_sub(oy));
+                    gen_mask = imageops::crop_imm(&gen_mask, ox, oy, crop_w, crop_h).to_image();
+                }
+                gen_mask
+            };
+
+            let color_b64 = patch_data
+                .get("color")
+                .and_then(|v| v.as_str())
+                .context("Missing color data")?;
+            let color_bytes = general_purpose::STANDARD.decode(color_b64)?;
+            let color_image_u8 = image::load_from_memory(&color_bytes)?.into_rgb8();
+
+            let (patch_w, patch_h) = color_image_u8.dimensions();
+            let final_color = if !is_cropped && (canon_w != patch_w || canon_h != patch_h) {
+                imageops::resize(
+                    &color_image_u8,
+                    canon_w,
+                    canon_h,
+                    imageops::FilterType::Lanczos3,
+                )
+            } else {
+                color_image_u8
+            };
+
+            let (mask_bitmap, final_color) = if scale == 1 {
+                (mask_bitmap, final_color)
+            } else {
+                let (w, h) = mask_bitmap.dimensions();
+                let (sw, sh) = (w * scale, h * scale);
+                (
+                    imageops::resize(&mask_bitmap, sw, sh, imageops::FilterType::Triangle),
+                    imageops::resize(&final_color, sw, sh, imageops::FilterType::CatmullRom),
+                )
+            };
+
+            Ok(DecodedPatch {
+                offset_x: offset_x.map(|v| v * scale),
+                offset_y: offset_y.map(|v| v * scale),
+                mask: mask_bitmap,
+                color: final_color,
+                is_srgb_encoded,
+                is_working_space,
+            })
+        })
+        .collect();
+
+    let decoded_patches = decoded_patches?;
+
+    let mut composited_image = base_image.into_owned();
+    let lut = srgb_to_linear_lut();
+
+    let from_srgb = srgb_to_working();
+
+    let get_color = |patch: &DecodedPatch, r: u8, g: u8, b: u8| -> (f32, f32, f32) {
+        let linear = || Vec3::new(lut[r as usize], lut[g as usize], lut[b as usize]);
+        match (patch.is_working_space, patch.is_srgb_encoded) {
+            (true, true) => linear().into(),
+            (true, false) => (r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0),
+            (false, true) => (from_srgb * linear()).into(),
+            (false, false) => (from_srgb * linear()).map(srgb_encode).into(),
+        }
+    };
+
+    match &mut composited_image {
+        DynamicImage::ImageRgb32F(img_buf) => {
+            for patch in decoded_patches {
+                let mask_raw = patch.mask.as_raw();
+                let color_raw = patch.color.as_raw();
+                let patch_w = patch.mask.width() as usize;
+
+                if let (Some(ox), Some(oy)) = (patch.offset_x, patch.offset_y) {
+                    let max_x = (ox + patch.mask.width()).min(base_w);
+                    let max_y = (oy + patch.mask.height()).min(base_h);
+
+                    let crop_w = max_x.saturating_sub(ox) as usize;
+                    let crop_h = max_y.saturating_sub(oy) as usize;
+
+                    if crop_w == 0 || crop_h == 0 {
+                        continue;
+                    }
+
+                    let base_w_usize = base_w as usize;
+                    let ox_usize = ox as usize;
+                    let oy_usize = oy as usize;
+
+                    img_buf
+                        .par_chunks_mut(base_w_usize * 3)
+                        .enumerate()
+                        .skip(oy_usize)
+                        .take(crop_h)
+                        .for_each(|(y, row)| {
+                            let py = y - oy_usize;
+                            let patch_row_start = py * patch_w;
+
+                            for x in ox_usize..(ox_usize + crop_w) {
+                                let px = x - ox_usize;
+                                let mask_idx = patch_row_start + px;
+                                let mask_value = mask_raw[mask_idx];
+
+                                if mask_value > 0 {
+                                    let color_idx = mask_idx * 3;
+                                    let pr_u8 = color_raw[color_idx];
+                                    let pg_u8 = color_raw[color_idx + 1];
+                                    let pb_u8 = color_raw[color_idx + 2];
+
+                                    let (pr, pg, pb) = get_color(&patch, pr_u8, pg_u8, pb_u8);
+
+                                    let alpha = mask_value as f32 / 255.0;
+                                    let one_minus_alpha = 1.0 - alpha;
+
+                                    let base_idx = x * 3;
+                                    row[base_idx] = pr * alpha + row[base_idx] * one_minus_alpha;
+                                    row[base_idx + 1] =
+                                        pg * alpha + row[base_idx + 1] * one_minus_alpha;
+                                    row[base_idx + 2] =
+                                        pb * alpha + row[base_idx + 2] * one_minus_alpha;
+                                }
+                            }
+                        });
+                } else {
+                    img_buf
+                        .par_chunks_mut((base_w * 3) as usize)
+                        .enumerate()
+                        .for_each(|(y, row)| {
+                            let patch_row_start = y * patch_w;
+                            for x in 0..base_w as usize {
+                                let mask_idx = patch_row_start + x;
+                                let mask_value = mask_raw[mask_idx];
+                                if mask_value > 0 {
+                                    let color_idx = mask_idx * 3;
+                                    let pr_u8 = color_raw[color_idx];
+                                    let pg_u8 = color_raw[color_idx + 1];
+                                    let pb_u8 = color_raw[color_idx + 2];
+
+                                    let (pr, pg, pb) = get_color(&patch, pr_u8, pg_u8, pb_u8);
+
+                                    let alpha = mask_value as f32 / 255.0;
+                                    let one_minus_alpha = 1.0 - alpha;
+
+                                    row[x * 3] = pr * alpha + row[x * 3] * one_minus_alpha;
+                                    row[x * 3 + 1] = pg * alpha + row[x * 3 + 1] * one_minus_alpha;
+                                    row[x * 3 + 2] = pb * alpha + row[x * 3 + 2] * one_minus_alpha;
+                                }
+                            }
+                        });
+                }
+            }
+        }
+        DynamicImage::ImageRgba32F(img_buf) => {
+            for patch in decoded_patches {
+                let mask_raw = patch.mask.as_raw();
+                let color_raw = patch.color.as_raw();
+                let patch_w = patch.mask.width() as usize;
+
+                if let (Some(ox), Some(oy)) = (patch.offset_x, patch.offset_y) {
+                    let max_x = (ox + patch.mask.width()).min(base_w);
+                    let max_y = (oy + patch.mask.height()).min(base_h);
+
+                    let crop_w = max_x.saturating_sub(ox) as usize;
+                    let crop_h = max_y.saturating_sub(oy) as usize;
+
+                    if crop_w == 0 || crop_h == 0 {
+                        continue;
+                    }
+
+                    let base_w_usize = base_w as usize;
+                    let ox_usize = ox as usize;
+                    let oy_usize = oy as usize;
+
+                    img_buf
+                        .par_chunks_mut(base_w_usize * 4)
+                        .enumerate()
+                        .skip(oy_usize)
+                        .take(crop_h)
+                        .for_each(|(y, row)| {
+                            let py = y - oy_usize;
+                            let patch_row_start = py * patch_w;
+
+                            for x in ox_usize..(ox_usize + crop_w) {
+                                let px = x - ox_usize;
+                                let mask_idx = patch_row_start + px;
+                                let mask_value = mask_raw[mask_idx];
+
+                                if mask_value > 0 {
+                                    let color_idx = mask_idx * 3;
+                                    let pr_u8 = color_raw[color_idx];
+                                    let pg_u8 = color_raw[color_idx + 1];
+                                    let pb_u8 = color_raw[color_idx + 2];
+
+                                    let (pr, pg, pb) = get_color(&patch, pr_u8, pg_u8, pb_u8);
+                                    let alpha = mask_value as f32 / 255.0;
+                                    let one_minus_alpha = 1.0 - alpha;
+
+                                    let base_idx = x * 4;
+                                    row[base_idx] = pr * alpha + row[base_idx] * one_minus_alpha;
+                                    row[base_idx + 1] =
+                                        pg * alpha + row[base_idx + 1] * one_minus_alpha;
+                                    row[base_idx + 2] =
+                                        pb * alpha + row[base_idx + 2] * one_minus_alpha;
+                                }
+                            }
+                        });
+                } else {
+                    img_buf
+                        .par_chunks_mut((base_w * 4) as usize)
+                        .enumerate()
+                        .for_each(|(y, row)| {
+                            let patch_row_start = y * patch_w;
+                            for x in 0..base_w as usize {
+                                let mask_idx = patch_row_start + x;
+                                let mask_value = mask_raw[mask_idx];
+                                if mask_value > 0 {
+                                    let color_idx = mask_idx * 3;
+                                    let pr_u8 = color_raw[color_idx];
+                                    let pg_u8 = color_raw[color_idx + 1];
+                                    let pb_u8 = color_raw[color_idx + 2];
+
+                                    let (pr, pg, pb) = get_color(&patch, pr_u8, pg_u8, pb_u8);
+
+                                    let alpha = mask_value as f32 / 255.0;
+                                    let one_minus_alpha = 1.0 - alpha;
+
+                                    row[x * 4] = pr * alpha + row[x * 4] * one_minus_alpha;
+                                    row[x * 4 + 1] = pg * alpha + row[x * 4 + 1] * one_minus_alpha;
+                                    row[x * 4 + 2] = pb * alpha + row[x * 4 + 2] * one_minus_alpha;
+                                }
+                            }
+                        });
+                }
+            }
+        }
+        _ => {
+            let mut rgba32_img = composited_image.to_rgba32f();
+            for patch in decoded_patches {
+                let mask_raw = patch.mask.as_raw();
+                let color_raw = patch.color.as_raw();
+                let patch_w = patch.mask.width() as usize;
+
+                if let (Some(ox), Some(oy)) = (patch.offset_x, patch.offset_y) {
+                    let max_x = (ox + patch.mask.width()).min(base_w);
+                    let max_y = (oy + patch.mask.height()).min(base_h);
+
+                    let crop_w = max_x.saturating_sub(ox) as usize;
+                    let crop_h = max_y.saturating_sub(oy) as usize;
+
+                    if crop_w == 0 || crop_h == 0 {
+                        continue;
+                    }
+
+                    let base_w_usize = base_w as usize;
+                    let ox_usize = ox as usize;
+                    let oy_usize = oy as usize;
+
+                    rgba32_img
+                        .par_chunks_mut(base_w_usize * 4)
+                        .enumerate()
+                        .skip(oy_usize)
+                        .take(crop_h)
+                        .for_each(|(y, row)| {
+                            let py = y - oy_usize;
+                            let patch_row_start = py * patch_w;
+
+                            for x in ox_usize..(ox_usize + crop_w) {
+                                let px = x - ox_usize;
+                                let mask_idx = patch_row_start + px;
+                                let mask_value = mask_raw[mask_idx];
+
+                                if mask_value > 0 {
+                                    let color_idx = mask_idx * 3;
+                                    let pr_u8 = color_raw[color_idx];
+                                    let pg_u8 = color_raw[color_idx + 1];
+                                    let pb_u8 = color_raw[color_idx + 2];
+
+                                    let (pr, pg, pb) = get_color(&patch, pr_u8, pg_u8, pb_u8);
+                                    let alpha = mask_value as f32 / 255.0;
+                                    let one_minus_alpha = 1.0 - alpha;
+
+                                    let base_idx = x * 4;
+                                    row[base_idx] = pr * alpha + row[base_idx] * one_minus_alpha;
+                                    row[base_idx + 1] =
+                                        pg * alpha + row[base_idx + 1] * one_minus_alpha;
+                                    row[base_idx + 2] =
+                                        pb * alpha + row[base_idx + 2] * one_minus_alpha;
+                                }
+                            }
+                        });
+                } else {
+                    rgba32_img
+                        .par_chunks_mut((base_w * 4) as usize)
+                        .enumerate()
+                        .for_each(|(y, row)| {
+                            let patch_row_start = y * patch_w;
+                            for x in 0..base_w as usize {
+                                let mask_idx = patch_row_start + x;
+                                let mask_value = mask_raw[mask_idx];
+                                if mask_value > 0 {
+                                    let color_idx = mask_idx * 3;
+                                    let pr_u8 = color_raw[color_idx];
+                                    let pg_u8 = color_raw[color_idx + 1];
+                                    let pb_u8 = color_raw[color_idx + 2];
+
+                                    let (pr, pg, pb) = get_color(&patch, pr_u8, pg_u8, pb_u8);
+                                    let alpha = mask_value as f32 / 255.0;
+                                    let one_minus_alpha = 1.0 - alpha;
+
+                                    row[x * 4] = pr * alpha + row[x * 4] * one_minus_alpha;
+                                    row[x * 4 + 1] = pg * alpha + row[x * 4 + 1] * one_minus_alpha;
+                                    row[x * 4 + 2] = pb * alpha + row[x * 4 + 2] * one_minus_alpha;
+                                }
+                            }
+                        });
+                }
+            }
+            composited_image = DynamicImage::ImageRgba32F(rgba32_img);
+        }
+    }
+
+    Ok(Cow::Owned(composited_image))
+}
+
+fn is_cancelled(cancel_token: &Option<(Arc<AtomicUsize>, usize)>) -> bool {
+    cancel_token
+        .as_ref()
+        .is_some_and(|(tracker, generation)| tracker.load(Ordering::SeqCst) != *generation)
+}
+
+pub fn decode_pristine(
+    source_path: &Path,
+    path_str: &str,
+    settings: &AppSettings,
+    cancel_token: Option<(Arc<AtomicUsize>, usize)>,
+) -> Result<(DynamicImage, HashMap<String, String>), String> {
+    if crate::library::file_ops::is_cloud_placeholder(source_path) {
+        return Err(format!(
+            "'{}' is stored in iCloud and hasn't been downloaded yet. Download it in Finder, then try again.",
+            path_str
+        ));
+    }
+    let decode = |bytes: &[u8]| -> Result<(DynamicImage, HashMap<String, String>), String> {
+        if is_cancelled(&cancel_token) {
+            return Err("Load cancelled".to_string());
+        }
+        let image =
+            load_base_image_from_bytes(bytes, path_str, false, settings, cancel_token.clone())
+                .map_err(|e| e.to_string())?;
+        crate::decode::as_shot::as_shot_from_bytes(path_str, bytes);
+        Ok((image, sidecar::read_exif_data(path_str, bytes)))
+    };
+    match read_file_mapped(source_path) {
+        Ok(mmap) => decode(&mmap),
+        Err(e) => {
+            log::warn!(
+                "Failed to memory-map file '{}': {}. Falling back to standard read.",
+                path_str,
+                e
+            );
+            let bytes = fs::read(source_path)
+                .map_err(|io_err| format!("Fallback read failed for {}: {}", path_str, io_err))?;
+            decode(&bytes)
+        }
+    }
+}
+
+pub fn cache_pristine(
+    state: &AppState,
+    path_str: String,
+    fingerprint: Option<DecodeFingerprint>,
+    image: DynamicImage,
+    exif: HashMap<String, String>,
+) -> (Arc<DynamicImage>, HashMap<String, String>) {
+    let image = Arc::new(image);
+    if let Some(fp) = fingerprint {
+        state.decoded_image_cache.lock().unwrap().insert(
+            path_str,
+            fp,
+            Arc::clone(&image),
+            exif.clone(),
+        );
+    }
+    (image, exif)
+}
+
+pub fn get_or_decode_pristine(
+    state: &AppState,
+    source_path: &Path,
+    settings: &AppSettings,
+    cancel_token: Option<(Arc<AtomicUsize>, usize)>,
+) -> Result<(Arc<DynamicImage>, HashMap<String, String>), String> {
+    let path_str = source_path.to_string_lossy().to_string();
+    let fingerprint = DecodeFingerprint::for_file(source_path, settings);
+    let cached = || {
+        fingerprint
+            .as_ref()
+            .and_then(|fp| state.decoded_image_cache.lock().unwrap().get(&path_str, fp))
+    };
+    loop {
+        if let Some(hit) = cached() {
+            return Ok(hit);
+        }
+        if is_cancelled(&cancel_token) {
+            return Err("Load cancelled".to_string());
+        }
+        let _flight = match state.decode_flights.begin(&path_str) {
+            FlightRole::Follower(flight) => {
+                flight.wait();
+                continue;
+            }
+            FlightRole::Leader(guard) => guard,
+        };
+        if let Some(hit) = cached() {
+            return Ok(hit);
+        }
+
+        let (image, exif) = decode_pristine(source_path, &path_str, settings, cancel_token)?;
+        return Ok(cache_pristine(state, path_str, fingerprint, image, exif));
+    }
+}
+
+#[tauri::command]
+pub fn is_image_cached(
+    path: String,
+    state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> bool {
+    let (source_path, _) = parse_virtual_path(&path);
+    let settings = load_settings(app_handle).unwrap_or_default();
+    let Some(fingerprint) = DecodeFingerprint::for_file(&source_path, &settings) else {
+        return false;
+    };
+    state
+        .decoded_image_cache
+        .lock()
+        .unwrap()
+        .contains(&source_path.to_string_lossy(), &fingerprint)
+}
+
+#[tauri::command]
+pub async fn load_image(
+    path: String,
+    state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<LoadImageResult, String> {
+    let (source_path, sidecar_path) = parse_virtual_path(&path);
+    let source_path_str = source_path.to_string_lossy().to_string();
+    let _preload_guard = state.image_preloader.begin_load(&source_path_str);
+
+    let my_generation = state.load_image_generation.fetch_add(1, Ordering::SeqCst) + 1;
+    let cancel_token = Some((state.load_image_generation.clone(), my_generation));
+
+    {
+        *state
+            .original_image
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = None;
+        for target in PreviewTarget::ALL {
+            clear_preview_slot(&state, target);
+        }
+        *state
+            .full_warped_cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = None;
+        crate::render::cache_utils::clear_preview_stage_caches(&state);
+
+        state
+            .mask_cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
+        state
+            .patch_cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
+        state
+            .uncropped_source_cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
+
+        *state.hdr_result.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    }
+
+    crate::integrations::immich::ensure_local(&app_handle, &source_path).await?;
+
+    let metadata: ImageMetadata = crate::metadata::sidecar::load_sidecar(&sidecar_path);
+
+    let settings = load_settings(app_handle.clone()).unwrap_or_default();
+    let baseline_options = BaselineOptions::from_settings(&settings);
+
+    state
+        .decoded_image_cache
+        .lock()
+        .unwrap()
+        .promote(&source_path_str);
+
+    // Serialise decodes (fork): one in-flight full-res decode at a time, so a burst
+    // of navigation can't stack up hundreds of MB per queued image. Cache hits pass
+    // through quickly; same-file requests share a decode via `decode_flights`.
+    let _decode_permit = state
+        .decode_permit
+        .acquire()
+        .await
+        .map_err(|e| e.to_string())?;
+    if state.load_image_generation.load(Ordering::SeqCst) != my_generation {
+        return Err("Load cancelled".to_string());
+    }
+
+    let (pristine_arc, exif_data) = {
+        let app_handle = app_handle.clone();
+        let source_path = source_path.clone();
+        tokio::task::spawn_blocking(move || {
+            let state = app_handle.state::<AppState>();
+            get_or_decode_pristine(&state, &source_path, &settings, cancel_token)
+        })
+        .await
+        .map_err(|e| e.to_string())??
+    };
+
+    if state.load_image_generation.load(Ordering::SeqCst) != my_generation {
+        return Err("Load cancelled".to_string());
+    }
+
+    let is_raw = is_raw_file(&source_path_str);
+
+    if state.load_image_generation.load(Ordering::SeqCst) != my_generation {
+        return Err("Load cancelled".to_string());
+    }
+
+    let (orig_width, orig_height) = pristine_arc.dimensions();
+    let as_shot = crate::decode::as_shot::as_shot(&source_path_str);
+    if is_raw {
+        log::info!(
+            "Baseline exposure for '{}': {:+.2} EV (DNG baseline {:+.2} EV, highlight preservation {:+.2} EV)",
+            source_path_str,
+            effective_baseline_exposure(&metadata.adjustments, as_shot, baseline_options),
+            as_shot.exposure.dng_baseline.unwrap_or(0.0),
+            as_shot.exposure.highlight_preservation
+        );
+    }
+
+    *state.original_image.lock().unwrap() = Some(LoadedImage {
+        path: path.clone(),
+        image: pristine_arc,
+        is_raw,
+        as_shot,
+    });
+
+    crate::ai::jobs::prioritize(&app_handle, &path);
+
+    Ok(LoadImageResult {
+        width: orig_width,
+        height: orig_height,
+        metadata,
+        exif: exif_data,
+        is_raw,
+        as_shot_white_balance: as_shot.white_balance,
+        is_embedded_preview: is_embedded_preview(&source_path_str),
+    })
+}

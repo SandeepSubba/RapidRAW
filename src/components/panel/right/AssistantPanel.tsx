@@ -24,7 +24,8 @@ import { listen } from '@tauri-apps/api/event';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'react-toastify';
 import clsx from 'clsx';
-import { ImageFlag, Invokes } from '../../ui/AppProperties';
+import { ImageFlag } from '../../../types/library';
+import { Invokes } from '../../../types/invokes';
 import Text from '../../ui/Text';
 import { TextColors, TextVariants } from '../../../types/typography';
 import { useEditorStore } from '../../../store/useEditorStore';
@@ -61,7 +62,7 @@ import {
 } from '../../../utils/adjustments';
 import { useAuth } from '@clerk/react';
 import { createSubMask } from '../../../utils/maskUtils';
-import { Mask, SubMaskMode } from './Masks';
+import { Mask, SubMaskMode } from '../../../types/masks';
 import { v4 as uuidv4 } from 'uuid';
 
 // The develop-slider fields the assistant is allowed to set, with their valid

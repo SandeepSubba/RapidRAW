@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import { Invokes } from '../components/ui/AppProperties';
+import { Invokes } from '../types/invokes';
 
 // Comparative culling from the Assistant chat. Per-image batch chat sends every
 // photo in its own conversation, so the model can never compare frames. Here

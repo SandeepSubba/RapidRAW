@@ -5,19 +5,20 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'react-toastify';
 import { useTranslation } from 'react-i18next';
 import clsx from 'clsx';
-import { Invokes } from '../../ui/AppProperties';
-import FlagToggles from '../../ui/FlagToggles';
+import { Invokes } from '../../../types/invokes';
+import FlagToggles from '../library/FlagToggles';
 import { getImageFlag } from '../../../utils/imageFlags';
 import { COLOR_LABELS, Color } from '../../../utils/adjustments';
 import Text from '../../ui/Text';
 import { TextColors, TextVariants, TextWeights } from '../../../types/typography';
-import { IconAperture, IconShutter, IconIso, IconFocalLength, IconLens } from '../editor/ExifIcons';
+import { IconAperture, IconShutter, IconIso, IconFocalLength, IconLens, IconCamera } from '../editor/ExifIcons';
 import { useEditorStore } from '../../../store/useEditorStore';
 import { useLibraryStore } from '../../../store/useLibraryStore';
 import { useSettingsStore } from '../../../store/useSettingsStore';
 import { useProcessStore } from '../../../store/useProcessStore';
 import { useLibraryActions } from '../../../hooks/useLibraryActions';
 import { expandGroupedPaths } from '../../../utils/imageGrouping';
+import type { ParseKeys } from 'i18next';
 
 interface CameraSetting {
   format?(value: number): string | number;
@@ -30,6 +31,8 @@ interface CameraSettings {
   FNumber: CameraSetting;
   FocalLengthIn35mmFilm: CameraSetting;
   LensModel: CameraSetting;
+  Make: CameraSetting;
+  Model: CameraSetting;
   PhotographicSensitivity: CameraSetting;
 }
 
@@ -67,6 +70,7 @@ const CAMERA_ICONS: Record<string, React.FC> = {
   ExposureTime: IconShutter,
   PhotographicSensitivity: IconIso,
   FocalLengthIn35mmFilm: IconFocalLength,
+  Model: IconCamera,
   LensModel: IconLens,
 };
 
@@ -247,7 +251,7 @@ const EDITABLE_FIELDS = [
   { key: 'Artist', label: 'author' },
   { key: 'Copyright', label: 'copyright' },
   { key: 'UserComment', label: 'comments' },
-];
+] as const;
 
 const KEY_CAMERA_SETTINGS_MAP: CameraSettings = {
   FNumber: {
@@ -268,6 +272,14 @@ const KEY_CAMERA_SETTINGS_MAP: CameraSettings = {
   FocalLengthIn35mmFilm: {
     format: (value: number) => (String(value).endsWith('mm') ? value : `${value} mm`),
     label: 'Focal Length',
+  },
+  Make: {
+    format: (value: number) => String(value).replace(/"/g, ''),
+    label: 'Camera Make',
+  },
+  Model: {
+    format: (value: number) => String(value).replace(/"/g, ''),
+    label: 'Camera Model',
   },
   LensModel: {
     format: (value: number) => String(value).replace(/"/g, ''),
@@ -508,6 +520,7 @@ export default function MetadataPanel() {
   };
 
   const LensIcon = CAMERA_ICONS['LensModel'];
+  const CameraIcon = CAMERA_ICONS['Model'];
 
   return (
     <div className="flex flex-col h-full">
@@ -622,7 +635,6 @@ export default function MetadataPanel() {
                     );
                   })}
                 </div>
-
                 <div
                   className="flex items-center gap-2 bg-surface border border-surface px-3 py-2 rounded-xl cursor-default"
                   data-tooltip={lensSetting.label}
@@ -680,7 +692,7 @@ export default function MetadataPanel() {
                         {creatorFields.map((field) => (
                           <EditableMetadataItem
                             key={field.key}
-                            label={t(`editor.metadata.fields.${field.label}`)}
+                            label={t(`editor.metadata.fields.${field.label}` as ParseKeys)}
                             value={field.value}
                             mixed={field.mixed}
                             onSave={(newVal) => {

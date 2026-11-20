@@ -1,0 +1,783 @@
+pub mod candidates;
+pub mod hierarchy;
+
+use anyhow::Result;
+use futures::stream::{self, StreamExt};
+use image::{DynamicImage, imageops::FilterType};
+use ndarray::{Array, Axis};
+use ort::session::Session;
+use ort::value::Tensor;
+use rayon::prelude::*;
+use std::collections::{HashMap, HashSet};
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use tauri::{AppHandle, Emitter, Manager, State};
+use tokenizers::Tokenizer;
+use tokio::task::JoinHandle;
+use walkdir::WalkDir;
+
+use crate::app::settings::load_settings;
+use crate::app::state::AppState;
+use crate::decode::formats::is_supported_image_file;
+use crate::library::sidecars::parse_virtual_path;
+use crate::library::tagging::candidates::TAG_CANDIDATES;
+use crate::library::tagging::hierarchy::TAG_HIERARCHY;
+use crate::library::thumbnails;
+use crate::metadata::sidecar::ImageMetadata;
+use crate::metadata::xmp;
+
+pub const COLOR_TAG_PREFIX: &str = "color:";
+pub const USER_TAG_PREFIX: &str = "user:";
+
+fn preprocess_clip_image(image: &DynamicImage) -> Array<f32, ndarray::Dim<[usize; 4]>> {
+    let input_size = 224;
+    let resized = image.resize_to_fill(input_size, input_size, FilterType::Triangle);
+    let rgb_image = resized.to_rgb8();
+
+    let mean = [0.48145466, 0.4578275, 0.40821073];
+    let std = [0.26862954, 0.261_302_6, 0.275_777_1];
+
+    let mut array = Array::zeros((1, 3, input_size as usize, input_size as usize));
+    for (x, y, pixel) in rgb_image.enumerate_pixels() {
+        array[[0, 0, y as usize, x as usize]] = (pixel[0] as f32 / 255.0 - mean[0]) / std[0];
+        array[[0, 1, y as usize, x as usize]] = (pixel[1] as f32 / 255.0 - mean[1]) / std[1];
+        array[[0, 2, y as usize, x as usize]] = (pixel[2] as f32 / 255.0 - mean[2]) / std[2];
+    }
+    array
+}
+
+fn softmax(array: &Array<f32, ndarray::Dim<[usize; 2]>>) -> Array<f32, ndarray::Dim<[usize; 2]>> {
+    let mut new_array = array.clone();
+    for mut row in new_array.axis_iter_mut(Axis(0)) {
+        let max_val = row.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b));
+        row.mapv_inplace(|x| (x - max_val).exp());
+        let sum = row.sum();
+        if sum > 0.0 {
+            row.mapv_inplace(|x| x / sum);
+        }
+    }
+    new_array
+}
+
+/// Run the bundled combined CLIP model as a zero-shot classifier: returns the softmax
+/// probability of each `prompts` entry for `image` (row 0 of the logits). Reused for both
+/// whole-image and per-face-crop classification.
+fn clip_prompt_probs(
+    image: &DynamicImage,
+    clip_session_mutex: &Mutex<Session>,
+    tokenizer: &Tokenizer,
+    prompts: &[&str],
+) -> Result<Vec<f32>> {
+    let text_inputs: Vec<String> = prompts.iter().map(|s| s.to_string()).collect();
+    let image_input = preprocess_clip_image(image);
+
+    let encodings = tokenizer
+        .encode_batch(text_inputs.clone(), true)
+        .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+    let max_len = encodings
+        .iter()
+        .map(|e| e.get_ids().len())
+        .max()
+        .unwrap_or(0);
+
+    let mut ids_data = Vec::new();
+    let mut mask_data = Vec::new();
+    for encoding in encodings {
+        let mut ids = encoding
+            .get_ids()
+            .iter()
+            .map(|&i| i as i64)
+            .collect::<Vec<_>>();
+        let mut mask = encoding
+            .get_attention_mask()
+            .iter()
+            .map(|&m| m as i64)
+            .collect::<Vec<_>>();
+        ids.resize(max_len, 0);
+        mask.resize(max_len, 0);
+        ids_data.extend_from_slice(&ids);
+        mask_data.extend_from_slice(&mask);
+    }
+
+    let ids_array = Array::from_shape_vec((text_inputs.len(), max_len), ids_data)?;
+    let mask_array = Array::from_shape_vec((text_inputs.len(), max_len), mask_data)?;
+
+    let image_input_dyn = image_input.into_dyn();
+    let ids_array_dyn = ids_array.into_dyn();
+    let mask_array_dyn = mask_array.into_dyn();
+
+    let image_val = Tensor::from_array(image_input_dyn.as_standard_layout().into_owned())?;
+    let ids_val = Tensor::from_array(ids_array_dyn.as_standard_layout().into_owned())?;
+    let mask_val = Tensor::from_array(mask_array_dyn.as_standard_layout().into_owned())?;
+
+    let mut clip_session = clip_session_mutex.lock().unwrap();
+    let outputs = clip_session.run(ort::inputs![ids_val, image_val, mask_val])?;
+    let logits_dyn = outputs[0].try_extract_array::<f32>()?.to_owned();
+    let logits = logits_dyn.into_dimensionality::<ndarray::Dim<[usize; 2]>>()?;
+    let probs = softmax(&logits);
+    Ok(probs.row(0).to_vec())
+}
+
+/// CLIP zero-shot aesthetic/composition score in [0,1] for non-people photos (landscape,
+/// product, food, still life) — how well-composed/lit/appealing the frame looks. Coarse, but
+/// it adds a composition cue that pure sharpness/exposure can't capture. Reuses the bundled
+/// CLIP model.
+pub fn clip_aesthetic(
+    image: &DynamicImage,
+    clip_session: &Mutex<Session>,
+    tokenizer: &Tokenizer,
+) -> Result<f32> {
+    const PROMPTS: [&str; 2] = [
+        "a sharp, well-composed, well-lit, appealing photograph",
+        "a blurry, poorly composed, badly lit, dull photograph",
+    ];
+    let probs = clip_prompt_probs(image, clip_session, tokenizer, &PROMPTS)?;
+    Ok(probs[0].clamp(0.0, 1.0))
+}
+
+/// Interpretable per-photo people cues, each in [0,1], aggregated over the detected faces.
+/// These feed both the default people score and the "learn from my picks" model.
+#[derive(Clone, Copy, Debug)]
+pub struct FaceCues {
+    pub face_sharp: f32, // mean per-face sharpness (focus on the subjects)
+    pub eye_sharp: f32,  // mean per-face sharpness at the sharper eye (where focus belongs)
+    pub face_light: f32, // mean per-face exposure: 1 = well lit, 0 = in deep shadow / blown
+    pub look_mean: f32,  // mean P(looking at camera)
+    pub look_worst: f32, // worst single face's P(looking at camera)
+    pub expr_mean: f32,  // mean P(smiling) — expression
+    pub eyes_worst: f32, // worst single face's P(eyes open)
+}
+
+/// Detects every face and grades each *cropped face* with one CLIP softmax, returning
+/// interpretable cues (looking-at-camera, expression, eyes-open, face sharpness) aggregated
+/// across faces — `*_worst` keeps the single worst face so one blinker/looker-away demotes
+/// the frame. Returns `None` when no faces are detected (caller falls back to technical).
+///
+/// Faces are found and read by CLIP on `image` (the 1920px working copy); focus and light
+/// are measured on the same faces in `full` (full size), where a missed eye still shows.
+pub fn score_faces(
+    image: &DynamicImage,
+    full: &DynamicImage,
+    face_session: &Mutex<Session>,
+    clip_session: &Mutex<Session>,
+    tokenizer: &Tokenizer,
+) -> Result<Option<FaceCues>> {
+    // One CLIP softmax per face over five states. Index meanings:
+    // 0 smiling+camera · 1 neutral+camera · 2 eyes-closed · 3 looking-away · 4 frowning.
+    const FACE_PROMPTS: [&str; 5] = [
+        "a close-up photo of a smiling happy face looking at the camera",
+        "a close-up photo of a face looking at the camera with a neutral expression",
+        "a close-up photo of a face with closed eyes, blinking",
+        "a close-up photo of a face turned away from the camera",
+        "a close-up photo of an unhappy frowning face",
+    ];
+    const MAX_FACES: usize = 8; // cap work on big group shots; largest faces first
+
+    let faces = crate::ai::models::run_face_detection(image, face_session)?;
+    if faces.is_empty() {
+        return Ok(None);
+    }
+
+    let (iw, ih) = (image.width() as f32, image.height() as f32);
+    let k = full.width() as f32 / iw; // working-copy → full-size coordinates
+    let mut look: Vec<f32> = Vec::new();
+    let mut expr: Vec<f32> = Vec::new();
+    let mut eyes_open: Vec<f32> = Vec::new();
+    let mut sharp: Vec<f32> = Vec::new();
+    let mut eye_sharp: Vec<f32> = Vec::new();
+    let mut light: Vec<f32> = Vec::new();
+    for f in faces.iter().take(MAX_FACES) {
+        // Expand the box ~30% so brows/eyes/mouth aren't clipped, then crop from full-res.
+        let (bw, bh) = (f.x2 - f.x1, f.y2 - f.y1);
+        let x1 = (f.x1 - bw * 0.3).max(0.0);
+        let y1 = (f.y1 - bh * 0.3).max(0.0);
+        let x2 = (f.x2 + bw * 0.3).min(iw);
+        let y2 = (f.y2 + bh * 0.3).min(ih);
+        if x2 <= x1 + 4.0 || y2 <= y1 + 4.0 {
+            continue;
+        }
+        let crop = image.crop_imm(x1 as u32, y1 as u32, (x2 - x1) as u32, (y2 - y1) as u32);
+        let p = clip_prompt_probs(&crop, clip_session, tokenizer, &FACE_PROMPTS)?;
+        look.push((p[0] + p[1]).clamp(0.0, 1.0)); // smiling-at-camera + neutral-at-camera
+        expr.push(p[0].clamp(0.0, 1.0)); // smiling
+        eyes_open.push((1.0 - p[2]).clamp(0.0, 1.0)); // not eyes-closed
+
+        // Focus on the full-size face (not the expanded crop: background bokeh or a sharp
+        // collar shouldn't count), normalized to a fixed size so faces compare.
+        let face_full = crate::library::culling::region_sharpness(full, f.x1 * k, f.y1 * k, bw * k, bh * k, 256);
+        let face_s = face_full.unwrap_or_else(|| crate::library::culling::normalized_sharpness_of(&crop));
+        sharp.push(face_s);
+        // The sharper eye: photographers focus on the near eye, so one soft eye is fine.
+        // Patch = half the eye distance around each eye landmark.
+        let [eye_r, eye_l, ..] = f.landmarks;
+        let d = (((eye_l.0 - eye_r.0).powi(2) + (eye_l.1 - eye_r.1).powi(2)).sqrt()) * k;
+        let eye = if d >= 12.0 {
+            [eye_r, eye_l]
+                .iter()
+                .filter_map(|&(ex, ey)| {
+                    crate::library::culling::region_sharpness(full, ex * k - d * 0.25, ey * k - d * 0.25, d * 0.5, d * 0.5, 96)
+                })
+                .fold(None, |a: Option<f32>, v| Some(a.map_or(v, |a| a.max(v))))
+        } else {
+            None // eyes too small to measure — the face's focus stands in
+        };
+        eye_sharp.push(eye.unwrap_or(face_s));
+        light.push(crate::library::culling::face_exposure(full, f.x1 * k, f.y1 * k, bw * k, bh * k).unwrap_or(0.5) as f32);
+    }
+    if look.is_empty() {
+        return Ok(None);
+    }
+
+    let mean = |v: &[f32]| v.iter().sum::<f32>() / v.len() as f32;
+    let min = |v: &[f32]| v.iter().cloned().fold(f32::INFINITY, f32::min);
+    Ok(Some(FaceCues {
+        face_sharp: mean(&sharp).clamp(0.0, 1.0),
+        eye_sharp: mean(&eye_sharp).clamp(0.0, 1.0),
+        face_light: mean(&light).clamp(0.0, 1.0),
+        look_mean: mean(&look),
+        look_worst: min(&look),
+        expr_mean: mean(&expr),
+        eyes_worst: min(&eyes_open),
+    }))
+}
+
+fn rgb_to_hsv((r, g, b): (u8, u8, u8)) -> (f32, f32, f32) {
+    let r = r as f32 / 255.0;
+    let g = g as f32 / 255.0;
+    let b = b as f32 / 255.0;
+
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let delta = max - min;
+
+    let h = if delta.abs() < f32::EPSILON {
+        0.0
+    } else if (max - r).abs() < f32::EPSILON {
+        60.0 * (((g - b) / delta) % 6.0)
+    } else if (max - g).abs() < f32::EPSILON {
+        60.0 * (((b - r) / delta) + 2.0)
+    } else {
+        60.0 * (((r - g) / delta) + 4.0)
+    };
+    let h = if h < 0.0 { h + 360.0 } else { h };
+
+    let s = if max.abs() < f32::EPSILON {
+        0.0
+    } else {
+        delta / max
+    };
+    let v = max;
+
+    (h, s, v)
+}
+
+pub fn extract_color_tags(image: &DynamicImage) -> Vec<String> {
+    let resized = image.resize(100, 100, FilterType::Triangle);
+    let rgb_image = resized.to_rgb8();
+    let mut color_counts: HashMap<String, u32> = HashMap::new();
+
+    for pixel in rgb_image.pixels() {
+        let rgb = (pixel[0], pixel[1], pixel[2]);
+        let (h, s, v) = rgb_to_hsv(rgb);
+
+        let color_name = if v < 0.2 {
+            "black".to_string()
+        } else if s < 0.1 {
+            if v > 0.8 {
+                "white".to_string()
+            } else {
+                "gray".to_string()
+            }
+        } else {
+            match h {
+                _ if !(20.0..340.0).contains(&h) => "red".to_string(),
+                _ if (20.0..45.0).contains(&h) => "orange".to_string(),
+                _ if (45.0..70.0).contains(&h) => "yellow".to_string(),
+                _ if (70.0..160.0).contains(&h) => "green".to_string(),
+                _ if (160.0..260.0).contains(&h) => "blue".to_string(),
+                _ if (260.0..340.0).contains(&h) => "purple".to_string(),
+                _ => "unknown".to_string(),
+            }
+        };
+
+        if (color_name == "orange" || color_name == "red") && v < 0.6 && s < 0.7 {
+            *color_counts.entry("brown".to_string()).or_insert(0) += 1;
+        } else {
+            *color_counts.entry(color_name).or_insert(0) += 1;
+        }
+    }
+
+    let mut colorful_tags: Vec<(String, u32)> = color_counts
+        .iter()
+        .filter(|(name, _)| !matches!(name.as_str(), "black" | "white" | "gray"))
+        .map(|(name, &count)| (name.clone(), count))
+        .collect();
+
+    colorful_tags.sort_by_key(|b| std::cmp::Reverse(b.1));
+
+    if !colorful_tags.is_empty() {
+        colorful_tags
+            .into_iter()
+            .take(2)
+            .map(|(name, _)| name)
+            .collect()
+    } else {
+        color_counts
+            .into_iter()
+            .max_by_key(|&(_, count)| count)
+            .map(|(name, _)| vec![name])
+            .unwrap_or_default()
+    }
+}
+
+pub fn generate_tags_with_clip(
+    image: &DynamicImage,
+    clip_session_mutex: &Mutex<Session>,
+    tokenizer: &Tokenizer,
+    custom_tags: Option<Vec<String>>,
+    max_tags: usize,
+) -> Result<Vec<String>> {
+    let image_input = preprocess_clip_image(image);
+
+    let is_custom = custom_tags.as_ref().map(|t| !t.is_empty()).unwrap_or(false);
+    let text_inputs: Vec<String> = if is_custom {
+        custom_tags.as_ref().unwrap().clone()
+    } else {
+        TAG_CANDIDATES.iter().map(|&s| s.to_string()).collect()
+    };
+
+    let encodings = tokenizer
+        .encode_batch(text_inputs.clone(), true)
+        .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+
+    let max_len = encodings
+        .iter()
+        .map(|e| e.get_ids().len())
+        .max()
+        .unwrap_or(0);
+
+    let mut ids_data = Vec::new();
+    let mut mask_data = Vec::new();
+    for encoding in encodings {
+        let mut ids = encoding
+            .get_ids()
+            .iter()
+            .map(|&i| i as i64)
+            .collect::<Vec<_>>();
+        let mut mask = encoding
+            .get_attention_mask()
+            .iter()
+            .map(|&m| m as i64)
+            .collect::<Vec<_>>();
+        ids.resize(max_len, 0);
+        mask.resize(max_len, 0);
+        ids_data.extend_from_slice(&ids);
+        mask_data.extend_from_slice(&mask);
+    }
+
+    let ids_array = Array::from_shape_vec((text_inputs.len(), max_len), ids_data)?;
+    let mask_array = Array::from_shape_vec((text_inputs.len(), max_len), mask_data)?;
+
+    let image_input_dyn = image_input.into_dyn();
+    let ids_array_dyn = ids_array.into_dyn();
+    let mask_array_dyn = mask_array.into_dyn();
+
+    let image_layout = image_input_dyn.as_standard_layout();
+    let ids_layout = ids_array_dyn.as_standard_layout();
+    let mask_layout = mask_array_dyn.as_standard_layout();
+
+    let image_val = Tensor::from_array(image_layout.into_owned())?;
+    let ids_val = Tensor::from_array(ids_layout.into_owned())?;
+    let mask_val = Tensor::from_array(mask_layout.into_owned())?;
+
+    let mut clip_session = clip_session_mutex.lock().unwrap();
+    let outputs = crate::ai::models::gpu_inference(
+        clip_session.run(ort::inputs![ids_val, image_val, mask_val]),
+    )?;
+
+    let logits_dyn = outputs[0].try_extract_array::<f32>()?.to_owned();
+    let logits = logits_dyn.into_dimensionality::<ndarray::Dim<[usize; 2]>>()?;
+    let probs = softmax(&logits);
+
+    let confidence_threshold = 0.005;
+    let mut scored_tags: Vec<(String, f32)> = Vec::new();
+
+    let prob_row = probs.row(0);
+    for (i, &prob) in prob_row.iter().enumerate() {
+        if prob > confidence_threshold {
+            scored_tags.push((text_inputs[i].clone(), prob));
+        }
+    }
+
+    scored_tags.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+    let ranked_tags: Vec<String> = scored_tags.into_iter().map(|(tag, _)| tag).collect();
+
+    let color_tags = if is_custom {
+        Vec::new()
+    } else {
+        extract_color_tags(image)
+    };
+
+    Ok(limit_tags(&ranked_tags, !is_custom, color_tags, max_tags))
+}
+
+fn limit_tags(
+    ranked_tags: &[String],
+    add_parents: bool,
+    color_tags: Vec<String>,
+    max_tags: usize,
+) -> Vec<String> {
+    let mut final_tags: Vec<String> = Vec::new();
+    let mut add_tag = |tag: &str| {
+        if final_tags.len() < max_tags && !final_tags.iter().any(|t| t == tag) {
+            final_tags.push(tag.to_string());
+        }
+    };
+
+    for tag in ranked_tags {
+        add_tag(tag);
+        if add_parents && let Some(parents) = TAG_HIERARCHY.get(tag.as_str()) {
+            for parent in parents {
+                add_tag(parent);
+            }
+        }
+    }
+    for color_tag in &color_tags {
+        add_tag(color_tag);
+    }
+
+    final_tags
+}
+
+fn needs_ai_tags(path: &Path) -> bool {
+    let (_, sidecar_path) = parse_virtual_path(&path.to_string_lossy());
+    match crate::metadata::sidecar::load_sidecar(&sidecar_path).tags {
+        None => true,
+        Some(tags) => !tags
+            .iter()
+            .any(|tag| !tag.starts_with(COLOR_TAG_PREFIX) && !tag.starts_with(USER_TAG_PREFIX)),
+    }
+}
+
+#[tauri::command]
+pub async fn start_background_indexing(
+    folder_path: String,
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    if let Some(handle) = state.indexing_task_handle.lock().unwrap().take() {
+        println!("Cancelling previous indexing task.");
+        handle.abort();
+        let _ = app_handle.emit("indexing-cancelled", ());
+    }
+
+    let settings = load_settings(app_handle.clone())?;
+    if !settings.enable_ai_tagging.unwrap_or(false) {
+        return Ok(());
+    }
+
+    let max_concurrent_tasks = settings.tagging_thread_count.unwrap_or(3).max(1) as usize;
+    let custom_ai_tags = settings.custom_ai_tags.clone();
+    let ai_tag_count = settings.ai_tag_count.unwrap_or(10) as usize;
+
+    let clip_models = crate::ai::models::get_or_init_clip_models(
+        &app_handle,
+        &state.ai_state,
+        &state.ai_init_lock,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let app_handle_clone = app_handle.clone();
+
+    let task: JoinHandle<()> = tokio::spawn(async move {
+        let image_paths: Vec<PathBuf> = match fs::read_dir(&folder_path) {
+            Ok(entries) => entries
+                .filter_map(Result::ok)
+                .map(|entry| entry.path())
+                .filter(|path| {
+                    path.is_file()
+                        && is_supported_image_file(path.to_string_lossy().as_ref())
+                        && needs_ai_tags(path)
+                })
+                .collect(),
+            Err(e) => {
+                eprintln!("Failed to read directory '{}': {}", folder_path, e);
+                let _ = app_handle_clone
+                    .emit("indexing-error", format!("Failed to read directory: {}", e));
+                *app_handle_clone
+                    .state::<AppState>()
+                    .indexing_task_handle
+                    .lock()
+                    .unwrap() = None;
+                return;
+            }
+        };
+
+        let total_images = image_paths.len();
+        if total_images == 0 {
+            *app_handle_clone
+                .state::<AppState>()
+                .indexing_task_handle
+                .lock()
+                .unwrap() = None;
+            return;
+        }
+
+        let _ = app_handle_clone.emit(
+            "indexing-started",
+            serde_json::json!({ "current": 0, "total": total_images }),
+        );
+        println!(
+            "Starting background indexing of {} images in: {}",
+            total_images, folder_path
+        );
+        println!(
+            "Using {} concurrent threads for AI tagging.",
+            max_concurrent_tasks
+        );
+
+        let state_clone = app_handle_clone.state::<AppState>();
+        let gpu_context =
+            crate::render::gpu::context::get_or_init_gpu_context(&state_clone, &app_handle).ok();
+
+        let processed_count = Arc::new(Mutex::new(0));
+        let custom_ai_tags_shared = Arc::new(custom_ai_tags);
+
+        stream::iter(image_paths)
+            .for_each_concurrent(max_concurrent_tasks, |path| {
+                let app_handle_inner = app_handle_clone.clone();
+                let clip_models_inner = clip_models.clone();
+                let gpu_context_inner = gpu_context.clone();
+                let processed_count_inner = Arc::clone(&processed_count);
+                let tags_inner = Arc::clone(&custom_ai_tags_shared);
+
+                async move {
+                    let path_str = path.to_string_lossy().to_string();
+                    let (source_path, sidecar_path) = parse_virtual_path(&path_str);
+
+                    match thumbnails::get_cached_or_generate_thumbnail_image(
+                        &path_str,
+                        &app_handle_inner,
+                        gpu_context_inner.as_ref(),
+                    ) {
+                        Ok(image) => {
+                            if let Ok(ai_tags) = generate_tags_with_clip(
+                                &image,
+                                &clip_models_inner.model,
+                                &clip_models_inner.tokenizer,
+                                (*tags_inner).clone(),
+                                ai_tag_count,
+                            ) {
+                                println!("Found AI tags for {}: {:?}", path_str, ai_tags);
+
+                                let _ = crate::metadata::sidecar::update_sidecar(
+                                    &sidecar_path,
+                                    &source_path,
+                                    |metadata| {
+                                        let mut existing_tags: HashSet<String> = metadata
+                                            .tags
+                                            .take()
+                                            .unwrap_or_default()
+                                            .into_iter()
+                                            .collect();
+
+                                        existing_tags.extend(ai_tags);
+
+                                        let mut final_tags: Vec<String> =
+                                            existing_tags.into_iter().collect();
+                                        final_tags.sort_unstable();
+
+                                        metadata.tags = Some(final_tags);
+                                    },
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "Could not get or generate image for tagging {}: {}",
+                                path_str, e
+                            );
+                        }
+                    }
+
+                    let mut count = processed_count_inner.lock().unwrap();
+                    *count += 1;
+                    let _ = app_handle_inner.emit(
+                        "indexing-progress",
+                        serde_json::json!({
+                            "current": *count,
+                            "total": total_images
+                        }),
+                    );
+                }
+            })
+            .await;
+
+        println!("Background indexing finished for: {}", folder_path);
+        let _ = app_handle_clone.emit("indexing-finished", ());
+
+        *app_handle_clone
+            .state::<AppState>()
+            .indexing_task_handle
+            .lock()
+            .unwrap() = None;
+    });
+
+    *state.indexing_task_handle.lock().unwrap() = Some(task);
+
+    Ok(())
+}
+
+fn modify_tags_for_path(
+    path_str: &str,
+    app_handle: &AppHandle,
+    modify_fn: impl Fn(&mut Vec<String>),
+) -> Result<(), String> {
+    let (source_path, sidecar_path) = parse_virtual_path(path_str);
+
+    let metadata =
+        crate::metadata::sidecar::update_sidecar(&sidecar_path, &source_path, |metadata| {
+            let mut tags = metadata.tags.take().unwrap_or_default();
+            modify_fn(&mut tags);
+
+            tags.sort_unstable();
+            tags.dedup();
+
+            if !tags.is_empty() {
+                metadata.tags = Some(tags);
+            }
+        })
+        .map_err(|e| e.to_string())?;
+
+    if let Ok(settings) = load_settings(app_handle.clone())
+        && settings.enable_xmp_sync.unwrap_or(false)
+    {
+        let create_if_missing = settings.create_xmp_if_missing.unwrap_or(false);
+        xmp::sync_metadata_to_xmp(&source_path, &sidecar_path, &metadata, create_if_missing);
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub fn add_tag_for_paths(
+    paths: Vec<String>,
+    tag: String,
+    app_handle: AppHandle,
+) -> Result<(), String> {
+    paths.par_iter().for_each(|path| {
+        let tag_clone = tag.clone();
+        if let Err(e) = modify_tags_for_path(path, &app_handle, |tags| {
+            if !tags.contains(&tag_clone) {
+                tags.push(tag_clone.clone());
+            }
+        }) {
+            eprintln!("Failed to add tag to {}: {}", path, e);
+        }
+    });
+    Ok(())
+}
+
+#[tauri::command]
+pub fn remove_tag_for_paths(
+    paths: Vec<String>,
+    tag: String,
+    app_handle: AppHandle,
+) -> Result<(), String> {
+    paths.par_iter().for_each(|path| {
+        let tag_clone = tag.clone();
+        if let Err(e) = modify_tags_for_path(path, &app_handle, |tags| {
+            tags.retain(|t| t != &tag_clone);
+        }) {
+            eprintln!("Failed to remove tag from {}: {}", path, e);
+        }
+    });
+    Ok(())
+}
+
+fn rrdata_source_path(rrdata: &Path) -> Option<PathBuf> {
+    let name = rrdata.file_name()?.to_str()?;
+    let (source_filename, _) = crate::library::sidecars::parse_sidecar_name(name)?;
+
+    Some(rrdata.with_file_name(source_filename))
+}
+
+fn sync_xmp_for_rrdata(
+    rrdata_path: &Path,
+    metadata: &ImageMetadata,
+    enable_xmp_sync: bool,
+    create_xmp_if_missing: bool,
+) {
+    if !enable_xmp_sync {
+        return;
+    }
+    if let Some(source_path) = rrdata_source_path(rrdata_path) {
+        xmp::sync_metadata_to_xmp(&source_path, rrdata_path, metadata, create_xmp_if_missing);
+    }
+}
+
+fn retain_tags_under(
+    root_path: &str,
+    app_handle: &AppHandle,
+    keep: impl Fn(&str) -> bool,
+) -> Result<usize, String> {
+    if !Path::new(root_path).exists() {
+        return Err(format!("Root path does not exist: {}", root_path));
+    }
+
+    let settings = load_settings(app_handle.clone()).unwrap_or_default();
+    let enable_xmp_sync = settings.enable_xmp_sync.unwrap_or(false);
+    let create_xmp_if_missing = settings.create_xmp_if_missing.unwrap_or(false);
+
+    let mut updated_count = 0;
+    let walker = WalkDir::new(root_path).into_iter();
+
+    for entry in walker.filter_map(|e| e.ok()) {
+        let path = entry.path();
+        if !path.is_file() || path.extension().and_then(|s| s.to_str()) != Some("rrdata") {
+            continue;
+        }
+        let Some(source_path) = rrdata_source_path(path) else {
+            continue;
+        };
+
+        let has_removable_tags = crate::metadata::sidecar::load_sidecar(path)
+            .tags
+            .is_some_and(|tags| tags.iter().any(|tag| !keep(tag)));
+        if !has_removable_tags {
+            continue;
+        }
+
+        let updated = crate::metadata::sidecar::update_sidecar(path, &source_path, |metadata| {
+            if let Some(tags) = &mut metadata.tags {
+                tags.retain(|tag| keep(tag));
+                if tags.is_empty() {
+                    metadata.tags = None;
+                }
+            }
+        });
+        if let Ok(metadata) = updated {
+            updated_count += 1;
+            sync_xmp_for_rrdata(path, &metadata, enable_xmp_sync, create_xmp_if_missing);
+        }
+    }
+    Ok(updated_count)
+}
+
+#[tauri::command]
+pub fn clear_ai_tags(root_path: String, app_handle: AppHandle) -> Result<usize, String> {
+    // Keep color tags and user tags, remove others (AI tags)
+    retain_tags_under(&root_path, &app_handle, |tag| {
+        tag.starts_with(COLOR_TAG_PREFIX) || tag.starts_with(USER_TAG_PREFIX)
+    })
+}
+
+#[tauri::command]
+pub fn clear_all_tags(root_path: String, app_handle: AppHandle) -> Result<usize, String> {
+    // Keep only color tags, remove AI and user tags
+    retain_tags_under(&root_path, &app_handle, |tag| {
+        tag.starts_with(COLOR_TAG_PREFIX)
+    })
+}

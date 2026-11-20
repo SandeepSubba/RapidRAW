@@ -150,6 +150,8 @@
       "aiDenoise": "AI-ruisonderdrukking",
       "classicDenoise": "Klassieke ruisonderdrukking",
       "aiDenoiseDetail": "Detail",
+      "aiUpscale": "RapidRes 2x",
+      "aiUpscaleDetail": "Detail",
       "blueYellow": "Blauw/Geel",
       "centre": "Centrum",
       "chromaticAberration": "Chromatische aberratie",
@@ -165,6 +167,7 @@
       "negativeGreen": "Groen",
       "negativeRed": "Rood",
       "noiseReduction": "Ruisonderdrukking",
+      "superResolution": "RapidRes",
       "presence": "Presentie",
       "redCyan": "Rood/Cyaan",
       "sharpening": "Verscherping",
@@ -324,8 +327,12 @@
       "removeBlackWhite": "Zwart-wit verwijderen",
       "removeDenoise": "Ruisonderdrukking verwijderen",
       "removeNegativeConversion": "Negatiefconversie verwijderen",
+      "removeSuperResolution": "RapidRes verwijderen",
       "resetAdjustments": "Aanpassingen herstellen",
+      "resetToDefaults": "Herstellen naar standaard",
+      "resetToNeutral": "Herstellen naar neutraal",
       "stitchPanorama": "Panorama samenvoegen",
+      "superResolution": "RapidRes (2x)",
       "tagging": "Tags toevoegen",
       "undo": "Ongedaan maken",
       "unflagged": "Niet gemarkeerd"
@@ -387,6 +394,8 @@
       "deleteSelected": "Alleen geselecteerde verwijderen",
       "denoise_one": "Ruis verwijderen",
       "denoise_other": "Ruis verwijderen",
+      "superResolution_one": "RapidRes (2x)",
+      "superResolution_other": "RapidRes (2x)",
       "duplicateImage": "Afbeelding dupliceren",
       "enable": "Inschakelen",
       "exportImage_one": "Afbeelding exporteren",
@@ -510,6 +519,7 @@
       "createNewTitle": "Nieuwe generatieve bewerking maken",
       "createNewTooltip": "Nieuwe {{name}} bewerking maken",
       "denoising": "AI-ruisonderdrukking wordt uitgevoerd...",
+      "upscaling": "RapidRes wordt uitgevoerd...",
       "dropzoneText": "Hier neerzetten om een nieuwe bewerking te maken",
       "editSettingsTitle": "Bewerkingsinstellingen",
       "editsTitle": "Bewerkingen",
@@ -714,11 +724,13 @@
       "cancel": "Annuleren",
       "drawingActive": "Tekenen actief",
       "hint": "Teken langs randen in uw foto die verticaal of horizontaal moeten zijn.",
+      "horizontalLine": "Horizontale hulplijn {{index}}",
       "linesStatus": "Actieve hulplijnen",
       "toast": {
         "angleRejected": "Lijnhoek is te ver van horizontaal of verticaal",
         "maxLines": "Maximaal 2 verticale en 2 horizontale lijnen toegestaan"
-      }
+      },
+      "verticalLine": "Verticale hulplijn {{index}}"
     },
     "layout": {
       "split": "Splitsen"
@@ -833,6 +845,7 @@
         "focalLength": "Brandpuntsafstand",
         "iso": "ISO",
         "lens": "Lens",
+        "model": "Model",
         "shutterSpeed": "Sluitertijd",
         "title": "Cameradetails"
       },
@@ -877,6 +890,8 @@
     },
     "presets": {
       "amount": "Hoeveelheid",
+      "defaultForAllCameras": "Standaard voor alle camera's",
+      "defaultForCamera": "Standaard voor {{camera}}",
       "dialog": {
         "allPresetFiles": "Alle voorinstellingsbestanden",
         "exportAllTitle": "Alle voorinstellingen exporteren",
@@ -897,7 +912,11 @@
         "newPreset": "Nieuwe voorinstelling",
         "overwrite": "Overschrijven",
         "renameFolder": "Map hernoemen",
-        "sortAll": "Alles alfabetisch sorteren"
+        "setDefaultAllCameras": "Instellen als standaard voor alle camera's",
+        "setDefaultForCamera": "Instellen als standaard voor {{camera}}",
+        "sortAll": "Alles alfabetisch sorteren",
+        "unsetDefaultAllCameras": "Niet meer als standaard gebruiken voor alle camera's",
+        "unsetDefaultForCamera": "Niet meer als standaard gebruiken voor {{camera}}"
       },
       "status": {
         "empty": "Nog geen voorinstellingen opgeslagen. Maak uw eigen, importeer uit een bestand of verken community-voorinstellingen.",
@@ -910,6 +929,9 @@
         "masks": "Maskers"
       },
       "title": "Voorinstellingen",
+      "toasts": {
+        "importFailed": "Importeren van {{fileName}} mislukt: {{error}}"
+      },
       "tooltips": {
         "explore": "Community-voorinstellingen verkennen",
         "export": "Alle voorinstellingen exporteren naar .rrpreset-bestand",
@@ -932,12 +954,16 @@
         "adjust": "Aanpassen",
         "crop": "Bijsnijden",
         "export": "Exporteren",
+        "filmstrip": "Filmstrip",
         "info": "Info",
         "inpaint": "Inpainting",
         "masks": "Maskers",
         "presets": "Voorinstellingen",
         "tethering": "Kabelopname"
       }
+    },
+    "toasts": {
+      "embeddedPreview": "RapidRAW kon dit RAW-bestand niet decoderen, dus je ziet en bewerkt de ingesloten JPEG-preview van de camera. Verwacht een lagere kwaliteit en minder bewerkingsruimte dan bij een echte RAW."
     },
     "toolbar": {
       "history": "Geschiedenis",
@@ -948,6 +974,7 @@
         "compare": "Voor / na (B) of modi (rechtsklik)",
         "focalLength": "Brandpuntsafstand",
         "fullscreen": "Volledig scherm aan/uit (F)",
+        "hdr": "HDR-voorvertoning",
         "iso": "ISO",
         "redo": "Opnieuw (Ctrl+Y) of geschiedenis (rechtermuisknop)",
         "shutterSpeed": "Sluitertijd",
@@ -1004,7 +1031,13 @@
       "selectFolderTitle_other": "Map selecteren om {{count}} afbeeldingen te exporteren"
     },
     "file": {
+      "colorSpace": "Kleurruimte",
       "dpi": "DPI",
+      "hdr": "HDR-uitvoer",
+      "hdrJpegHint": "Voegt een gain map toe: HDR-schermen tonen helderdere hooglichten, al het andere toont de normale foto.",
+      "hdrJxlHint": "Slaat een echt HDR-bestand op (PQ, Rec. 2020). Vereist een viewer met HDR-ondersteuning.",
+      "hdrNoPreview": "Dit scherm kan de HDR-hooglichten niet weergeven. De export bevat ze wel.",
+      "hdrPreviewOff": "Schakel HDR in via de werkbalk van de editor om de hooglichten te bekijken.",
       "quality": "Kwaliteit",
       "qualityLossless": "Kwaliteit (verliesvrij)",
       "resolution": "Resolutie",
@@ -1160,6 +1193,7 @@
       "failed": "Mislukt ({{failedCount}})",
       "kinds": {
         "denoise": "AI-ruisonderdrukking",
+        "upscale": "RapidRes-vergroting",
         "depthMap": "Diepte analyseren",
         "depthMask": "Dieptemasker maken",
         "faceMask": "Gezichtsmasker maken",
@@ -1456,10 +1490,7 @@
       "originalRatio": "Originele verhouding"
     },
     "thumbnailSize": {
-      "large": "Groot",
-      "list": "Lijst",
-      "medium": "Middel",
-      "small": "Klein"
+      "list": "Lijst"
     },
     "tooltips": {
       "communityPresets": "Community-voorinstellingen",
@@ -1552,6 +1583,7 @@
       "descReplace": "Overschrijft alle geselecteerde instellingen en herstelt de overige naar standaardwaarden.",
       "groups": {
         "aiDenoise": "AI-ruisonderdrukking",
+        "aiUpscale": "RapidRes",
         "blackWhite": "Zwart-wit",
         "chromaticAberration": "Chromatische aberratie",
         "clarityDehaze": "Contrast en nevelreductie",
@@ -1714,18 +1746,35 @@
       "zoomOutTooltip": "Uitzoomen"
     },
     "panorama": {
+      "autoCrop": "Automatisch bijsnijden",
+      "autoProjectionUsed": "Gebruikt: {{projection}}",
+      "boundaryWarp": "Grensvervorming",
+      "boundaryWarpHint": "Rekt de randen uit om het kader te vullen in plaats van ze weg te snijden.",
       "cancel": "Annuleren",
       "close": "Sluiten",
       "descCount": "Combineer {{count}} overlappende afbeeldingen tot een naadloos panorama.",
       "descCount_one": "Combineer {{count}} overlappende afbeelding tot een naadloos panorama.",
       "descCount_other": "Combineer {{count}} overlappende afbeeldingen tot een naadloos panorama.",
       "descGeneric": "Combineer uw overlappende afbeeldingen tot een naadloos panorama.",
+      "excludedImages": "{{count}} afbeeldingen konden niet worden gekoppeld en zijn weggelaten",
+      "excludedImages_one": "{{count}} afbeelding kon niet worden gekoppeld en is weggelaten",
+      "excludedImages_other": "{{count}} afbeeldingen konden niet worden gekoppeld en zijn weggelaten",
+      "exposureCompensation": "Belichtingscompensatie",
+      "exposureCompensationHint": "Egaliseert belichting, witbalans en vignettering tussen de afbeeldingen.",
       "failed": "Panorama mislukt",
       "initializing": "Initialiseren...",
       "openInEditor": "Openen in editor",
+      "outputInfo": "{{images}} afbeeldingen · {{width}} × {{height}} px",
+      "projection": "Projectie",
+      "projectionAuto": "Automatisch",
+      "projectionCylindrical": "Cilindrisch",
+      "projectionFallback": "{{requested}} dekt dit gezichtsveld niet, gebruikt: {{projection}}",
+      "projectionPerspective": "Perspectief",
+      "projectionSpherical": "Sferisch",
       "retry": "Opnieuw",
       "save": "Opslaan",
       "savedSuccess": "Panorama succesvol opgeslagen!",
+      "saving": "Opslaan…",
       "speedNotice": "Dit kan enkele minuten duren afhankelijk van het aantal en de grootte van afbeeldingen.",
       "start": "Starten",
       "stitchingProgress": "Panorama samenvoegen",
@@ -1842,6 +1891,7 @@
       "limit": "Limiet",
       "modals": {
         "aiDenoiseMessage": "Weet je zeker dat je de AI-ruisonderdrukkingscache wilt wissen?\n\nAfbeeldingen met AI-ruisonderdrukking ingeschakeld moeten opnieuw worden verwerkt, wat per afbeelding enkele minuten kan duren.",
+        "aiUpscaleMessage": "Weet je zeker dat je de RapidRes-cache wilt wissen?\n\nAfbeeldingen met RapidRes ingeschakeld moeten opnieuw worden vergroot.",
         "aiMapsMessage": "Weet je zeker dat je de diepte- en normal maps wilt wissen?\n\nAfbeeldingen met lensvervaging, mist of herbelichting maken hun maps opnieuw aan wanneer ze weer worden geopend.",
         "aiMessage": "Weet u zeker dat u alle door AI gegenereerde tags van alle afbeeldingen in alle actieve hoofdmappen wilt verwijderen?\n\nDit heeft geen invloed op door gebruikers toegevoegde tags. Deze actie kan niet ongedaan worden gemaakt.",
         "allMessage": "Weet u zeker dat u alle door AI gegenereerde en door gebruikers toegevoegde tags van alle afbeeldingen in alle actieve hoofdmappen wilt verwijderen?\n\nDeze actie kan niet ongedaan worden gemaakt.",
@@ -1869,6 +1919,7 @@
       "show": "Tonen",
       "statuses": {
         "aiDenoiseSuccess": "AI-ruisonderdrukkingscache succesvol gewist.",
+        "aiUpscaleSuccess": "RapidRes-cache succesvol gewist.",
         "aiSuccess": "{{count}} bestanden bijgewerkt. AI-tags verwijderd.",
         "aiSuccess_one": "{{count}} bestand bijgewerkt. AI-tags verwijderd.",
         "aiSuccess_other": "{{count}} bestanden bijgewerkt. AI-tags verwijderd.",
@@ -1885,6 +1936,8 @@
       "storage": {
         "aiDenoise": "AI-ruisonderdrukking",
         "aiDenoiseDesc": "Gecachete ruisonderdrukkingsresultaten.",
+        "aiUpscale": "RapidRes",
+        "aiUpscaleDesc": "Gecachete 2x-vergrotingen van RapidRes.",
         "aiMaps": "Diepte- & normal maps",
         "aiMapsDesc": "Gebruikt door lensvervaging, mist en herbelichting.",
         "immich": "Immich",
@@ -2110,6 +2163,52 @@
         "metal": "Metal",
         "vulkan": "Vulkan"
       },
+      "colorManagement": {
+        "chooseProfile": "Profiel kiezen",
+        "modeAuto": "Automatisch (systeemprofiel)",
+        "modeCustom": "Aangepast ICC-profiel",
+        "modeOff": "Uit",
+        "profile": "Monitorprofiel",
+        "profileDesc": "Zet de voorvertoning in de editor om naar het kleurprofiel van je monitor, zodat kleuren kloppen op gekalibreerde en wide-gamutschermen. Exports blijven ongewijzigd.",
+        "statusInvalid": "Dit profiel kon niet worden geladen.",
+        "statusNone": "Geen monitorprofiel gevonden. De voorvertoning wordt als sRGB weergegeven.",
+        "statusProfile": "Gebruikt {{name}}.",
+        "statusSystem": "Kleuren worden beheerd door het besturingssysteem.",
+        "statusUnavailable": "Kleurbeheer vereist de GPU-renderer.",
+        "wideGamut": "Wide-gamutvoorvertoning ({{space}}).",
+        "wideGamutHdrNote": "Niet gebruikt zolang de editor HDR toont.",
+        "wideGamutPreview": "Wide-gamut-voorbeeld",
+        "wideGamutPreviewDesc": "Toont kleuren buiten sRGB op wide-gamut-monitoren. Zet dit aan als je exporteert in Display P3, Adobe RGB of een andere brede kleurruimte. Uitgeschakeld zie je hoe een sRGB-export eruit zal zien.",
+        "wideGamutPreviewEnable": "Wide-gamut-kleuren tonen"
+      },
+      "defaultAdjustments": {
+        "addCamera": "Camera toevoegen…",
+        "applyToNonRaw": "Ook toepassen op JPEG, TIFF, PNG en andere niet-RAW-bestanden",
+        "applyToNonRawDesc": "Indien uit gebruiken alleen RAW-bestanden deze standaardwaarden. JPEG's uit de camera zijn meestal al bewerkt en lensgecorrigeerd, dus nogmaals toepassen kan te veel worden.",
+        "autoLensCorrection": "Automatische lenscorrectie",
+        "autoLensCorrectionDesc": "Corrigeert vertekening, chromatische aberratie en vignettering met het lensprofiel dat uit de metadata van elke afbeelding is herkend.",
+        "cameraDefaults": "Standaardwaarden per camera",
+        "cameraDefaultsDesc": "Geef afbeeldingen van bepaalde camera's een eigen voorinstelling. Camera's die hier niet staan, gebruiken de standaardvoorinstelling hierboven, en lenscorrectie geldt voor alle camera's.",
+        "cameraPresetMissing": "De gekozen voorinstelling is verwijderd, daarom gebruiken afbeeldingen van deze camera weer de voorinstelling voor alle camera's.",
+        "description": "Bepaal waarmee onbewerkte afbeeldingen beginnen en waarnaar \"Aanpassingen herstellen\" terugkeert; bewerkte afbeeldingen behouden hun instellingen. Met standaardwaarden worden RAW-miniaturen berekend in plaats van de ingesloten camerapreview te gebruiken en laden ze eerst trager.",
+        "lensCorrection": "Lenscorrectie",
+        "noCamerasFound": "Geen andere camera's gevonden. Open een map met afbeeldingen van een camera, of klik met rechts op een voorinstelling terwijl je een van de afbeeldingen bewerkt.",
+        "noPreset": "Geen (neutraal)",
+        "preset": "Standaardvoorinstelling",
+        "presetDesc": "Geldt voor elke onbewerkte afbeelding. Maskers, uitsneden en transformaties worden overgeslagen, omdat ze alleen passen bij de afbeelding waarop ze zijn gemaakt.",
+        "presetMissing": "De gekozen voorinstelling is verwijderd, daarom gebruiken onbewerkte afbeeldingen weer neutrale waarden.",
+        "removeCamera": "Camera verwijderen",
+        "sameAsAllCameras": "Zelfde als alle camera's",
+        "scope": "Van toepassing op",
+        "sliderReset": "Schuifregelaar herstellen",
+        "sliderResetDefaults": "Standaardaanpassingen",
+        "sliderResetDesc": "Waar een schuifregelaar naar teruggaat als je hem herstelt, bijvoorbeeld door te dubbelklikken of in snelbewerken. Maskerregelaars gaan altijd terug naar hun neutrale waarde.",
+        "sliderResetNeutral": "Neutrale waarde",
+        "title": "Standaardaanpassingen"
+      },
+      "display": {
+        "title": "Weergave"
+      },
       "dynamicDesc": "De editor rendert het voorbeeld om overeen te komen met de werkelijke pixeldichtheid van uw beeldscherm. Dit zorgt ervoor dat elk detail wordt weergegeven met 1:1 pixelnauwkeurigheid, wat maximale helderheid biedt bij zoomen en scherpte controleren.",
       "editIn": {
         "add": "Programma toevoegen",
@@ -2127,6 +2226,16 @@
         "title": "Bewerken in"
       },
       "enableLivePreviews": "Live voorbeelden inschakelen",
+      "hdr": {
+        "display": "HDR-weergave",
+        "displayDesc": "Toont hooglichten helderder dan normaal wit op een HDR-scherm. Schaduwen en middentonen blijven gelijk en standaardexports veranderen niet.",
+        "enableDisplay": "HDR gebruiken in de editor",
+        "headroom": "Bereik hooglichten",
+        "headroomDesc": "Hoe ver hooglichten boven normaal wit mogen uitkomen. Geldt ook voor HDR-exports.",
+        "statusActive": "Dit scherm staat in HDR-modus.",
+        "statusInactive": "Dit scherm staat niet in HDR-modus. Schakel HDR in bij de beeldscherminstellingen van het systeem om het effect te zien.",
+        "statusUnsupported": "HDR vereist de GPU-renderer op Windows of macOS."
+      },
       "highDpi": "High-DPI-rendering",
       "highDpiDesc": "Voorbeelden renderen op de native {{dpr}}x fysieke pixelresolutie van uw scherm. Produceert het scherpste mogelijk voorbeeld maar gebruikt aanzienlijk meer geheugen.",
       "highDpiDescStandard": "Deze instelling is alleen van invloed op high-DPI-beeldschermen. Uw huidige beeldscherm heeft een standaardresolutie.",
@@ -2155,7 +2264,7 @@
         "baselineExposure": "Basisbelichting",
         "baselineExposureAmount": "Basiswaarde",
         "baselineExposureAmountDesc": "Belichting die aan RAW-bestanden wordt toegevoegd. darktable gebruikt +0,7 EV.",
-        "baselineExposureDesc": "Maakt RAW-bestanden een vaste hoeveelheid lichter, plus de DNG-tag BaselineExposure indien aanwezig.",
+        "baselineExposureDesc": "Maakt RAW-bestanden een vaste hoeveelheid lichter, of in plaats daarvan met de waarde van de DNG-tag BaselineExposure indien aanwezig.",
         "colorNr": "Basis kleurruisonderdrukking",
         "colorNrDesc": "Past een cross-bilateraal filter vroeg in de pijplijn toe om chroominantieruis te verwijderen. Hogere waarde = Sterkere ruisonderdrukking.",
         "defaultNonRawTonemapper": "Standaard niet-RAW-toonmapping",
@@ -2195,6 +2304,13 @@
       "qualities": {
         "high": "Hoge kwaliteit",
         "performance": "Prestaties"
+      },
+      "rawDecoding": "RAW-decodering",
+      "rawDecodingDesc": "Selecteer waar RAW-bestanden worden gedecodeerd. 'Automatisch' gebruikt de GPU en schakelt over naar de CPU als die je afbeeldingen niet aankan. 'GPU' probeert altijd eerst de GPU. 'CPU' is langzamer, maar werkt op elk systeem.",
+      "rawDecodingOptions": {
+        "auto": "Automatisch",
+        "cpu": "CPU",
+        "gpu": "GPU"
       },
       "renderScale": "Renderresolutieschaal",
       "renderScaleDesc": "Schaalt de renderresolutie ten opzichte van uw beeldscherm. Lagere waarden verbeteren de prestaties op hoge-resolutie-schermen ten koste van wat scherpte.",
@@ -2252,6 +2368,7 @@
         "mediapipe": "Voor de snelle gezichtslandmark- en segmentatiemodellen achter de AI-gezichtsmaskers.",
         "negpy": "Voor de inspiratie achter de negatief-omzetlogica.",
         "nind": "Voor het leveren van AI-modellen die de AI-ruisonderdrukkingmogelijkheden in RapidRAW aandrijven.",
+        "span": "Voor het basis-AI-model achter RapidRes, de 2x AI-vergroting van RapidRAW, door RapidRAW verfijnd op de eigen RAW-verwerking (door Philip Hofmann, CC BY 4.0).",
         "rawler": "Voor de uitstekende Rust-crate die de basis vormt voor RAW-bestandsverwerking in dit project.",
         "sam2": "Voor het leveren van het basismodel dat wordt gebruikt voor de AI-onderwerpdetectiemogelijkheden.",
         "spektrafilm": "Voor de spectraalgebaseerde filmemulatie-LUT's door Andrea Volpato, gebruikt voor de ingebouwde filmemulaties van RapidRAW. Gelicenseerd onder CC BY-SA 4.0.",
@@ -2327,13 +2444,11 @@
     "bottomBar": {
       "imagesSelected": "{{current}} van {{total}} afbeeldingen geselecteerd",
       "tooltips": {
-        "collapseFilmstrip": "Filmstrip inklappen",
         "collapseLeft": "Linkerpaneel inklappen",
         "collapseRight": "Rechterpaneel inklappen",
         "copyPasteSettings": "Instellingen kopiëren & plakken",
         "copySettings": "Instellingen kopiëren",
         "customZoom": "Klik om aangepast zoompercentage in te voeren",
-        "expandFilmstrip": "Filmstrip uitklappen",
         "expandLeft": "Linkerpaneel uitklappen",
         "expandRight": "Rechterpaneel uitklappen",
         "export": "Exporteren",

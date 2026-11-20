@@ -47,6 +47,7 @@ export interface SettingItemProps {
   children: any;
   description?: string;
   label: string;
+  status?: string | null;
 }
 
 export const KeybindRow = ({
@@ -185,7 +186,7 @@ export const KeybindRow = ({
   );
 };
 
-export const SettingItem = ({ children, description, label }: SettingItemProps) => (
+export const SettingItem = ({ children, description, label, status }: SettingItemProps) => (
   <div>
     <Text variant={TextVariants.heading} className="block mb-2">
       {label}
@@ -194,6 +195,11 @@ export const SettingItem = ({ children, description, label }: SettingItemProps) 
     {description && (
       <Text variant={TextVariants.small} className="mt-2">
         {description}
+      </Text>
+    )}
+    {status && (
+      <Text variant={TextVariants.small} className="mt-1">
+        {status}
       </Text>
     )}
   </div>

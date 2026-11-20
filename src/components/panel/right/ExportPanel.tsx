@@ -24,17 +24,26 @@ import {
   MAX_EXPORT_DPI,
   TiffBitDepth,
   WatermarkAnchor,
-} from '../../ui/ExportImportProperties';
-import { Invokes, SelectedImage, AppSettings, Panel } from '../../ui/AppProperties';
-import ExportPresetsList from '../../ui/ExportPresetsList';
+  COLOR_SPACE_FILE_FORMATS,
+  HDR_FILE_FORMATS,
+  EXPORT_COLOR_SPACES,
+  ExportColorSpace,
+} from '../../../types/export';
+import { Invokes } from '../../../types/invokes';
+import { SelectedImage } from '../../../types/editor';
+import { AppSettings } from '../../../types/settings';
+import { Panel } from '../../../types/ui';
+import ExportPresetsList from './ExportPresetsList';
 import { useExportSettings } from '../../../hooks/useExportSettings';
 import { useOsPlatform } from '../../../hooks/useOsPlatform';
+import { DEFAULT_HDR_HEADROOM, useDisplayStatus } from '../../../hooks/useDisplayStatus';
+import { useSettingsStore } from '../../../store/useSettingsStore';
 import Text from '../../ui/Text';
 import { TextColors, TextVariants, TextWeights } from '../../../types/typography';
 import { useEditorStore } from '../../../store/useEditorStore';
 import { useUIStore } from '../../../store/useUIStore';
 import ImmichExportOptions, { useImmichExportAvailable, useImmichExportChoice } from '../../immich/ImmichExportOptions';
-import { prepareImmichExport } from '../../immich/immichApi';
+import { prepareImmichExport } from '../../../utils/immichApi';
 import { formatBytes } from '../../../utils/formatBytes';
 
 interface ExportPanelProps {
@@ -259,6 +268,10 @@ export default function ExportPanel({
     setJpegQuality,
     tiffBitDepth,
     setTiffBitDepth,
+    colorSpace,
+    setColorSpace,
+    hdr,
+    setHdr,
     dpi,
     setDpi,
     enableResize,
@@ -395,6 +408,38 @@ export default function ExportPanel({
   const [imageAspectRatio, setImageAspectRatio] = useState(16 / 9);
   const filenameInputRef = useRef<HTMLInputElement>(null);
   const osPlatform = useOsPlatform();
+  const displayStatus = useDisplayStatus();
+  const [hdrHeadroom, setHdrHeadroom] = useState(appSettings?.hdrHeadroom ?? DEFAULT_HDR_HEADROOM);
+  const pendingHdrHeadroom = useRef<number | null>(null);
+  useEffect(() => {
+    if (pendingHdrHeadroom.current === null) {
+      setHdrHeadroom(appSettings?.hdrHeadroom ?? DEFAULT_HDR_HEADROOM);
+    }
+  }, [appSettings?.hdrHeadroom]);
+  const saveHdrHeadroom = useMemo(
+    () =>
+      debounce((value: number) => {
+        const { appSettings: latest, handleSettingsChange } = useSettingsStore.getState();
+        if (latest) {
+          handleSettingsChange({ ...latest, hdrHeadroom: value });
+        }
+        pendingHdrHeadroom.current = null;
+      }, 200),
+    [],
+  );
+  useEffect(() => () => saveHdrHeadroom.flush(), [saveHdrHeadroom]);
+  const handleHdrHeadroomChange = (value: number) => {
+    pendingHdrHeadroom.current = value;
+    setHdrHeadroom(value);
+    saveHdrHeadroom(value);
+  };
+  const hdrPreviewHint = !displayStatus
+    ? null
+    : !displayStatus.hdrActive
+      ? t('export.file.hdrNoPreview')
+      : !appSettings?.hdrDisplay
+        ? t('export.file.hdrPreviewOff')
+        : null;
   const isAndroid = osPlatform === 'android';
   const canExportToImmich = useImmichExportAvailable() && !isAndroid;
   const destination = destinationType === 'immich' && !canExportToImmich ? 'customFolder' : destinationType;
@@ -447,7 +492,7 @@ export default function ExportPanel({
           path: watermarkPath,
         });
         setWatermarkImageAspectRatio(dimensions.height > 0 ? dimensions.width / dimensions.height : 1);
-      } catch (error) {
+      } catch {
         setWatermarkImageAspectRatio(1);
       }
     };
@@ -505,6 +550,8 @@ export default function ExportPanel({
       filenameTemplate,
       jpegQuality,
       tiffBitDepth,
+      colorSpace,
+      hdr,
       keepMetadata,
       preserveTimestamps,
       preserveFolders,
@@ -559,6 +606,8 @@ export default function ExportPanel({
     fileFormat,
     jpegQuality,
     tiffBitDepth,
+    colorSpace,
+    hdr,
     enableResize,
     resizeMode,
     resizeValue,
@@ -613,6 +662,8 @@ export default function ExportPanel({
       filenameTemplate,
       jpegQuality,
       tiffBitDepth,
+      colorSpace,
+      hdr,
       keepMetadata,
       preserveTimestamps,
       preserveFolders,
@@ -654,19 +705,10 @@ export default function ExportPanel({
       } else if (isOriginalFolder) {
         outputFolderOrFile = 'originalFolderDummy';
       } else if (shouldChooseOutputFile) {
-        let suggestedName: string;
-        try {
-          // Resolve the template (dates, metadata tokens, original filename) in the
-          // backend so single-image export supports the same tokens as batch.
-          suggestedName = await invoke<string>(Invokes.GenerateExportFilename, {
-            path: pathsToExport[0],
-            template: filenameTemplate,
-          });
-        } catch {
-          const originalFilename = pathsToExport[0].split(/[\\/]/).pop() || '';
-          const stem = originalFilename.substring(0, originalFilename.lastIndexOf('.')) || originalFilename;
-          suggestedName = filenameTemplate.replace('{original_filename}', stem);
-        }
+        const suggestedName = await invoke<string>(Invokes.ResolveExportFileStem, {
+          path: pathsToExport[0],
+          filenameTemplate,
+        });
         const outputFileName = `${suggestedName}.${selectedFormat.extensions[0]}`;
 
         outputFolderOrFile = isAndroid
@@ -709,6 +751,7 @@ export default function ExportPanel({
 
         setExportState({
           destination: isOriginalFolder || isImmich || isAndroid ? null : outputFolderOrFile,
+          isOriginalFolder,
           errorMessage: '',
           progress: { current: 0, total: numImages },
           status: Status.Exporting,
@@ -789,7 +832,7 @@ export default function ExportPanel({
                   <Slider
                     defaultValue={90}
                     label={
-                      fileFormat === FileFormats.Jxl && jpegQuality === 100
+                      fileFormat === FileFormats.Jxl && jpegQuality === 100 && !hdr
                         ? t('export.file.qualityLossless')
                         : t('export.file.quality')
                     }
@@ -862,18 +905,16 @@ export default function ExportPanel({
                 value={filenameTemplate}
               />
               <div className="flex flex-wrap gap-2 mt-2">
-                {FILENAME_VARIABLES.filter((variable: string) => numImages > 1 || variable !== '{sequence}').map(
-                  (variable: string) => (
-                    <button
-                      className="px-2 py-1 bg-surface text-text-secondary text-xs rounded-md hover:bg-card-active transition-colors disabled:opacity-50"
-                      disabled={isExporting}
-                      key={variable}
-                      onClick={() => handleVariableClick(variable)}
-                    >
-                      {variable}
-                    </button>
-                  ),
-                )}
+                {FILENAME_VARIABLES.map((variable: string) => (
+                  <button
+                    className="px-2 py-1 bg-surface text-text-secondary text-xs rounded-md hover:bg-card-active transition-colors disabled:opacity-50"
+                    disabled={isExporting}
+                    key={variable}
+                    onClick={() => handleVariableClick(variable)}
+                  >
+                    {variable}
+                  </button>
+                ))}
               </div>
             </Section>
 
@@ -1016,7 +1057,9 @@ export default function ExportPanel({
                   )}
                 </Section>
 
-                {[FileFormats.Jpeg, FileFormats.Png, FileFormats.Webp].includes(fileFormat as FileFormats) && (
+                {[FileFormats.Jpeg, FileFormats.Png, FileFormats.Tiff, FileFormats.Webp, FileFormats.Jxl].includes(
+                  fileFormat as FileFormats,
+                ) && (
                   <Section title={t('export.sections.metadata')}>
                     <Switch
                       checked={keepMetadata}
@@ -1194,6 +1237,51 @@ export default function ExportPanel({
                               </>
                             )}
                           </>
+                        )}
+                        {HDR_FILE_FORMATS.includes(fileFormat) && (
+                          <Switch
+                            label={t('export.file.hdr')}
+                            tooltip={t(
+                              fileFormat === FileFormats.Jpeg ? 'export.file.hdrJpegHint' : 'export.file.hdrJxlHint',
+                            )}
+                            checked={hdr}
+                            onChange={setHdr}
+                            disabled={isExporting}
+                          />
+                        )}
+                        {HDR_FILE_FORMATS.includes(fileFormat) && hdr && (
+                          <div className={isExporting ? 'opacity-50 pointer-events-none' : ''}>
+                            <Slider
+                              defaultValue={DEFAULT_HDR_HEADROOM}
+                              label={t('settings.processing.hdr.headroom')}
+                              max={4}
+                              min={1}
+                              onChange={(e) => handleHdrHeadroomChange(Number(e.target.value))}
+                              step={0.1}
+                              value={hdrHeadroom}
+                              fillOrigin="min"
+                              suffix=" EV"
+                            />
+                            {hdrPreviewHint && (
+                              <Text variant={TextVariants.small} className="mt-1">
+                                {hdrPreviewHint}
+                              </Text>
+                            )}
+                          </div>
+                        )}
+                        {COLOR_SPACE_FILE_FORMATS.includes(fileFormat) && !(hdr && fileFormat === FileFormats.Jxl) && (
+                          <div className={isExporting ? 'opacity-50 pointer-events-none' : ''}>
+                            <Text variant={TextVariants.label} className="mb-1">
+                              {t('export.file.colorSpace')}
+                            </Text>
+                            <Dropdown
+                              options={EXPORT_COLOR_SPACES}
+                              value={colorSpace}
+                              onChange={(value) => setColorSpace(value as ExportColorSpace)}
+                              disabled={isExporting}
+                              className="w-full"
+                            />
+                          </div>
                         )}
                         {[FileFormats.Jpeg, FileFormats.Png, FileFormats.Tiff].includes(fileFormat as FileFormats) && (
                           <div className="flex items-center gap-2">

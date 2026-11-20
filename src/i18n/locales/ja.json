@@ -150,6 +150,8 @@
       "aiDenoise": "AIノイズ除去",
       "classicDenoise": "クラシックノイズ除去",
       "aiDenoiseDetail": "ディテール",
+      "aiUpscale": "RapidRes 2x",
+      "aiUpscaleDetail": "ディテール",
       "blueYellow": "ブルー/イエロー",
       "centre": "中央",
       "chromaticAberration": "色収差",
@@ -165,6 +167,7 @@
       "negativeGreen": "グリーン",
       "negativeRed": "レッド",
       "noiseReduction": "ノイズ低減",
+      "superResolution": "RapidRes",
       "presence": "外観",
       "redCyan": "レッド/シアン",
       "sharpening": "シャープ",
@@ -324,8 +327,12 @@
       "removeBlackWhite": "白黒を解除",
       "removeDenoise": "ノイズ低減を解除",
       "removeNegativeConversion": "ネガ反転を解除",
+      "removeSuperResolution": "RapidResを解除",
       "resetAdjustments": "補正設定をリセット",
+      "resetToDefaults": "デフォルトにリセット",
+      "resetToNeutral": "ニュートラルにリセット",
       "stitchPanorama": "パノラマ写真を作成",
+      "superResolution": "RapidRes (2x)",
       "tagging": "タグ付け",
       "undo": "元に戻す",
       "unflagged": "フラグなし"
@@ -387,6 +394,8 @@
       "deleteSelected": "選択したもののみ削除",
       "denoise_one": "ノイズ低減",
       "denoise_other": "ノイズ低減",
+      "superResolution_one": "RapidRes (2x)",
+      "superResolution_other": "RapidRes (2x)",
       "duplicateImage": "画像を複製",
       "enable": "有効にする",
       "exportImage_one": "画像を書き出し",
@@ -510,6 +519,7 @@
       "createNewTitle": "新しい生成編集を作成",
       "createNewTooltip": "新しい {{name}} 編集を作成",
       "denoising": "AIノイズ除去を実行中...",
+      "upscaling": "RapidResを実行中...",
       "dropzoneText": "ここにドロップして新しい編集を作成",
       "editSettingsTitle": "編集設定",
       "editsTitle": "編集一覧",
@@ -711,11 +721,13 @@
       "cancel": "キャンセル",
       "drawingActive": "描画中",
       "hint": "垂直または水平であるべき写真の縁に沿って描画します。",
+      "horizontalLine": "水平ガイド {{index}}",
       "linesStatus": "アクティブなガイドライン",
       "toast": {
         "angleRejected": "線の角度が水平または垂直から離れすぎています",
         "maxLines": "垂直線と水平線はそれぞれ最大2本まで許可されています"
-      }
+      },
+      "verticalLine": "垂直ガイド {{index}}"
     },
     "layout": {
       "split": "分割"
@@ -830,6 +842,7 @@
         "focalLength": "焦点距離",
         "iso": "ISO感度",
         "lens": "レンズ",
+        "model": "モデル",
         "shutterSpeed": "シャッタースピード",
         "title": "カメラ情報"
       },
@@ -874,6 +887,8 @@
     },
     "presets": {
       "amount": "適用量",
+      "defaultForAllCameras": "すべてのカメラのデフォルト",
+      "defaultForCamera": "{{camera}} のデフォルト",
       "dialog": {
         "allPresetFiles": "すべてのプリセットファイル",
         "exportAllTitle": "すべてのプリセットを書き出し",
@@ -894,7 +909,11 @@
         "newPreset": "新規プリセット",
         "overwrite": "上書き",
         "renameFolder": "フォルダ名を変更",
-        "sortAll": "すべて名前順に並べ替え"
+        "setDefaultAllCameras": "すべてのカメラのデフォルトに設定",
+        "setDefaultForCamera": "{{camera}} のデフォルトに設定",
+        "sortAll": "すべて名前順に並べ替え",
+        "unsetDefaultAllCameras": "すべてのカメラのデフォルトから外す",
+        "unsetDefaultForCamera": "{{camera}} のデフォルトから外す"
       },
       "status": {
         "empty": "保存されたプリセットはまだありません。作成、インポート、またはコミュニティのプリセットを探してみましょう。",
@@ -907,6 +926,9 @@
         "masks": "マスク"
       },
       "title": "プリセット",
+      "toasts": {
+        "importFailed": "{{fileName}} のインポートに失敗しました: {{error}}"
+      },
       "tooltips": {
         "explore": "コミュニティのプリセットを検索",
         "export": "すべてのプリセットを .rrpreset ファイルとして書き出し",
@@ -929,12 +951,16 @@
         "adjust": "補正",
         "crop": "切り抜き",
         "export": "書き出し",
+        "filmstrip": "フィルムストリップ",
         "info": "情報",
         "inpaint": "インペイント",
         "masks": "マスク",
         "presets": "プリセット",
         "tethering": "テザー撮影"
       }
+    },
+    "toasts": {
+      "embeddedPreview": "RapidRAW はこの RAW ファイルをデコードできなかったため、カメラに埋め込まれた JPEG プレビューを表示・編集しています。本来の RAW より画質が低く、編集の余裕も少なくなります。"
     },
     "toolbar": {
       "history": "履歴",
@@ -945,6 +971,7 @@
         "compare": "補正前 / 補正後 (B) またはモード (右クリック)",
         "focalLength": "焦点距離",
         "fullscreen": "全画面表示切り替え (F)",
+        "hdr": "HDR プレビュー",
         "iso": "ISO感度",
         "redo": "やり直し (Ctrl+Y) または履歴 (右クリック)",
         "shutterSpeed": "シャッタースピード",
@@ -1001,7 +1028,13 @@
       "selectFolderTitle_other": "{{count}} 枚の画像を書き出すフォルダを選択"
     },
     "file": {
+      "colorSpace": "カラースペース",
       "dpi": "DPI",
+      "hdr": "HDR出力",
+      "hdrJpegHint": "ゲインマップを追加します。HDR画面ではハイライトがより明るく表示され、それ以外では通常の写真が表示されます。",
+      "hdrJxlHint": "本来のHDRファイル（PQ、Rec. 2020）として保存します。HDR対応のビューアが必要です。",
+      "hdrNoPreview": "このディスプレイでは HDR のハイライトを表示できません。書き出したファイルには含まれます。",
+      "hdrPreviewOff": "ハイライトをプレビューするには、エディターのツールバーで HDR をオンにしてください。",
       "quality": "画質",
       "qualityLossless": "画質 (ロスレス)",
       "resolution": "解像度",
@@ -1157,6 +1190,7 @@
       "failed": "失敗（{{failedCount}}）",
       "kinds": {
         "denoise": "AIノイズ除去中",
+        "upscale": "RapidResで拡大中",
         "depthMap": "深度を解析中",
         "depthMask": "深度マスクを生成中",
         "faceMask": "顔マスクを生成中",
@@ -1450,10 +1484,7 @@
       "originalRatio": "オリジナル比率"
     },
     "thumbnailSize": {
-      "large": "大",
-      "list": "リスト",
-      "medium": "中",
-      "small": "小"
+      "list": "リスト"
     },
     "tooltips": {
       "communityPresets": "コミュニティプリセット",
@@ -1546,6 +1577,7 @@
       "descReplace": "選択したすべての設定を上書きし、残りの設定をデフォルトにリセットします。",
       "groups": {
         "aiDenoise": "AIノイズ除去",
+        "aiUpscale": "RapidRes",
         "blackWhite": "白黒",
         "chromaticAberration": "色収差",
         "clarityDehaze": "明瞭度とかすみの除去",
@@ -1708,18 +1740,35 @@
       "zoomOutTooltip": "縮小"
     },
     "panorama": {
+      "autoCrop": "自動切り抜き",
+      "autoProjectionUsed": "使用中: {{projection}}",
+      "boundaryWarp": "境界のワープ",
+      "boundaryWarpHint": "端を切り抜く代わりに引き伸ばしてフレームを埋めます。",
       "cancel": "キャンセル",
       "close": "閉じる",
       "descCount": "{{count}} 枚の重複する画像をシームレスなパノラマに結合します。",
       "descCount_one": "{{count}} 枚の重複する画像をシームレスなパノラマに結合します。",
       "descCount_other": "{{count}} 枚の重複する画像をシームレスなパノラマに結合します。",
       "descGeneric": "重複する画像をシームレスなパノラマに結合します。",
+      "excludedImages": "{{count}} 枚の画像は一致しなかったため除外されました",
+      "excludedImages_one": "{{count}} 枚の画像は一致しなかったため除外されました",
+      "excludedImages_other": "{{count}} 枚の画像は一致しなかったため除外されました",
+      "exposureCompensation": "露出補正",
+      "exposureCompensationHint": "画像間の露出、ホワイトバランス、周辺減光を揃えます。",
       "failed": "パノラマ作成に失敗しました",
       "initializing": "初期化中...",
       "openInEditor": "エディタで開く",
+      "outputInfo": "{{images}} 枚 · {{width}} × {{height}} px",
+      "projection": "投影法",
+      "projectionAuto": "自動",
+      "projectionCylindrical": "円筒",
+      "projectionFallback": "{{requested}} ではこの画角をカバーできないため、{{projection}} を使用しています",
+      "projectionPerspective": "遠近法",
+      "projectionSpherical": "球面",
       "retry": "再試行",
       "save": "保存",
       "savedSuccess": "パノラマを正常に保存しました！",
+      "saving": "保存中…",
       "speedNotice": "画像枚数や画像サイズによって、数分かかる場合があります。",
       "start": "開始",
       "stitchingProgress": "パノラマ写真を作成中",
@@ -1836,6 +1885,7 @@
       "limit": "上限",
       "modals": {
         "aiDenoiseMessage": "AIノイズ除去キャッシュを消去してもよろしいですか？\n\nAIノイズ除去が有効な画像は再度処理する必要があり、1枚あたり数分かかる場合があります。",
+        "aiUpscaleMessage": "RapidResキャッシュを消去してもよろしいですか？\n\nRapidResが有効な画像は再度拡大処理する必要があります。",
         "aiMapsMessage": "深度・法線マップをクリアしてもよろしいですか？\n\nレンズブラー、フォグ、リライトを使用している画像は、次に開いたときにマップを再生成します。",
         "aiMessage": "本当にすべてのアクティブなルートフォルダ内の画像から、AI生成されたタグをすべて削除しますか？\n\n手動で追加したタグには影響しません。この操作は取り消せません。",
         "allMessage": "本当にすべてのアクティブなルートフォルダ内の画像から、AI生成および手動追加されたタグをすべて削除しますか？\n\nこの操作は取り消せません。",
@@ -1863,6 +1913,7 @@
       "show": "表示",
       "statuses": {
         "aiDenoiseSuccess": "AIノイズ除去キャッシュを消去しました。",
+        "aiUpscaleSuccess": "RapidResキャッシュを消去しました。",
         "aiSuccess": "{{count}} 件のファイルを更新しました。AIタグを削除しました。",
         "aiSuccess_one": "{{count}} 件のファイルを更新しました。AIタグを削除しました。",
         "aiSuccess_other": "{{count}} 件のファイルを更新しました。AIタグを削除しました。",
@@ -1879,6 +1930,8 @@
       "storage": {
         "aiDenoise": "AI ノイズ除去",
         "aiDenoiseDesc": "キャッシュされたノイズ除去結果。",
+        "aiUpscale": "RapidRes",
+        "aiUpscaleDesc": "キャッシュされたRapidResの2倍拡大結果。",
         "aiMaps": "深度・法線マップ",
         "aiMapsDesc": "レンズブラー、フォグ、リライトで使用されます。",
         "immich": "Immich",
@@ -2108,6 +2161,52 @@
         "metal": "Metal",
         "vulkan": "Vulkan"
       },
+      "colorManagement": {
+        "chooseProfile": "プロファイルを選択",
+        "modeAuto": "自動（システムのプロファイル）",
+        "modeCustom": "カスタム ICC プロファイル",
+        "modeOff": "オフ",
+        "profile": "モニタープロファイル",
+        "profileDesc": "エディターのプレビューをモニターのカラープロファイルに変換し、キャリブレーション済みや広色域のディスプレイで正確な色を表示します。書き出しには影響しません。",
+        "statusInvalid": "このプロファイルを読み込めませんでした。",
+        "statusNone": "モニタープロファイルが見つかりません。プレビューは sRGB として表示されます。",
+        "statusProfile": "{{name}} を使用中です。",
+        "statusSystem": "色は OS によって管理されています。",
+        "statusUnavailable": "カラーマネジメントには GPU レンダラーが必要です。",
+        "wideGamut": "広色域プレビュー（{{space}}）。",
+        "wideGamutHdrNote": "エディターが HDR 表示中は使用されません。",
+        "wideGamutPreview": "広色域プレビュー",
+        "wideGamutPreviewDesc": "広色域モニターで sRGB を超える色を表示します。Display P3、Adobe RGB などの広い色空間で書き出す場合はオンにしてください。オフにすると sRGB で書き出した場合の見た目を確認できます。",
+        "wideGamutPreviewEnable": "広色域の色を表示"
+      },
+      "defaultAdjustments": {
+        "addCamera": "カメラを追加…",
+        "applyToNonRaw": "JPEG、TIFF、PNG など RAW 以外のファイルにも適用",
+        "applyToNonRawDesc": "オフの場合、このデフォルトは RAW ファイルにのみ適用されます。カメラ JPEG は通常すでに処理・補正済みのため、再適用すると効きすぎることがあります。",
+        "autoLensCorrection": "自動レンズ補正",
+        "autoLensCorrectionDesc": "各画像のメタデータから検出したレンズプロファイルで、歪曲収差、色収差、周辺減光を補正します。",
+        "cameraDefaults": "カメラ別のデフォルト",
+        "cameraDefaultsDesc": "特定のカメラの画像に専用のプリセットを設定します。ここにないカメラには上のデフォルトのプリセットが適用され、レンズ補正はすべてのカメラに適用されます。",
+        "cameraPresetMissing": "選択したプリセットが削除されたため、このカメラの画像は再びすべてのカメラ用のプリセットを使用します。",
+        "description": "未編集の画像の初期状態と「補正設定をリセット」で戻る値を設定します。編集済みの画像の設定は変わりません。デフォルトを設定すると、RAW のサムネイルはカメラの埋め込みプレビューではなく生成されるため、最初は読み込みが遅くなります。",
+        "lensCorrection": "レンズ補正",
+        "noCamerasFound": "他のカメラが見つかりません。そのカメラの画像があるフォルダを開くか、その画像を編集中にプリセットを右クリックしてください。",
+        "noPreset": "なし（ニュートラル）",
+        "preset": "デフォルトのプリセット",
+        "presetDesc": "未編集のすべての画像に適用されます。マスク、切り抜き、変形は作成した画像にしか合わないため除外されます。",
+        "presetMissing": "選択したプリセットが削除されたため、未編集の画像は再びニュートラル値を使用します。",
+        "removeCamera": "カメラを削除",
+        "sameAsAllCameras": "すべてのカメラと同じ",
+        "scope": "適用対象",
+        "sliderReset": "スライダーのリセット",
+        "sliderResetDefaults": "デフォルトの補正",
+        "sliderResetDesc": "ダブルクリックやスピード編集などでスライダーをリセットしたときに戻る値です。マスクのスライダーは常にニュートラル値に戻ります。",
+        "sliderResetNeutral": "ニュートラル値",
+        "title": "デフォルトの補正"
+      },
+      "display": {
+        "title": "ディスプレイ"
+      },
       "dynamicDesc": "編集画面は、ディスプレイの実際の画素密度に合わせたプレビューをレンダリングします。これにより、ズーム時やピント合わせ時に1:1のピクセル精度で細部まで鮮明に表現されます。",
       "editIn": {
         "add": "プログラムを追加",
@@ -2125,6 +2224,16 @@
         "title": "外部アプリで編集"
       },
       "enableLivePreviews": "リアルタイムプレビューを有効化",
+      "hdr": {
+        "display": "HDR表示",
+        "displayDesc": "HDRディスプレイでハイライトを通常の白より明るく表示します。シャドウと中間調は変わらず、通常の書き出しには影響しません。",
+        "enableDisplay": "エディターでHDRを使用",
+        "headroom": "ハイライトの範囲",
+        "headroomDesc": "ハイライトが通常の白をどこまで超えられるかを設定します。HDR書き出しにも使用されます。",
+        "statusActive": "このディスプレイはHDRモードです。",
+        "statusInactive": "このディスプレイはHDRモードではありません。効果を確認するには、システムのディスプレイ設定でHDRをオンにしてください。",
+        "statusUnsupported": "HDRにはWindowsまたはmacOSのGPUレンダラーが必要です。"
+      },
       "highDpi": "高DPIレンダリング",
       "highDpiDesc": "画面本来の物理解像度である {{dpr}}x でプレビューをレンダリングします。極めて鮮明なプレビューが得られますが、メモリ消費が大幅に増加します。",
       "highDpiDescStandard": "この設定は高DPIディスプレイのみに影響します。現在のディスプレイは標準解像度です。",
@@ -2153,7 +2262,7 @@
         "baselineExposure": "ベース露出",
         "baselineExposureAmount": "ベース量",
         "baselineExposureAmountDesc": "RAWファイルに加える露出量です。darktableは+0.7 EVを使用します。",
-        "baselineExposureDesc": "RAWファイルを一定量明るくします。DNGのBaselineExposureタグがあればその値も加えます。",
+        "baselineExposureDesc": "RAWファイルを一定量明るくします。DNGのBaselineExposureタグがある場合は、代わりにその値を使います。",
         "colorNr": "カラーノイズ低減 (基本)",
         "colorNrDesc": "パイプラインの初期段階でクロスバイラテラルフィルタを適用し、カラーノイズを除去します。値が大きいほど効果が強まります。",
         "defaultNonRawTonemapper": "標準トーンマッパー (RAW以外)",
@@ -2193,6 +2302,13 @@
       "qualities": {
         "high": "高画質",
         "performance": "パフォーマンス優先"
+      },
+      "rawDecoding": "RAWデコード",
+      "rawDecodingDesc": "RAWファイルをデコードする場所を選択します。「自動」はGPUを使用し、GPUで画像を処理できない場合はCPUに切り替えます。「GPU」は常に最初にGPUを試します。「CPU」は低速ですが、すべてのシステムで動作します。",
+      "rawDecodingOptions": {
+        "auto": "自動",
+        "cpu": "CPU",
+        "gpu": "GPU"
       },
       "renderScale": "レンダリングスケール",
       "renderScaleDesc": "画面解像度に対する表示解像度の比率を調整します。高解像度ディスプレイで値を下げると、シャープネスがわずかに低下する代わりに動作が軽くなります。",
@@ -2250,6 +2366,7 @@
         "mediapipe": "AI顔マスクを支える高速な顔ランドマークおよびセグメンテーションモデルに。",
         "negpy": "ネガ反転アルゴリズムのヒントとなりました。",
         "nind": "AIノイズ低減機能を支えるAIモデルを提供しています。",
+        "span": "RapidRAWのAI 2倍拡大機能RapidResのベースとなるAIモデルです。RapidRAWが独自のRAW処理に合わせてファインチューニングしています（Philip Hofmann作、CC BY 4.0）。",
         "rawler": "RAWファイル処理の基盤となる優れたRustライブラリを提供しています。",
         "sam2": "AI被写体検出機能の基盤となるモデルを提供しています。",
         "spektrafilm": "RapidRAW の内蔵フィルムエミュレーションを支える、Andrea Volpato 氏によるスペクトルベースのフィルムエミュレーション LUT を提供してくださったことに。ライセンスは CC BY-SA 4.0 です。",
@@ -2325,13 +2442,11 @@
     "bottomBar": {
       "imagesSelected": "{{total}}枚中 {{current}}枚の画像を選択中",
       "tooltips": {
-        "collapseFilmstrip": "フィルムストリップをたたむ",
         "collapseLeft": "左パネルを折りたたむ",
         "collapseRight": "右パネルを折りたたむ",
         "copyPasteSettings": "補正設定のコピーと貼り付け",
         "copySettings": "補正設定をコピー",
         "customZoom": "クリックしてカスタムのズーム倍率を入力",
-        "expandFilmstrip": "フィルムストリップを展開",
         "expandLeft": "左パネルを展開",
         "expandRight": "右パネルを展開",
         "export": "書き出し",

@@ -5,7 +5,7 @@ import Dropdown from '../../ui/Dropdown';
 import { useSettingsStore } from '../../../store/useSettingsStore';
 import { allProfiles, FilmProfile } from '../../../utils/filmProfiles';
 import { toast } from 'react-toastify';
-import { Invokes } from '../../ui/AppProperties';
+import { Invokes } from '../../../types/invokes';
 import { useImportStore } from '../../../store/useImportStore';
 import { useLibraryStore } from '../../../store/useLibraryStore';
 import { useScannerStore, FilmType, ScannerCaps } from '../../../store/useScannerStore';

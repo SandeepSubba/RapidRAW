@@ -1,9 +1,10 @@
 import { Crop } from 'react-image-crop';
 import { v4 as uuidv4 } from 'uuid';
-import { SubMask, SubMaskMode } from '../components/panel/right/Masks';
-import type { AdjustmentLayout, AppSettings } from '../components/ui/AppProperties';
+import { SubMask, SubMaskMode } from '../types/masks';
+import type { AdjustmentLayout, AppSettings } from '../types/settings';
 import type { WhiteBalance } from './whiteBalance';
 import defaultAdjustments from './defaultAdjustments.json';
+import type { ParseKeys } from 'i18next';
 
 export enum ActiveChannel {
   Blue = 'blue',
@@ -84,6 +85,8 @@ export enum DetailsAdjustment {
   AiDenoiseDetail = 'aiDenoiseDetail',
   AiDenoiseEnabled = 'aiDenoiseEnabled',
   AiDenoiseMethod = 'aiDenoiseMethod',
+  AiUpscaleDetail = 'aiUpscaleDetail',
+  AiUpscaleEnabled = 'aiUpscaleEnabled',
   Clarity = 'clarity',
   SkinSmoothing = 'skinSmoothing',
   SkinTexture = 'skinTexture',
@@ -334,6 +337,8 @@ export interface Adjustments {
   aiDenoiseMethod: DenoiseMethod;
   aiPatches: Array<AiPatch>;
   snapshots: Array<AdjustmentSnapshot>;
+  aiUpscaleDetail: number;
+  aiUpscaleEnabled: boolean;
   aspectRatio: number | null;
   baselineExposure: boolean;
   blacks: number;
@@ -945,7 +950,7 @@ export const MONOCHROME_ADJUSTMENT_KEYS = [
 ] as const;
 
 export interface AdjustmentGroup {
-  label: string;
+  label: ParseKeys;
   keys: string[];
 }
 
@@ -1014,6 +1019,10 @@ export const ADJUSTMENT_GROUPS: Record<string, AdjustmentGroup[]> = {
         DetailsAdjustment.AiDenoiseAmount,
         DetailsAdjustment.AiDenoiseDetail,
       ],
+    },
+    {
+      label: 'modals.copyPaste.groups.aiUpscale',
+      keys: [DetailsAdjustment.AiUpscaleEnabled, DetailsAdjustment.AiUpscaleDetail],
     },
     {
       label: 'modals.copyPaste.groups.chromaticAberration',
@@ -1092,6 +1101,7 @@ export const ADJUSTMENT_GROUPS: Record<string, AdjustmentGroup[]> = {
         Effect.MotionBlurAmount,
         Effect.MotionBlurAngle,
         Effect.MotionBlurType,
+        Effect.MotionBlurLayer,
         Effect.MotionBlurHighlights,
         Effect.MotionBlurDepthEnabled,
         Effect.MotionBlurDepth,
@@ -1224,6 +1234,8 @@ export const ADJUSTMENT_SECTIONS: Sections = {
     DetailsAdjustment.AiDenoiseMethod,
     DetailsAdjustment.AiDenoiseAmount,
     DetailsAdjustment.AiDenoiseDetail,
+    DetailsAdjustment.AiUpscaleEnabled,
+    DetailsAdjustment.AiUpscaleDetail,
     DetailsAdjustment.ChromaticAberrationRedCyan,
     DetailsAdjustment.ChromaticAberrationBlueYellow,
     DetailsAdjustment.NegativeConversionEnabled,
@@ -1381,6 +1393,7 @@ export const ADJUSTMENT_SECTION_TOOLS: Record<string, Array<AdjustmentSectionToo
     { id: 'sharpening', label: 'adjustments.details.sharpening' },
     { id: 'presence', label: 'adjustments.details.presence' },
     { id: 'noiseReduction', label: 'adjustments.details.noiseReduction' },
+    { id: 'superResolution', label: 'adjustments.details.superResolution' },
     { id: 'chromaticAberration', label: 'adjustments.details.chromaticAberration' },
     { id: 'negativeConversion', label: 'adjustments.details.negativeConversion' },
   ],

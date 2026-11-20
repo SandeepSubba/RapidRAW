@@ -4,7 +4,7 @@ import { Check, Layers, Droplet, Grid2x2, Eye, Sparkles } from 'lucide-react';
 import { useImportStore } from '../../../store/useImportStore';
 import { useSettingsStore } from '../../../store/useSettingsStore';
 import { useSdImportActions } from '../../../hooks/useSdImportActions';
-import { CullingSuggestions, SortDirection } from '../../../components/ui/AppProperties';
+import { CullingSuggestions, SortDirection } from '../../../types/library';
 import { computeVisible, pairCompanions } from './importFilters';
 import ImportFilterBar from './ImportFilterBar';
 import { RatingColor } from './RatingColor';

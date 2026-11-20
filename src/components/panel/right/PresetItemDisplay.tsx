@@ -1,15 +1,17 @@
 import { useMemo, ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Crop, Layers, Loader2, Palette, Wrench } from 'lucide-react';
+import { Crop, Layers, Loader2, Palette, Star, Wrench } from 'lucide-react';
 import Text from '../../ui/Text';
 import Slider from '../../ui/Slider';
 import { TextColors, TextVariants, TextWeights } from '../../../types/typography';
 import { ADJUSTMENT_GROUPS } from '../../../utils/adjustments';
-import { Preset } from '../../ui/AppProperties';
+import { cameraDisplayName } from '../../../utils/developDefaults';
+import { useSettingsStore } from '../../../store/useSettingsStore';
+import { Preset } from '../../../types/editor';
 
 export interface PresetItemDisplayProps {
-  isGeneratingPreviews: boolean;
+  isGeneratingPreviews?: boolean;
   preset: Preset;
   previewUrl: string;
   isActive?: boolean;
@@ -40,6 +42,18 @@ export default function PresetItemDisplay({
     preset.includeCropTransform ?? geometryKeys.some((key) => preset.adjustments?.[key] !== undefined);
   const isTool = preset.presetType === 'tool';
   const showBadges = !subtitle && (supportsMasks || supportsGeometry);
+  // Upstream v1.7: a star marks presets used as default adjustments.
+  const developDefaults = useSettingsStore((state) => state.appSettings?.developDefaults);
+  const defaultForLabel = useMemo(() => {
+    const labels: string[] = [];
+    if (developDefaults?.presetId === preset.id) labels.push(t('editor.presets.defaultForAllCameras'));
+    for (const rule of developDefaults?.cameras ?? []) {
+      if (rule.presetId === preset.id) {
+        labels.push(t('editor.presets.defaultForCamera', { camera: cameraDisplayName(rule) }));
+      }
+    }
+    return labels.length > 0 ? labels.join(', ') : null;
+  }, [developDefaults, preset.id, t]);
   const tooltipContent = useMemo(() => {
     const features = [];
     if (supportsMasks) features.push(t('editor.presets.supports.masks'));
@@ -82,9 +96,16 @@ export default function PresetItemDisplay({
 
         <div className="grow min-w-0 flex flex-col justify-center">
           {nameSlot ?? (
-            <Text color={TextColors.primary} weight={TextWeights.medium} className="truncate">
-              {preset.name}
-            </Text>
+            <div className="flex items-center gap-1.5 min-w-0">
+              <Text color={TextColors.primary} weight={TextWeights.medium} className="truncate">
+                {preset.name}
+              </Text>
+              {defaultForLabel && (
+                <span className="shrink-0 text-accent" data-tooltip={defaultForLabel}>
+                  <Star size={12} fill="currentColor" />
+                </span>
+              )}
+            </div>
           )}
           <div className="flex items-center gap-1.5 mt-0.5">
             {subtitle ?? (

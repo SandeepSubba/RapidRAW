@@ -150,6 +150,8 @@
       "aiDenoise": "AI 노이즈 제거",
       "classicDenoise": "클래식 노이즈 제거",
       "aiDenoiseDetail": "디테일",
+      "aiUpscale": "RapidRes 2x",
+      "aiUpscaleDetail": "디테일",
       "blueYellow": "파랑/노랑",
       "centre": "중앙",
       "chromaticAberration": "색수차",
@@ -165,6 +167,7 @@
       "negativeGreen": "초록",
       "negativeRed": "빨강",
       "noiseReduction": "노이즈 감소",
+      "superResolution": "RapidRes",
       "presence": "외관",
       "redCyan": "빨강/시안",
       "sharpening": "선명도 향상",
@@ -324,8 +327,12 @@
       "removeBlackWhite": "흑백 해제",
       "removeDenoise": "노이즈 제거 해제",
       "removeNegativeConversion": "네거티브 변환 해제",
+      "removeSuperResolution": "RapidRes 해제",
       "resetAdjustments": "조정값 초기화",
+      "resetToDefaults": "기본값으로 초기화",
+      "resetToNeutral": "중립 값으로 초기화",
       "stitchPanorama": "파노라마 스티칭",
+      "superResolution": "RapidRes (2x)",
       "tagging": "태그 지정",
       "undo": "실행 취소",
       "unflagged": "플래그 없음"
@@ -387,6 +394,8 @@
       "deleteSelected": "선택 항목만 삭제",
       "denoise_one": "노이즈 제거",
       "denoise_other": "노이즈 제거",
+      "superResolution_one": "RapidRes (2x)",
+      "superResolution_other": "RapidRes (2x)",
       "duplicateImage": "이미지 복제",
       "enable": "사용",
       "exportImage_one": "이미지 내보내기",
@@ -510,6 +519,7 @@
       "createNewTitle": "새 생성형 편집 만들기",
       "createNewTooltip": "새 {{name}} 편집 만들기",
       "denoising": "AI 노이즈 제거 실행 중...",
+      "upscaling": "RapidRes 실행 중...",
       "dropzoneText": "여기에 놓아 새 편집을 만드세요",
       "editSettingsTitle": "편집 설정",
       "editsTitle": "편집",
@@ -711,11 +721,13 @@
       "cancel": "취소",
       "drawingActive": "그리기 활성화",
       "hint": "사진에서 수직이나 수평이 되어야 하는 가장자리를 따라 그리세요.",
+      "horizontalLine": "수평 안내선 {{index}}",
       "linesStatus": "활성 안내선",
       "toast": {
         "angleRejected": "선의 각도가 수평이나 수직에서 너무 벗어났습니다",
         "maxLines": "수직선 2개, 수평선 2개까지만 허용됩니다"
-      }
+      },
+      "verticalLine": "수직 안내선 {{index}}"
     },
     "layout": {
       "split": "분할"
@@ -830,6 +842,7 @@
         "focalLength": "초점 거리",
         "iso": "ISO",
         "lens": "렌즈",
+        "model": "모델",
         "shutterSpeed": "셔터 속도",
         "title": "카메라 세부 정보"
       },
@@ -874,6 +887,8 @@
     },
     "presets": {
       "amount": "양",
+      "defaultForAllCameras": "모든 카메라의 기본값",
+      "defaultForCamera": "{{camera}}의 기본값",
       "dialog": {
         "allPresetFiles": "모든 프리셋 파일",
         "exportAllTitle": "모든 프리셋 내보내기",
@@ -894,7 +909,11 @@
         "newPreset": "새 프리셋",
         "overwrite": "덮어쓰기",
         "renameFolder": "폴더 이름 변경",
-        "sortAll": "모두 알파벳순 정렬"
+        "setDefaultAllCameras": "모든 카메라의 기본값으로 설정",
+        "setDefaultForCamera": "{{camera}}의 기본값으로 설정",
+        "sortAll": "모두 알파벳순 정렬",
+        "unsetDefaultAllCameras": "모든 카메라의 기본값으로 사용 안 함",
+        "unsetDefaultForCamera": "{{camera}}의 기본값으로 사용 안 함"
       },
       "status": {
         "empty": "아직 저장된 프리셋이 없습니다. 직접 만들거나, 파일에서 가져오거나, 커뮤니티 프리셋을 둘러보세요.",
@@ -907,6 +926,9 @@
         "masks": "마스크"
       },
       "title": "프리셋",
+      "toasts": {
+        "importFailed": "{{fileName}} 가져오기 실패: {{error}}"
+      },
       "tooltips": {
         "explore": "커뮤니티 프리셋 둘러보기",
         "export": "모든 프리셋을 .rrpreset 파일로 내보내기",
@@ -929,12 +951,16 @@
         "adjust": "조정",
         "crop": "자르기",
         "export": "내보내기",
+        "filmstrip": "필름스트립",
         "info": "정보",
         "inpaint": "인페인팅",
         "masks": "마스크",
         "presets": "프리셋",
         "tethering": "테더링"
       }
+    },
+    "toasts": {
+      "embeddedPreview": "RapidRAW가 이 RAW 파일을 디코딩하지 못해 카메라에 포함된 JPEG 미리보기를 표시하고 편집하고 있습니다. 실제 RAW보다 화질이 낮고 편집 여유도 적습니다."
     },
     "toolbar": {
       "history": "기록",
@@ -945,6 +971,7 @@
         "compare": "전 / 후 (B) 또는 모드 (우클릭)",
         "focalLength": "초점 거리",
         "fullscreen": "전체 화면 전환 (F)",
+        "hdr": "HDR 미리보기",
         "iso": "ISO",
         "redo": "다시 실행 (Ctrl+Y) 또는 기록 (우클릭)",
         "shutterSpeed": "셔터 속도",
@@ -1001,7 +1028,13 @@
       "selectFolderTitle_other": "이미지 {{count}}개를 내보낼 폴더 선택"
     },
     "file": {
+      "colorSpace": "색 공간",
       "dpi": "DPI",
+      "hdr": "HDR 출력",
+      "hdrJpegHint": "게인 맵을 추가합니다. HDR 화면에서는 하이라이트가 더 밝게 보이고, 그 외에는 일반 사진으로 보입니다.",
+      "hdrJxlHint": "실제 HDR 파일(PQ, Rec. 2020)로 저장합니다. HDR 지원 뷰어가 필요합니다.",
+      "hdrNoPreview": "이 디스플레이에서는 HDR 하이라이트를 표시할 수 없습니다. 내보낸 파일에는 포함됩니다.",
+      "hdrPreviewOff": "하이라이트를 미리 보려면 편집기 도구 모음에서 HDR을 켜세요.",
       "quality": "품질",
       "qualityLossless": "품질 (무손실)",
       "resolution": "해상도",
@@ -1157,6 +1190,7 @@
       "failed": "실패 ({{failedCount}})",
       "kinds": {
         "denoise": "AI 노이즈 제거 중",
+        "upscale": "RapidRes 확대 중",
         "depthMap": "깊이 분석 중",
         "depthMask": "깊이 마스크 생성 중",
         "faceMask": "얼굴 마스크 생성 중",
@@ -1450,10 +1484,7 @@
       "originalRatio": "원본 비율"
     },
     "thumbnailSize": {
-      "large": "크게",
-      "list": "목록",
-      "medium": "보통",
-      "small": "작게"
+      "list": "목록"
     },
     "tooltips": {
       "communityPresets": "커뮤니티 프리셋",
@@ -1546,6 +1577,7 @@
       "descReplace": "선택한 모든 설정을 덮어쓰고 나머지는 기본값으로 초기화합니다.",
       "groups": {
         "aiDenoise": "AI 노이즈 제거",
+        "aiUpscale": "RapidRes",
         "blackWhite": "흑백",
         "chromaticAberration": "색수차",
         "clarityDehaze": "명료도 및 디헤이즈",
@@ -1708,18 +1740,35 @@
       "zoomOutTooltip": "축소"
     },
     "panorama": {
+      "autoCrop": "자동 자르기",
+      "autoProjectionUsed": "사용 중: {{projection}}",
+      "boundaryWarp": "경계 변형",
+      "boundaryWarpHint": "가장자리를 잘라내는 대신 늘려서 프레임을 채웁니다.",
       "cancel": "취소",
       "close": "닫기",
       "descCount": "겹치는 이미지 {{count}}개를 매끄러운 파노라마로 결합합니다.",
       "descCount_one": "겹치는 이미지 {{count}}개를 매끄러운 파노라마로 결합합니다.",
       "descCount_other": "겹치는 이미지 {{count}}개를 매끄러운 파노라마로 결합합니다.",
       "descGeneric": "겹치는 이미지를 매끄러운 파노라마로 결합합니다.",
+      "excludedImages": "{{count}}개의 이미지를 일치시킬 수 없어 제외했습니다",
+      "excludedImages_one": "{{count}}개의 이미지를 일치시킬 수 없어 제외했습니다",
+      "excludedImages_other": "{{count}}개의 이미지를 일치시킬 수 없어 제외했습니다",
+      "exposureCompensation": "노출 보정",
+      "exposureCompensationHint": "이미지 간 노출, 화이트 밸런스, 비네팅을 균일하게 맞춥니다.",
       "failed": "파노라마 실패",
       "initializing": "초기화 중...",
       "openInEditor": "편집기에서 열기",
+      "outputInfo": "이미지 {{images}}개 · {{width}} × {{height}} px",
+      "projection": "투영",
+      "projectionAuto": "자동",
+      "projectionCylindrical": "원통형",
+      "projectionFallback": "{{requested}}(으)로는 이 화각을 담을 수 없어 {{projection}}을(를) 사용합니다",
+      "projectionPerspective": "원근",
+      "projectionSpherical": "구형",
       "retry": "다시 시도",
       "save": "저장",
       "savedSuccess": "파노라마가 성공적으로 저장되었습니다!",
+      "saving": "저장 중…",
       "speedNotice": "이미지의 개수와 크기에 따라 몇 분이 걸릴 수 있습니다.",
       "start": "시작",
       "stitchingProgress": "파노라마 스티칭 중",
@@ -1836,6 +1885,7 @@
       "limit": "한도",
       "modals": {
         "aiDenoiseMessage": "AI 노이즈 제거 캐시를 지우시겠습니까?\n\nAI 노이즈 제거가 켜진 이미지는 다시 처리해야 하며, 이미지당 몇 분이 걸릴 수 있습니다.",
+        "aiUpscaleMessage": "RapidRes 캐시를 지우시겠습니까?\n\nRapidRes가 켜진 이미지는 다시 확대 처리해야 합니다.",
         "aiMapsMessage": "깊이 및 노멀 맵을 지우시겠습니까?\n\n렌즈 블러, 안개 또는 리라이트를 사용하는 이미지는 다음에 열 때 맵을 다시 생성합니다.",
         "aiMessage": "모든 활성 루트 폴더의 모든 이미지에서 AI가 생성한 태그를 모두 제거하시겠습니까?\n\n사용자가 추가한 태그에는 영향을 주지 않습니다. 이 작업은 취소할 수 없습니다.",
         "allMessage": "모든 활성 루트 폴더의 모든 이미지에서 AI가 생성한 태그와 사용자가 추가한 태그를 모두 제거하시겠습니까?\n\n이 작업은 취소할 수 없습니다.",
@@ -1863,6 +1913,7 @@
       "show": "보기",
       "statuses": {
         "aiDenoiseSuccess": "AI 노이즈 제거 캐시를 지웠습니다.",
+        "aiUpscaleSuccess": "RapidRes 캐시를 지웠습니다.",
         "aiSuccess": "{{count}}개 파일이 업데이트되었습니다. AI 태그가 제거되었습니다.",
         "aiSuccess_one": "{{count}}개 파일이 업데이트되었습니다. AI 태그가 제거되었습니다.",
         "aiSuccess_other": "{{count}}개 파일이 업데이트되었습니다. AI 태그가 제거되었습니다.",
@@ -1879,6 +1930,8 @@
       "storage": {
         "aiDenoise": "AI 노이즈 제거",
         "aiDenoiseDesc": "캐시된 노이즈 제거 결과입니다.",
+        "aiUpscale": "RapidRes",
+        "aiUpscaleDesc": "캐시된 RapidRes 2배 확대 결과입니다.",
         "aiMaps": "깊이 및 노멀 맵",
         "aiMapsDesc": "렌즈 블러, 안개, 리라이트에 사용됩니다.",
         "immich": "Immich",
@@ -2108,6 +2161,52 @@
         "metal": "Metal",
         "vulkan": "Vulkan"
       },
+      "colorManagement": {
+        "chooseProfile": "프로파일 선택",
+        "modeAuto": "자동(시스템 프로파일)",
+        "modeCustom": "사용자 지정 ICC 프로파일",
+        "modeOff": "끄기",
+        "profile": "모니터 프로파일",
+        "profileDesc": "편집기 미리보기를 모니터의 색상 프로파일로 변환하여 캘리브레이션된 디스플레이와 광색역 디스플레이에서 색을 정확하게 표시합니다. 내보내기에는 영향을 주지 않습니다.",
+        "statusInvalid": "이 프로파일을 불러올 수 없습니다.",
+        "statusNone": "모니터 프로파일을 찾을 수 없습니다. 미리보기는 sRGB로 표시됩니다.",
+        "statusProfile": "{{name}} 사용 중.",
+        "statusSystem": "색상은 운영 체제에서 관리합니다.",
+        "statusUnavailable": "색상 관리를 사용하려면 GPU 렌더러가 필요합니다.",
+        "wideGamut": "광색역 미리보기({{space}}).",
+        "wideGamutHdrNote": "편집기가 HDR로 표시하는 동안에는 사용되지 않습니다.",
+        "wideGamutPreview": "광색역 미리보기",
+        "wideGamutPreviewDesc": "광색역 모니터에서 sRGB를 넘는 색을 표시합니다. Display P3, Adobe RGB 등 넓은 색 공간으로 내보낼 때 켜세요. 끄면 sRGB로 내보낸 결과를 미리 볼 수 있습니다.",
+        "wideGamutPreviewEnable": "광색역 색상 표시"
+      },
+      "defaultAdjustments": {
+        "addCamera": "카메라 추가…",
+        "applyToNonRaw": "JPEG, TIFF, PNG 등 RAW가 아닌 파일에도 적용",
+        "applyToNonRawDesc": "끄면 RAW 파일에만 이 기본값이 적용됩니다. 카메라 JPEG는 보통 이미 처리되고 보정되어 있어 다시 적용하면 과해질 수 있습니다.",
+        "autoLensCorrection": "자동 렌즈 보정",
+        "autoLensCorrectionDesc": "각 이미지의 메타데이터에서 감지한 렌즈 프로필로 왜곡, 색수차, 비네팅을 보정합니다.",
+        "cameraDefaults": "카메라별 기본값",
+        "cameraDefaultsDesc": "특정 카메라의 이미지에 별도의 프리셋을 지정합니다. 여기에 없는 카메라는 위의 기본 프리셋을 사용하며, 렌즈 보정은 모든 카메라에 적용됩니다.",
+        "cameraPresetMissing": "선택한 프리셋이 삭제되어 이 카메라의 이미지가 다시 모든 카메라용 프리셋을 사용합니다.",
+        "description": "편집하지 않은 이미지의 시작 값과 '조정값 초기화'가 돌아가는 값을 설정합니다. 편집한 이미지는 설정이 유지됩니다. 기본값을 설정하면 RAW 썸네일이 카메라 내장 미리보기 대신 새로 만들어져 처음에는 더 느리게 로드됩니다.",
+        "lensCorrection": "렌즈 보정",
+        "noCamerasFound": "다른 카메라를 찾지 못했습니다. 해당 카메라 이미지가 있는 폴더를 열거나, 그 이미지를 편집하는 중에 프리셋을 마우스 오른쪽 버튼으로 클릭하세요.",
+        "noPreset": "없음 (중립)",
+        "preset": "기본 프리셋",
+        "presetDesc": "편집하지 않은 모든 이미지에 적용됩니다. 마스크, 자르기, 변형은 만든 이미지에만 맞기 때문에 제외됩니다.",
+        "presetMissing": "선택한 프리셋이 삭제되어 편집하지 않은 이미지가 다시 중립 값을 사용합니다.",
+        "removeCamera": "카메라 제거",
+        "sameAsAllCameras": "모든 카메라와 동일",
+        "scope": "적용 대상",
+        "sliderReset": "슬라이더 초기화",
+        "sliderResetDefaults": "기본 조정값",
+        "sliderResetDesc": "더블클릭이나 빠른 편집 등으로 슬라이더를 초기화할 때 돌아가는 값입니다. 마스크 슬라이더는 항상 중립 값으로 돌아갑니다.",
+        "sliderResetNeutral": "중립 값",
+        "title": "기본 조정값"
+      },
+      "display": {
+        "title": "디스플레이"
+      },
       "dynamicDesc": "편집기는 디스플레이의 실제 픽셀 밀도에 맞춰 미리보기를 렌더링합니다. 이를 통해 모든 디테일이 1:1 픽셀 정확도로 표현되어, 확대하고 초점을 확인할 때 최대의 선명도를 제공합니다.",
       "editIn": {
         "add": "프로그램 추가",
@@ -2125,6 +2224,16 @@
         "title": "다른 프로그램에서 편집"
       },
       "enableLivePreviews": "실시간 미리보기 활성화",
+      "hdr": {
+        "display": "HDR 디스플레이",
+        "displayDesc": "HDR 디스플레이에서 하이라이트를 일반 흰색보다 밝게 표시합니다. 섀도와 중간 톤은 그대로이며 일반 내보내기에는 영향을 주지 않습니다.",
+        "enableDisplay": "편집기에서 HDR 사용",
+        "headroom": "하이라이트 범위",
+        "headroomDesc": "하이라이트가 일반 흰색보다 얼마나 밝아질 수 있는지 정합니다. HDR 내보내기에도 사용됩니다.",
+        "statusActive": "이 디스플레이는 HDR 모드입니다.",
+        "statusInactive": "이 디스플레이는 HDR 모드가 아닙니다. 효과를 보려면 시스템 디스플레이 설정에서 HDR을 켜세요.",
+        "statusUnsupported": "HDR에는 Windows 또는 macOS의 GPU 렌더러가 필요합니다."
+      },
       "highDpi": "고해상도(High-DPI) 렌더링",
       "highDpiDesc": "화면의 네이티브 {{dpr}}배 물리적 픽셀 해상도로 미리보기를 렌더링합니다. 가능한 가장 선명한 미리보기를 제공하지만 메모리를 훨씬 많이 사용합니다.",
       "highDpiDescStandard": "이 설정은 고해상도 디스플레이에만 영향을 줍니다. 현재 디스플레이는 표준 해상도입니다.",
@@ -2153,7 +2262,7 @@
         "baselineExposure": "기본 노출",
         "baselineExposureAmount": "기본량",
         "baselineExposureAmountDesc": "RAW 파일에 더하는 노출입니다. darktable은 +0.7 EV를 사용합니다.",
-        "baselineExposureDesc": "RAW 파일을 일정량 밝힙니다. DNG BaselineExposure 태그가 있으면 그 값도 더합니다.",
+        "baselineExposureDesc": "RAW 파일을 일정량 밝힙니다. DNG BaselineExposure 태그가 있으면 대신 그 값을 사용합니다.",
         "colorNr": "기본 색상 노이즈 감소",
         "colorNrDesc": "파이프라인 초기에 교차 양방향 필터를 적용하여 색차 노이즈를 제거합니다. 값이 높을수록 노이즈 감소가 강해집니다.",
         "defaultNonRawTonemapper": "기본 비RAW 톤매퍼",
@@ -2193,6 +2302,13 @@
       "qualities": {
         "high": "고품질",
         "performance": "성능"
+      },
+      "rawDecoding": "RAW 디코딩",
+      "rawDecodingDesc": "RAW 파일을 디코딩할 위치를 선택합니다. 'Auto'는 GPU를 사용하고 GPU가 이미지를 처리할 수 없으면 CPU로 전환합니다. 'GPU'는 항상 GPU를 먼저 시도합니다. 'CPU'는 더 느리지만 모든 시스템에서 작동합니다.",
+      "rawDecodingOptions": {
+        "auto": "Auto",
+        "cpu": "CPU",
+        "gpu": "GPU"
       },
       "renderScale": "렌더 해상도 배율",
       "renderScaleDesc": "디스플레이를 기준으로 렌더 해상도를 조정합니다. 값이 낮을수록 약간의 선명도를 희생하여 고해상도 화면에서 성능이 향상됩니다.",
@@ -2250,6 +2366,7 @@
         "mediapipe": "AI 얼굴 마스크를 구동하는 빠른 얼굴 랜드마크 및 분할 모델에 감사드립니다.",
         "negpy": "네거티브 변환 로직에 영감을 주었습니다.",
         "nind": "RapidRAW의 AI 노이즈 감소 기능을 구동하는 AI 모델을 제공해 주었습니다.",
+        "span": "RapidRAW의 AI 2배 확대 기능인 RapidRes의 기본 AI 모델로, RapidRAW가 자체 RAW 처리에 맞게 미세 조정했습니다 (Philip Hofmann 제작, CC BY 4.0).",
         "rawler": "이 프로젝트의 RAW 파일 처리 기반이 되는 훌륭한 Rust 크레이트를 제공해 주었습니다.",
         "sam2": "AI 피사체 감지 기능에 사용되는 파운데이션 모델을 제공해 주었습니다.",
         "spektrafilm": "RapidRAW의 내장 필름 에뮬레이션을 구동하는, Andrea Volpato의 스펙트럼 기반 필름 에뮬레이션 LUT를 제공해 주셔서. CC BY-SA 4.0 라이선스입니다.",
@@ -2325,13 +2442,11 @@
     "bottomBar": {
       "imagesSelected": "이미지 {{total}}개 중 {{current}}개 선택됨",
       "tooltips": {
-        "collapseFilmstrip": "필름스트립 접기",
         "collapseLeft": "왼쪽 패널 접기",
         "collapseRight": "오른쪽 패널 접기",
         "copyPasteSettings": "설정 복사 및 붙여넣기",
         "copySettings": "설정 복사",
         "customZoom": "클릭하여 사용자 지정 확대/축소 비율 입력",
-        "expandFilmstrip": "필름스트립 펼치기",
         "expandLeft": "왼쪽 패널 펼치기",
         "expandRight": "오른쪽 패널 펼치기",
         "export": "내보내기",

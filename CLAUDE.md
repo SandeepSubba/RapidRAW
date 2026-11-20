@@ -21,11 +21,11 @@ Rules:
   touching scanning or negative conversion.
 - Film/negative conventions that are easy to get wrong:
   - `adjustments.negativeConversion` is **sidecar-owned**. The save guard in
-    file_management.rs re-inserts the sidecar's copy over whatever the frontend
+    library/sidecars.rs re-inserts the sidecar's copy over whatever the frontend
     sends — conversion params must go through the dedicated commands
     (`update_negative_conversion`, `set_negative_film_base`), never
     `setAdjustments`. This keeps them out of undo, presets, and copy/paste.
-  - Conversion runs on CPU at decode time (image_loader.rs), before the GPU
+  - Conversion runs on CPU at decode time (decode/image_loader.rs), before the GPU
     stack; caches are keyed on the whole negativeConversion blob. Any param
     change requires clearing decode caches + re-decoding (the commands do it).
   - Film-stock profiles (`AppSettings.negativeProfiles`) store params only —
@@ -33,7 +33,7 @@ Rules:
   - Scan-time clip percentiles: auto-tone solves against default-clip bounds
     while renders use user-clip bounds; solving on user bounds would cancel the
     sliders (auto-tone anchors the median).
-  - Rust `AppSettings` (app_settings.rs) is a strict serde struct — any new
+  - Rust `AppSettings` (app/settings.rs) is a strict serde struct — any new
     TS-side settings field needs its one-line Rust field or it silently drops
     on the next save round-trip.
 - The AI assistant panel has a scan-preview mode: when the scanner pane is open
@@ -55,9 +55,9 @@ Rules:
   chat-directed changes go through `importCullTarget` and must not be recorded.
 - Auto adjust (`calculate_auto_adjustments`) takes the frontend's adjustments JSON;
   with `AutoAdjustOptions.keep_look` it renders them through the preset-preview path
-  (analysis.rs `render_for_analysis`) and returns deltas tagged `_relative` that the
+  (adjustments/auto_adjust.rs `render_for_analysis`) and returns deltas tagged `_relative` that the
   frontend ADDS to the sliders. `auto_results_to_json` filters by the options —
-  batch auto (file_management.rs) must go through it too, absolute mode only.
+  batch auto (library/sidecars.rs) must go through it too, absolute mode only.
   `AutoProfile` (settings.json) is learned from rendered edited thumbnails only
   (`measure_output_style` / `learn_style`); new fields need serde defaults so v1
   profiles keep loading. Auto never learns from its own output — only from saves.
@@ -68,14 +68,22 @@ Rules:
   by TS and Rust). See FORK_NOTES.md "v1.6.6 sync notes".
 - Two negative conversions exist since upstream v1.6.7: the fork's sidecar-owned
   `negativeConversion` (Film panel, the film workflow) and upstream's flat
-  `negative*` keys (`negative_conversion/inline.rs`). Upstream's stands down when
+  `negative*` keys (`adjustments/negative_conversion/inline.rs`). Upstream's stands down when
   the fork's is enabled — keep that guard if either changes. Auto strength is
   `AutoAdjustOptions.strength`. See FORK_NOTES.md "v1.6.7 sync notes".
 - Upstream v1.6.9 dropped the clarity/structure blur textures; the fork's skin
-  smoothing owns shader bindings 8/16 (blur slots 2/3). `GlobalAdjustments` in
-  image_processing.rs and shader.wgsl must match field-for-field (pads included).
-  Fork display fixes (pending resize, redraw retry) sit on upstream's
-  `WgpuDisplay`. See FORK_NOTES.md "v1.6.9 sync notes".
+  smoothing owns shader bindings 7/8/16 (blur slots 1/2/3). `GlobalAdjustments` in
+  render/uniforms.rs and shader.wgsl must match field-for-field (pads included) —
+  the uniform size test and the naga shader-validation test in
+  render/gpu/pipelines.rs catch drift. Fork display fixes (pending resize, redraw
+  retry) sit on upstream's `WgpuDisplay`. See FORK_NOTES.md "v1.6.9 sync notes".
+- Upstream v1.7 split the backend into module dirs (decode/, render/, library/,
+  adjustments/, ai/, integrations/, …) and AppProperties.tsx into src/types/*.
+  Decode now yields Rec.2020 working-space pixels; the film conversion wraps itself
+  in working↔sRGB primaries. Upstream's GPU RCD/Markesteijn replaced the fork's
+  demosaic; upstream panorama and CropRotateArea replaced the fork's. Film param
+  changes re-decode via LoadImage and must bump `displayRevision` to re-render.
+  See FORK_NOTES.md "v1.7 sync notes".
 - The `claudecode` assistant provider shells out to the `claude` CLI (absolute
   path in settings); prompts go via stdin — never argv (E2BIG with mask-laden
   adjustments).

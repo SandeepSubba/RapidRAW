@@ -25,7 +25,7 @@ import { useUIStore } from '../../store/useUIStore';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { relaunch } from '@tauri-apps/plugin-process';
-import { motion, AnimatePresence, LayoutGroup } from 'framer-motion';
+import { motion, AnimatePresence, LayoutGroup, Variants } from 'framer-motion';
 import clsx from 'clsx';
 import { Show, SignIn, useUser } from '@clerk/react';
 import Button from '../ui/Button';
@@ -36,7 +36,7 @@ import Input from '../ui/Input';
 import Slider from '../ui/Slider';
 import { ThemeProps, THEMES, DEFAULT_THEME_ID, EDITOR_CANVAS_COLORS } from '../../utils/themes';
 import { useTranslation } from 'react-i18next';
-import { Invokes } from '../ui/AppProperties';
+import { Invokes } from '../../types/invokes';
 import {
   ADJUSTMENT_NUDGES,
   getDefaultCombo,
@@ -61,8 +61,11 @@ import {
 } from './settings/widgets';
 import ImmichSettings from '../immich/ImmichSettings';
 import DataManagementSettings from './settings/DataManagementSettings';
+import DefaultAdjustmentsSettings from './settings/DefaultAdjustmentsSettings';
 import EditInAppsSettings from './settings/EditInAppsSettings';
 import { applyUiScale, clampUiScale, getDevicePixelRatio, UI_SCALE_PRESETS } from '../../utils/displayScale';
+import type { ParseKeys } from 'i18next';
+import { DEFAULT_HDR_HEADROOM, useDisplayStatus } from '../../hooks/useDisplayStatus';
 
 interface ConfirmModalState {
   confirmText: string;
@@ -94,6 +97,12 @@ interface MyLens {
 
 const EXECUTE_TIMEOUT = 3000;
 const DEFAULT_BASELINE_EXPOSURE = 0.7;
+const DISPLAY_STATUS_INTERVAL = 3000;
+const PREVIEW_SPACE_NAMES: Record<string, string> = {
+  displayP3: 'Display P3',
+  adobeRgb: 'Adobe RGB',
+  rec2020: 'Rec. 2020',
+};
 
 const adjustmentVisibilityDefaults = {
   sharpening: true,
@@ -224,6 +233,55 @@ const MiniKey = ({ code, osPlatform }: { code: string; osPlatform: string }) => 
   </kbd>
 );
 
+const THANKS_CREDITS: Array<{ name: string; url: string; description: ParseKeys }> = [
+  {
+    name: 'rawler',
+    url: 'https://github.com/dnglab/dnglab/tree/main/rawler',
+    description: 'settings.thanks.list.rawler',
+  },
+  { name: 'lensfun', url: 'https://lensfun.github.io/', description: 'settings.thanks.list.lensfun' },
+  {
+    name: 'spektrafilm',
+    url: 'https://github.com/andreavolpato/spektrafilm',
+    description: 'settings.thanks.list.spektrafilm',
+  },
+  { name: 'NegPy', url: 'https://github.com/marcinz606/NegPy', description: 'settings.thanks.list.negpy' },
+  { name: 'LaMa', url: 'https://github.com/advimman/lama', description: 'settings.thanks.list.lama' },
+  {
+    name: 'Segment Anything',
+    url: 'https://github.com/facebookresearch/segment-anything',
+    description: 'settings.thanks.list.sam2',
+  },
+  {
+    name: 'EfficientSAM3',
+    url: 'https://github.com/SimonZeng7108/efficientsam3',
+    description: 'settings.thanks.list.efficientsam3',
+  },
+  { name: 'BiRefNet', url: 'https://github.com/ZhengPeng7/BiRefNet', description: 'settings.thanks.list.birefnet' },
+  {
+    name: 'MediaPipe',
+    url: 'https://github.com/google-ai-edge/mediapipe',
+    description: 'settings.thanks.list.mediapipe',
+  },
+  {
+    name: 'Depth Anything V2',
+    url: 'https://github.com/DepthAnything/Depth-Anything-V2',
+    description: 'settings.thanks.list.depth',
+  },
+  { name: 'nind-denoise', url: 'https://github.com/trougnouf/nind-denoise', description: 'settings.thanks.list.nind' },
+  {
+    name: '2xBHI_small_span_pretrain',
+    url: 'https://github.com/Phhofm/models/releases/tag/2xBHI_small_span_pretrain',
+    description: 'settings.thanks.list.span',
+  },
+  { name: 'libgphoto2', url: 'http://gphoto.org/', description: 'settings.thanks.list.libgphoto2' },
+  {
+    name: 'darktable & co.',
+    url: 'https://github.com/darktable-org/darktable',
+    description: 'settings.thanks.list.darktable',
+  },
+];
+
 export default function SettingsPanel({
   appSettings,
   onBack,
@@ -276,12 +334,48 @@ export default function SettingsPanel({
       .then(setIsWgpuSupported)
       .catch(() => setIsWgpuSupported(false));
   }, []);
+  const displayStatus = useDisplayStatus(DISPLAY_STATUS_INTERVAL);
+  const displayColorMode = appSettings?.displayColorMode ?? 'auto';
+  const displayColorOptions = useMemo<OptionItem<string>[]>(
+    () => [
+      { value: 'auto', label: t('settings.processing.colorManagement.modeAuto') },
+      { value: 'off', label: t('settings.processing.colorManagement.modeOff') },
+      { value: 'custom', label: t('settings.processing.colorManagement.modeCustom') },
+    ],
+    [t],
+  );
+  const displayColorStatus = useMemo(() => {
+    if (!displayStatus || displayColorMode === 'off') return null;
+    if (!displayStatus.rendererActive) return t('settings.processing.colorManagement.statusUnavailable');
+    const space = PREVIEW_SPACE_NAMES[displayStatus.previewSpace];
+    const wideGamut = space ? ` ${t('settings.processing.colorManagement.wideGamut', { space })}` : '';
+    switch (displayStatus.colorManagement) {
+      case 'profile':
+        return t('settings.processing.colorManagement.statusProfile', { name: displayStatus.profileName }) + wideGamut;
+      case 'system':
+        return t('settings.processing.colorManagement.statusSystem') + wideGamut;
+      default:
+        if (displayColorMode === 'auto') return t('settings.processing.colorManagement.statusNone');
+        return appSettings?.displayIccProfile ? t('settings.processing.colorManagement.statusInvalid') : null;
+    }
+  }, [displayStatus, displayColorMode, appSettings?.displayIccProfile, t]);
+  const hdrPreviewActive = Boolean(appSettings?.hdrDisplay && displayStatus?.hdrActive);
+  const pickDisplayProfile = async () => {
+    const selected = await openFileDialog({
+      multiple: false,
+      filters: [{ name: t('settings.processing.colorManagement.modeCustom'), extensions: ['icc', 'icm'] }],
+    });
+    if (typeof selected === 'string') {
+      onSettingsChange({ ...appSettings, displayIccProfile: selected });
+    }
+  };
   const [processingSettings, setProcessingSettings] = useState({
     editorPreviewResolution: appSettings?.editorPreviewResolution || 1920,
     smallThumbnailResolution: appSettings?.smallThumbnailResolution || 480,
     mediumThumbnailResolution: appSettings?.mediumThumbnailResolution || 1280,
     rawHighlightCompression: appSettings?.rawHighlightCompression ?? 2.5,
     baselineExposure: appSettings?.baselineExposure ?? DEFAULT_BASELINE_EXPOSURE,
+    hdrHeadroom: appSettings?.hdrHeadroom ?? DEFAULT_HDR_HEADROOM,
     processingBackend: appSettings?.processingBackend || 'auto',
     linuxGpuOptimization: appSettings?.linuxGpuOptimization ?? false,
     highResZoomMultiplier: appSettings?.highResZoomMultiplier || 1.0,
@@ -337,6 +431,15 @@ export default function SettingsPanel({
       return true;
     });
   }, [t, osPlatform]);
+
+  const rawDecodingOptions = useMemo<OptionItem<string>[]>(
+    () => [
+      { value: 'auto', label: t('settings.processing.rawDecodingOptions.auto') },
+      { value: 'gpu', label: t('settings.processing.rawDecodingOptions.gpu') },
+      { value: 'cpu', label: t('settings.processing.rawDecodingOptions.cpu') },
+    ],
+    [t],
+  );
 
   const linearRawOptions = useMemo<OptionItem<string>[]>(
     () => [
@@ -424,6 +527,7 @@ export default function SettingsPanel({
     mediumThumbnailResolution: appSettings?.mediumThumbnailResolution || 1280,
       rawHighlightCompression: appSettings?.rawHighlightCompression ?? 2.5,
       baselineExposure: appSettings?.baselineExposure ?? DEFAULT_BASELINE_EXPOSURE,
+      hdrHeadroom: appSettings?.hdrHeadroom ?? DEFAULT_HDR_HEADROOM,
       processingBackend: appSettings?.processingBackend || 'auto',
       linuxGpuOptimization: appSettings?.linuxGpuOptimization ?? false,
       highResZoomMultiplier: appSettings?.highResZoomMultiplier || 1.0,
@@ -527,7 +631,7 @@ export default function SettingsPanel({
 
   const effectiveRootPaths = rootPaths?.length > 0 ? rootPaths : appSettings?.rootFolders || [];
 
-  const shortcutTagVariants = {
+  const shortcutTagVariants: Variants = {
     visible: { opacity: 1, scale: 1, transition: { type: 'spring', stiffness: 500, damping: 30 } },
     exit: { opacity: 0, scale: 0.8, transition: { duration: 0.15 } },
   };
@@ -763,6 +867,7 @@ export default function SettingsPanel({
                           { value: 'ru', label: 'Русский' },
                           { value: 'uk', label: 'Українська' },
                           { value: 'lt', label: 'Lietuvių' },
+                          { value: 'sv', label: 'Svenska' },
                           { value: 'zh-CN', label: '简体中文' },
                           { value: 'zh-TW', label: '繁體中文' },
                         ]}
@@ -1070,6 +1175,13 @@ export default function SettingsPanel({
 
                 <div className="p-6 bg-surface rounded-xl shadow-md">
                   <Text variant={TextVariants.title} color={TextColors.accent} className="mb-8">
+                    {t('settings.processing.defaultAdjustments.title')}
+                  </Text>
+                  <DefaultAdjustmentsSettings appSettings={appSettings} onSettingsChange={onSettingsChange} />
+                </div>
+
+                <div className="p-6 bg-surface rounded-xl shadow-md">
+                  <Text variant={TextVariants.title} color={TextColors.accent} className="mb-8">
                     {t('settings.lenses.title')}
                   </Text>
                   <Text className="mb-6">{t('settings.lenses.description')}</Text>
@@ -1345,131 +1457,19 @@ export default function SettingsPanel({
                   </Text>
                   <Text className="mb-4">{t('settings.thanks.description')}</Text>
                   <Text as="ul" className="space-y-3 list-disc ml-5 pl-1">
-                    <li>
-                      <a
-                        href="https://github.com/dnglab/dnglab/tree/main/rawler"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="font-semibold text-accent hover:underline"
-                      >
-                        rawler
-                      </a>
-                      : {t('settings.thanks.list.rawler')}
-                    </li>
-                    <li>
-                      <a
-                        href="https://lensfun.github.io/"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="font-semibold text-accent hover:underline"
-                      >
-                        lensfun
-                      </a>
-                      : {t('settings.thanks.list.lensfun')}
-                    </li>
-                    <li>
-                      <a
-                        href="https://github.com/marcinz606/NegPy"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="font-semibold text-accent hover:underline"
-                      >
-                        NegPy
-                      </a>
-                      : {t('settings.thanks.list.negpy')}
-                    </li>
-                    <li>
-                      <a
-                        href="https://github.com/advimman/lama"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="font-semibold text-accent hover:underline"
-                      >
-                        LaMa
-                      </a>
-                      : {t('settings.thanks.list.lama')}
-                    </li>
-                    <li>
-                      <a
-                        href="https://github.com/facebookresearch/segment-anything"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="font-semibold text-accent hover:underline"
-                      >
-                        Segment Anything
-                      </a>
-                      : {t('settings.thanks.list.sam2')}
-                    </li>
-                    <li>
-                      <a
-                        href="https://github.com/SimonZeng7108/efficientsam3"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="font-semibold text-accent hover:underline"
-                      >
-                        EfficientSAM3
-                      </a>
-                      : {t('settings.thanks.list.efficientsam3')}
-                    </li>
-                    <li>
-                      <a
-                        href="https://github.com/ZhengPeng7/BiRefNet"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="font-semibold text-accent hover:underline"
-                      >
-                        BiRefNet
-                      </a>
-                      : {t('settings.thanks.list.birefnet')}
-                    </li>
-                    <li>
-                      <a
-                        href="https://github.com/google-ai-edge/mediapipe"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="font-semibold text-accent hover:underline"
-                      >
-                        MediaPipe
-                      </a>
-                      : {t('settings.thanks.list.mediapipe')}
-                    </li>
-                    <li>
-                      <a
-                        href="https://github.com/DepthAnything/Depth-Anything-V2"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="font-semibold text-accent hover:underline"
-                      >
-                        Depth Anything V2
-                      </a>
-                      : {t('settings.thanks.list.depth')}
-                    </li>
-                    <li>
-                      <a
-                        href="https://github.com/trougnouf/nind-denoise"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="font-semibold text-accent hover:underline"
-                      >
-                        nind-denoise
-                      </a>
-                      : {t('settings.thanks.list.nind')}
-                    </li>
-                    <li>
-                      <a
-                        href="https://github.com/darktable-org/darktable"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="font-semibold text-accent hover:underline"
-                      >
-                        darktable & co.
-                      </a>
-                      : {t('settings.thanks.list.darktable')}
-                    </li>
-                    <li>
-                      <span className="font-semibold text-accent">{t('settings.thanks.list.youLabel')}</span>:{' '}
-                      {t('settings.thanks.list.you')}
-                    </li>
+                    {THANKS_CREDITS.map((credit) => (
+                      <li key={credit.name}>
+                        <a
+                          href={credit.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-semibold text-accent hover:underline"
+                        >
+                          {credit.name}
+                        </a>
+                        : {t(credit.description)}
+                      </li>
+                    ))}
                   </Text>
                 </div>
               </motion.div>
@@ -1779,6 +1779,18 @@ export default function SettingsPanel({
                       />
                     </SettingItem>
 
+                    <SettingItem
+                      label={t('settings.processing.rawDecoding')}
+                      description={t('settings.processing.rawDecodingDesc')}
+                    >
+                      <Dropdown
+                        onChange={(value: string) => onSettingsChange({ ...appSettings, rawDecoding: value })}
+                        options={rawDecodingOptions}
+                        value={appSettings?.rawDecoding ?? 'auto'}
+                        triggerClassName="bg-bg-primary"
+                      />
+                    </SettingItem>
+
                     {osPlatform !== 'macos' && osPlatform !== 'windows' && (
                       <SettingItem
                         label={t('settings.processing.linuxCompat')}
@@ -1896,7 +1908,7 @@ export default function SettingsPanel({
                         description={t('settings.processing.preprocessing.baselineExposureDesc')}
                       >
                         <Switch
-                          checked={appSettings?.enableBaselineExposure ?? false}
+                          checked={appSettings?.enableBaselineExposure ?? true}
                           id="baseline-exposure-toggle"
                           label={t('settings.processing.preprocessing.enableBaselineExposure')}
                           onChange={(checked) =>
@@ -1906,7 +1918,7 @@ export default function SettingsPanel({
                       </SettingItem>
 
                       <AnimatePresence>
-                        {(appSettings?.enableBaselineExposure ?? false) && (
+                        {(appSettings?.enableBaselineExposure ?? true) && (
                           <motion.div
                             initial={{ height: 0, opacity: 0 }}
                             animate={{ height: 'auto', opacity: 1 }}
@@ -2414,6 +2426,91 @@ export default function SettingsPanel({
                         </motion.div>
                       )}
                     </AnimatePresence>
+                  </div>
+                </div>
+
+                <div className="p-6 bg-surface rounded-xl shadow-md">
+                  <Text variant={TextVariants.title} color={TextColors.accent} className="mb-8">
+                    {t('settings.processing.display.title')}
+                  </Text>
+                  <div className="space-y-4">
+                    <SettingItem
+                      label={t('settings.processing.colorManagement.profile')}
+                      description={t('settings.processing.colorManagement.profileDesc')}
+                      status={displayColorStatus}
+                    >
+                      <Dropdown
+                        onChange={(value: any) => onSettingsChange({ ...appSettings, displayColorMode: value })}
+                        options={displayColorOptions}
+                        value={displayColorMode}
+                        triggerClassName="bg-bg-primary"
+                      />
+                      {displayColorMode === 'custom' && (
+                        <div className="mt-3 flex items-center gap-3">
+                          <Button onClick={pickDisplayProfile}>
+                            {t('settings.processing.colorManagement.chooseProfile')}
+                          </Button>
+                          {appSettings?.displayIccProfile && (
+                            <Text variant={TextVariants.small} className="truncate">
+                              {appSettings.displayIccProfile.split(/[\\/]/).pop()}
+                            </Text>
+                          )}
+                        </div>
+                      )}
+                    </SettingItem>
+                    {displayColorMode !== 'off' && (
+                      <SettingItem
+                        label={t('settings.processing.colorManagement.wideGamutPreview')}
+                        description={t('settings.processing.colorManagement.wideGamutPreviewDesc')}
+                        status={hdrPreviewActive ? t('settings.processing.colorManagement.wideGamutHdrNote') : null}
+                      >
+                        <Switch
+                          checked={appSettings?.wideGamutPreview ?? false}
+                          disabled={hdrPreviewActive}
+                          id="wide-gamut-preview-toggle"
+                          label={t('settings.processing.colorManagement.wideGamutPreviewEnable')}
+                          onChange={(checked) => onSettingsChange({ ...appSettings, wideGamutPreview: checked })}
+                        />
+                      </SettingItem>
+                    )}
+
+                    <SettingItem
+                      label={t('settings.processing.hdr.display')}
+                      description={t('settings.processing.hdr.displayDesc')}
+                      status={
+                        displayStatus &&
+                        (!displayStatus.hdrSupported
+                          ? t('settings.processing.hdr.statusUnsupported')
+                          : displayStatus.hdrActive
+                            ? t('settings.processing.hdr.statusActive')
+                            : t('settings.processing.hdr.statusInactive'))
+                      }
+                    >
+                      <Switch
+                        checked={appSettings?.hdrDisplay ?? false}
+                        disabled={displayStatus?.hdrSupported === false && !appSettings?.hdrDisplay}
+                        id="hdr-display-toggle"
+                        label={t('settings.processing.hdr.enableDisplay')}
+                        onChange={(checked) => onSettingsChange({ ...appSettings, hdrDisplay: checked })}
+                      />
+                    </SettingItem>
+
+                    <SettingItem
+                      label={t('settings.processing.hdr.headroom')}
+                      description={t('settings.processing.hdr.headroomDesc')}
+                    >
+                      <Slider
+                        label={t('settings.tagging.amount')}
+                        min={1}
+                        max={4}
+                        step={0.1}
+                        value={processingSettings.hdrHeadroom}
+                        defaultValue={DEFAULT_HDR_HEADROOM}
+                        onChange={(e) => handleProcessingSettingChange('hdrHeadroom', Number(e.target.value))}
+                        fillOrigin="min"
+                        suffix=" EV"
+                      />
+                    </SettingItem>
                   </div>
                 </div>
 

@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import ReactCrop from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
@@ -37,21 +37,30 @@ import {
   RelightLight,
   createRelightLight,
 } from '../../../utils/adjustments';
-import { Mask, SubMask, SubMaskMode, ToolType } from '../right/Masks';
-import { AppSettings, BrushSettings, Invokes, Panel, SelectedImage, TransformState } from '../../ui/AppProperties';
+import { Mask, SubMask, SubMaskMode, ToolType } from '../../../types/masks';
+import { AppSettings } from '../../../types/settings';
+import { BrushSettings, SelectedImage, TransformState, type OverlayMode } from '../../../types/editor';
+import { Invokes } from '../../../types/invokes';
+import { Panel } from '../../../types/ui';
 import { RenderSize } from '../../../hooks/useImageRenderSize';
 import { useDelayedLoading } from '../../../hooks/useDelayedLoading';
 import { useTranslation } from 'react-i18next';
 import { useEditorStore, WgpuPhase } from '../../../store/useEditorStore';
 import { MIXER_SAMPLE_SCREEN_SIZE, useHslMixerPicker } from '../../../hooks/useHslMixerPicker';
 import { isPanelVisible, useUIStore } from '../../../store/useUIStore';
-import type { OverlayMode } from '../right/CropPanel';
 import CompositionOverlays from './overlays/CompositionOverlays';
+import CropRotateArea from './overlays/CropRotateArea';
 import RelightLightShape, { RelightBasis } from './overlays/RelightLightShape';
 import CenterMarkerShape, { CENTER_MARKERS } from './overlays/CenterMarkerShape';
 import CloneSourceOverlay from './overlays/CloneSourceOverlay';
 import { countPatchesOfType, createSubMask, getStrokeCenter } from '../../../utils/maskUtils';
-import { calculateStraightenAngle, orientPoint, resolveAspectRatio, unorientPoint } from '../../../utils/cropUtils';
+import {
+  calculateStraightenAngle,
+  getCropViewLayout,
+  orientPoint,
+  resolveAspectRatio,
+  unorientPoint,
+} from '../../../utils/cropUtils';
 import { commitGuideLines } from '../../../utils/guidedPerspective';
 import { toast } from 'react-toastify';
 import {
@@ -107,8 +116,6 @@ interface ImageCanvasProps {
   onSelectAiPatchContainer?: (id: string | null) => void;
   onSelectMaskContainer?: (id: string | null) => void;
   onStraighten(val: number): void;
-  onRotateDrag?(angle: number): void;
-  onRotateDragEnd?(angle: number | null): void;
   selectedImage: SelectedImage;
   setCrop(crop: Crop, perfentCrop: PercentCrop): void;
   setIsMaskHovered(isHovered: boolean): void;
@@ -1442,8 +1449,6 @@ const ImageCanvas = memo(
     onSelectAiPatchContainer,
     onSelectMaskContainer,
     onStraighten,
-    onRotateDrag,
-    onRotateDragEnd,
     selectedImage,
     setCrop,
     setIsMaskHovered,
@@ -1738,10 +1743,9 @@ const ImageCanvas = memo(
           setDisplayState((prev) => ({ base: prev.base, fade: newSrc }));
           setIsFadingIn(false);
 
-          let frame1: number;
           let frame2: number;
 
-          frame1 = requestAnimationFrame(() => {
+          const frame1 = requestAnimationFrame(() => {
             frame2 = requestAnimationFrame(() => {
               setIsFadingIn(true);
             });
@@ -1914,9 +1918,11 @@ const ImageCanvas = memo(
       ],
     );
 
+    const strokeFeather = !isMasking && activeSubMask?.type === Mask.Brush ? 0 : (brushSettings?.feather ?? 0) / 100;
+
     const brushCursorPreview = useMemo(() => {
       const radius = Math.max(0.1, brushStageSize / 2);
-      const feather = Math.max(0, Math.min(1, (brushSettings?.feather ?? 0) / 100));
+      const feather = Math.max(0, Math.min(1, strokeFeather));
       const subMaskOpacity = Math.max(0, Math.min(1, (activeSubMask?.opacity ?? 100) / 100));
       const containerOpacity =
         activeContainer && 'opacity' in activeContainer && typeof activeContainer.opacity === 'number'
@@ -1962,7 +1968,7 @@ const ImageCanvas = memo(
       activeSubMask?.opacity,
       activeSubMask?.parameters?.flow,
       activeSubMask?.type,
-      brushSettings?.feather,
+      strokeFeather,
       brushStageSize,
       baseTool,
       isAltPressed,
@@ -2115,12 +2121,13 @@ const ImageCanvas = memo(
         return null;
       }
 
-      const scale = Math.min(viewportWidth / uncroppedEffectiveWidth, viewportHeight / uncroppedEffectiveHeight);
-
-      const renderWidth = uncroppedEffectiveWidth * scale;
-      const renderHeight = uncroppedEffectiveHeight * scale;
-
-      return { width: renderWidth, height: renderHeight };
+      const { width, height } = getCropViewLayout(
+        viewportWidth,
+        viewportHeight,
+        uncroppedEffectiveWidth,
+        uncroppedEffectiveHeight,
+      );
+      return { width, height };
     }, [selectedImage?.width, selectedImage?.height, imageRenderSize, adjustments.orientationSteps]);
 
     const cropRect = useMemo<RectBounds | null>(() => {
@@ -2879,7 +2886,7 @@ const ImageCanvas = memo(
 
             const imageSpaceLine: DrawnLine = {
               brushSize: brushImageSpaceSize,
-              feather: brushSettings?.feather ? brushSettings?.feather / 100 : 0,
+              feather: strokeFeather,
               flow: activeLineFlow,
               points: interpolateLine(startImageSpace, endImageSpace),
               tool: effectiveTool,
@@ -2976,6 +2983,7 @@ const ImageCanvas = memo(
         isAiSubjectActive,
         isParametricActive,
         brushSettings,
+        strokeFeather,
         onSelectMask,
         onSelectAiSubMask,
         isMasking,
@@ -3181,7 +3189,7 @@ const ImageCanvas = memo(
               ...stroke.lines,
               {
                 brushSize: brushImageSpaceSize,
-                feather: brushSettings?.feather ? brushSettings?.feather / 100 : 0,
+                feather: strokeFeather,
                 points: updatedLine.points.map((p: Coord) => ({ x: p.x / scale + cropX, y: p.y / scale + cropY })),
                 tool: updatedLine.tool,
               },
@@ -3195,7 +3203,7 @@ const ImageCanvas = memo(
 
             const imageSpaceLine: DrawnLine = {
               brushSize: brushImageSpaceSize,
-              feather: brushSettings?.feather ? brushSettings?.feather / 100 : 0,
+              feather: strokeFeather,
               flow: activeLineFlow,
               points: updatedLine.points.map((p: Coord) => ({
                 x: p.x / scale + cropX,
@@ -3226,7 +3234,7 @@ const ImageCanvas = memo(
 
             const imageSpaceLine: DrawnLine = {
               brushSize: brushImageSpaceSize,
-              feather: brushSettings?.feather ? brushSettings?.feather / 100 : 0,
+              feather: strokeFeather,
               flow: activeLineFlow,
               points: updatedLine.points.map((p: Coord) => ({
                 x: p.x / scale + cropX,
@@ -3287,6 +3295,7 @@ const ImageCanvas = memo(
         cropY,
         effectiveImageDimensions,
         brushSettings,
+        strokeFeather,
         isMasking,
         localInitialDrawParams,
         brushImageSpaceSize,
@@ -3449,7 +3458,7 @@ const ImageCanvas = memo(
       if (isBrushActive) {
         const imageSpaceLine: DrawnLine = {
           brushSize: brushImageSpaceSize,
-          feather: brushSettings?.feather ? brushSettings?.feather / 100 : 0,
+          feather: strokeFeather,
           flow: activeLineFlow,
           points: line.points.map((p: Coord) => ({
             x: p.x / scale + cropX,
@@ -3516,6 +3525,7 @@ const ImageCanvas = memo(
       cropX,
       cropY,
       brushSettings,
+      strokeFeather,
       imageRenderSize.scale,
       isAiEditing,
       isBrushActive,
@@ -3667,10 +3677,24 @@ const ImageCanvas = memo(
       }
     }, [baseIsReady, interactivePatch]);
 
-    const cropImageTransforms = useMemo(() => {
-      const rotation = liveRotation !== null && liveRotation !== undefined ? liveRotation : adjustments.rotation || 0;
-      return `rotate(${rotation}deg)`;
-    }, [adjustments.rotation, liveRotation]);
+    const effectiveRotation = liveRotation ?? adjustments.rotation ?? 0;
+
+    const cropImageTransforms = useMemo(() => `rotate(${effectiveRotation}deg)`, [effectiveRotation]);
+
+    const handleRotateHandleChange = useCallback(
+      (rotation: number) => setEditor({ isRotationActive: true, liveRotation: rotation }),
+      [setEditor],
+    );
+
+    const handleRotateHandleEnd = useCallback(
+      (rotation: number | null) => {
+        setEditor({ isRotationActive: false, liveRotation: null });
+        if (rotation !== null) {
+          setAdjustments((prev: Adjustments) => ({ ...prev, rotation }));
+        }
+      },
+      [setAdjustments, setEditor],
+    );
 
     const getCropDimensions = () => {
       if (!crop || !uncroppedImageRenderSize?.width || !uncroppedImageRenderSize?.height) {
@@ -3683,124 +3707,6 @@ const ImageCanvas = memo(
       return { width, height };
     };
 
-    // --- Rotate-by-dragging-the-crop-edges (Lightroom/Capture One style) ---------------
-    // The crop rectangle in container pixels. Used to place the rotate-capture zones in
-    // the margin just outside the crop, and as the pivot for the rotation.
-    const cropRectPx = useMemo(() => {
-      const cw = uncroppedImageRenderSize?.width ?? 0;
-      const ch = uncroppedImageRenderSize?.height ?? 0;
-      if (!cw || !ch) return null;
-      if (!crop) return { x: 0, y: 0, width: cw, height: ch };
-      const x = crop.unit === '%' ? cw * (crop.x / 100) : crop.x;
-      const y = crop.unit === '%' ? ch * (crop.y / 100) : crop.y;
-      const width = crop.unit === '%' ? cw * (crop.width / 100) : crop.width;
-      const height = crop.unit === '%' ? ch * (crop.height / 100) : crop.height;
-      return { x, y, width, height };
-    }, [crop, uncroppedImageRenderSize?.width, uncroppedImageRenderSize?.height]);
-
-    const cropContainerRef = useRef<HTMLDivElement>(null);
-    const isRotatingRef = useRef(false);
-    const rotatePivotRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
-    const rotateStartAngleRef = useRef(0);
-    const rotateBaseRef = useRef(0);
-    const lastRotateAngleRef = useRef(0);
-
-    const ROTATE_MIN = -45;
-    const ROTATE_MAX = 45;
-    const ROTATE_SNAP = 0.4; // snap to 0° within this many degrees
-
-    const handleRotatePointerMove = useCallback(
-      (e: PointerEvent) => {
-        if (!isRotatingRef.current) return;
-        const pivot = rotatePivotRef.current;
-        const current = (Math.atan2(e.clientY - pivot.y, e.clientX - pivot.x) * 180) / Math.PI;
-        let delta = current - rotateStartAngleRef.current;
-        if (delta > 180) delta -= 360;
-        if (delta < -180) delta += 360;
-        let next = rotateBaseRef.current + delta;
-        next = Math.max(ROTATE_MIN, Math.min(ROTATE_MAX, next));
-        if (Math.abs(next) < ROTATE_SNAP) next = 0;
-        lastRotateAngleRef.current = next;
-        onRotateDrag?.(next);
-      },
-      [onRotateDrag],
-    );
-
-    const handleRotatePointerUp = useCallback(() => {
-      if (!isRotatingRef.current) return;
-      isRotatingRef.current = false;
-      window.removeEventListener('pointermove', handleRotatePointerMove);
-      window.removeEventListener('pointerup', handleRotatePointerUp);
-      onRotateDragEnd?.(lastRotateAngleRef.current);
-    }, [handleRotatePointerMove, onRotateDragEnd]);
-
-    const handleRotatePointerDown = useCallback(
-      (e: React.PointerEvent) => {
-        if (e.button !== 0 && e.pointerType === 'mouse') return;
-        if (!cropContainerRef.current || !cropRectPx || !uncroppedImageRenderSize?.width) return;
-        e.preventDefault();
-        e.stopPropagation();
-
-        const rect = cropContainerRef.current.getBoundingClientRect();
-        // Map crop-center (container space) into client space, accounting for any scale
-        // applied to the rendered container.
-        const scaleX = rect.width / (uncroppedImageRenderSize.width || 1);
-        const scaleY = rect.height / (uncroppedImageRenderSize.height || 1);
-        const pivotX = rect.left + (cropRectPx.x + cropRectPx.width / 2) * scaleX;
-        const pivotY = rect.top + (cropRectPx.y + cropRectPx.height / 2) * scaleY;
-
-        rotatePivotRef.current = { x: pivotX, y: pivotY };
-        rotateStartAngleRef.current = (Math.atan2(e.clientY - pivotY, e.clientX - pivotX) * 180) / Math.PI;
-        rotateBaseRef.current = liveRotation ?? adjustments.rotation ?? 0;
-        lastRotateAngleRef.current = rotateBaseRef.current;
-        isRotatingRef.current = true;
-        onRotateDrag?.(rotateBaseRef.current);
-
-        window.addEventListener('pointermove', handleRotatePointerMove);
-        window.addEventListener('pointerup', handleRotatePointerUp);
-      },
-      [
-        cropRectPx,
-        uncroppedImageRenderSize?.width,
-        uncroppedImageRenderSize?.height,
-        liveRotation,
-        adjustments.rotation,
-        onRotateDrag,
-        handleRotatePointerMove,
-        handleRotatePointerUp,
-      ],
-    );
-
-    useEffect(() => {
-      // Safety: detach window listeners if the component unmounts mid-drag.
-      return () => {
-        window.removeEventListener('pointermove', handleRotatePointerMove);
-        window.removeEventListener('pointerup', handleRotatePointerUp);
-      };
-    }, [handleRotatePointerMove, handleRotatePointerUp]);
-
-    // The four margin zones (top/bottom/left/right) around the crop rectangle. A gap
-    // keeps the rotate zones clear of ReactCrop's resize handles so those stay grabbable.
-    const rotateZones = useMemo(() => {
-      if (!uncroppedImageRenderSize?.width || !uncroppedImageRenderSize?.height || !cropRectPx) return [];
-      const cw = uncroppedImageRenderSize.width;
-      const ch = uncroppedImageRenderSize.height;
-      const gap = 18;
-      const topH = Math.max(0, cropRectPx.y - gap);
-      const botY = Math.min(ch, cropRectPx.y + cropRectPx.height + gap);
-      const leftW = Math.max(0, cropRectPx.x - gap);
-      const rightX = Math.min(cw, cropRectPx.x + cropRectPx.width + gap);
-      const midH = Math.max(0, botY - topH);
-      return [
-        { key: 'top', left: 0, top: 0, width: cw, height: topH },
-        { key: 'bottom', left: 0, top: botY, width: cw, height: Math.max(0, ch - botY) },
-        { key: 'left', left: 0, top: topH, width: leftW, height: midH },
-        { key: 'right', left: rightX, top: topH, width: Math.max(0, cw - rightX), height: midH },
-      ].filter((z) => z.width > 0.5 && z.height > 0.5);
-    }, [cropRectPx, uncroppedImageRenderSize?.width, uncroppedImageRenderSize?.height]);
-
-    const ROTATE_CURSOR =
-      "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M3.5 9a9 9 0 1 1-1 6'/><polyline points='2 4 3.5 9 8.5 7.5'/></svg>\") 12 12, crosshair";
 
     const effectiveCursor = useMemo(() => {
       if (isGuidedPerspectiveActive && isCropping) return 'crosshair';
@@ -3888,6 +3794,24 @@ const ImageCanvas = memo(
             ? 0
             : 1;
 
+    const imageBoxStyle: CSSProperties =
+      imageRenderSize.width > 0 && imageRenderSize.height > 0
+        ? {
+            position: 'absolute',
+            left: `${imageRenderSize.offsetX}px`,
+            top: `${imageRenderSize.offsetY}px`,
+            width: `${imageRenderSize.width}px`,
+            height: `${imageRenderSize.height}px`,
+            overflow: 'visible',
+          }
+        : {
+            position: 'absolute',
+            inset: '0px',
+            width: '100%',
+            height: '100%',
+            overflow: 'visible',
+          };
+
     return (
       <div className="relative" style={{ width: '100%', height: '100%', cursor: effectiveCursor }}>
         <div
@@ -3906,27 +3830,7 @@ const ImageCanvas = memo(
             }}
           >
             <div className="absolute inset-0 w-full h-full">
-              <svg
-                className="pointer-events-none"
-                style={
-                  imageRenderSize.width > 0 && imageRenderSize.height > 0
-                    ? {
-                        position: 'absolute',
-                        left: `${imageRenderSize.offsetX}px`,
-                        top: `${imageRenderSize.offsetY}px`,
-                        width: `${imageRenderSize.width}px`,
-                        height: `${imageRenderSize.height}px`,
-                        overflow: 'visible',
-                      }
-                    : {
-                        position: 'absolute',
-                        inset: '0px',
-                        width: '100%',
-                        height: '100%',
-                        overflow: 'visible',
-                      }
-                }
-              >
+              <svg className="pointer-events-none" style={imageBoxStyle}>
                 {displayState.base && (!isWgpuActive || isWgpuHandoffFading) && (
                   <image
                     href={displayState.base}
@@ -3971,21 +3875,20 @@ const ImageCanvas = memo(
               </svg>
 
               {displayedMaskOverlay && (
-                <img
-                  alt="Mask Overlay"
-                  className="absolute pointer-events-none"
-                  src={displayedMaskOverlay.url}
-                  style={{
-                    height: `${displayedMaskOverlay.region[3] * imageRenderSize.height}px`,
-                    left: `${imageRenderSize.offsetX + displayedMaskOverlay.region[0] * imageRenderSize.width}px`,
-                    opacity: maskOpacity,
-                    top: `${imageRenderSize.offsetY + displayedMaskOverlay.region[1] * imageRenderSize.height}px`,
-                    transition: 'opacity 300ms ease-in-out',
-                    width: `${displayedMaskOverlay.region[2] * imageRenderSize.width}px`,
-                    imageRendering: isMaxZoom ? 'pixelated' : 'auto',
-                    zIndex: 3,
-                  }}
-                />
+                <svg
+                  className="pointer-events-none"
+                  style={{ ...imageBoxStyle, opacity: maskOpacity, transition: 'opacity 300ms ease-in-out', zIndex: 3 }}
+                >
+                  <image
+                    href={displayedMaskOverlay.url}
+                    x={`${displayedMaskOverlay.region[0] * 100}%`}
+                    y={`${displayedMaskOverlay.region[1] * 100}%`}
+                    width={`${displayedMaskOverlay.region[2] * 100}%`}
+                    height={`${displayedMaskOverlay.region[3] * 100}%`}
+                    preserveAspectRatio="none"
+                    style={{ imageRendering: isMaxZoom ? 'pixelated' : 'auto' }}
+                  />
+                </svg>
               )}
             </div>
           </div>
@@ -3998,18 +3901,8 @@ const ImageCanvas = memo(
             pointerEvents: isCropViewVisible ? 'auto' : 'none',
           }}
         >
-          {/* Letterbox rotate layer: dragging anywhere outside the image also rotates,
-              so straightening works even when the crop fills the whole frame. Sits
-              behind the crop container (which intercepts events over the image). */}
-          {cropToolActive && cropPreviewUrl && uncroppedImageRenderSize && !isStraightenActive && (
-            <div
-              onPointerDown={handleRotatePointerDown}
-              style={{ position: 'absolute', inset: 0, zIndex: 0, cursor: ROTATE_CURSOR, touchAction: 'none' }}
-            />
-          )}
           {cropPreviewUrl && uncroppedImageRenderSize && (
             <div
-              ref={cropContainerRef}
               style={{
                 height: uncroppedImageRenderSize.height,
                 overflow: 'hidden',
@@ -4364,26 +4257,36 @@ const ImageCanvas = memo(
                   className="absolute inset-0 transition-opacity duration-200"
                   style={{ opacity: isCropViewVisible ? 1 : 0, pointerEvents: 'none' }}
                 >
-                  <div
-                    ref={cropWrapperRef}
-                    className="absolute"
-                    style={{ pointerEvents: isCropViewVisible ? 'auto' : 'none' }}
-                    onPointerDownCapture={(e) => {
-                      if (e.button !== 0) {
-                        e.stopPropagation();
-                      }
-                    }}
-                    onMouseDownCapture={(e) => {
-                      if (e.button !== 0) {
-                        e.stopPropagation();
-                      }
-                    }}
+                  <CropRotateArea
+                    enabled={cropToolActive && isCropViewVisible && !isStraightenActive && !isGuidedPerspectiveActive}
+                    rotation={effectiveRotation}
+                    onRotate={handleRotateHandleChange}
+                    onRotateEnd={handleRotateHandleEnd}
                   >
-                    {cropToolActive ? (
+                    <div
+                      ref={cropWrapperRef}
+                      className="absolute"
+                      style={{ pointerEvents: isCropViewVisible ? 'auto' : 'none' }}
+                      onPointerDownCapture={(e) => {
+                        if (e.button !== 0) {
+                          e.stopPropagation();
+                        }
+                      }}
+                      onMouseDownCapture={(e) => {
+                        if (e.button !== 0) {
+                          e.stopPropagation();
+                        }
+                      }}
+                    >
+                      {/* Fork: crop handles only while the crop tool is activated. */}
+                      {cropToolActive ? (
                       <ReactCrop
                         aspect={
-                          resolveAspectRatio(adjustments.aspectRatio, selectedImage, adjustments.orientationSteps || 0) ??
-                          undefined
+                          resolveAspectRatio(
+                            adjustments.aspectRatio,
+                            selectedImage,
+                            adjustments.orientationSteps || 0,
+                          ) ?? undefined
                         }
                         crop={crop ?? undefined}
                         onChange={setCrop}
@@ -4413,35 +4316,11 @@ const ImageCanvas = memo(
                       >
                         <div ref={cropSizerRef} />
                       </ReactCrop>
-                    ) : (
-                      // Fork: crop tool not activated — no handles, just the sizer.
-                      <div ref={cropSizerRef} />
-                    )}
-                    {/* Fork: drag in the margin just outside the crop to rotate, like
-                        Lightroom/Capture One. Zones are in % of the uncropped image so
-                        they follow the zoomed crop box. */}
-                    {cropToolActive &&
-                      !isStraightenActive &&
-                      !isGuidedPerspectiveActive &&
-                      !!uncroppedImageRenderSize?.width &&
-                      !!uncroppedImageRenderSize?.height &&
-                      rotateZones.map((z) => (
-                        <div
-                          key={z.key}
-                          onPointerDown={handleRotatePointerDown}
-                          style={{
-                            position: 'absolute',
-                            left: `${(z.left / uncroppedImageRenderSize.width!) * 100}%`,
-                            top: `${(z.top / uncroppedImageRenderSize.height!) * 100}%`,
-                            width: `${(z.width / uncroppedImageRenderSize.width!) * 100}%`,
-                            height: `${(z.height / uncroppedImageRenderSize.height!) * 100}%`,
-                            zIndex: 5,
-                            cursor: ROTATE_CURSOR,
-                            touchAction: 'none',
-                          }}
-                        />
-                      ))}
-                  </div>
+                      ) : (
+                        <div ref={cropSizerRef} />
+                      )}
+                    </div>
+                  </CropRotateArea>
 
                   {(isStraightenActive ||
                     isGuidedPerspectiveActive ||

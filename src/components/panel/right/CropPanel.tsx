@@ -30,14 +30,15 @@ import { useTranslation, Trans } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 import { Adjustments, GUIDE_COLORS, GuideLine, guideLabel, INITIAL_ADJUSTMENTS } from '../../../utils/adjustments';
 import { commitGuideLines, setGuidedAutoCrop, withdrawAutoCrop } from '../../../utils/guidedPerspective';
+import { getDefaultAdjustments, getOpenImageDefaults } from '../../../utils/developDefaults';
 import clsx from 'clsx';
-import { CustomAspectRatio, Orientation } from '../../ui/AppProperties';
+import { CustomAspectRatio } from '../../../types/settings';
+import { Orientation } from '../../../types/ui';
 import { motion, AnimatePresence } from 'framer-motion';
 import Text from '../../ui/Text';
 import Slider from '../../ui/Slider';
 import Switch from '../../ui/Switch';
 import Dropdown from '../../ui/Dropdown';
-import Button from '../../ui/Button';
 import { TEXT_COLOR_KEYS, TextColors, TextVariants, TextWeights } from '../../../types/typography';
 import { useEditorStore } from '../../../store/useEditorStore';
 import { useEditorActions } from '../../../hooks/useEditorActions';
@@ -46,6 +47,7 @@ import {
   calculateAreaPreservingCrop,
   calculateCenteredCrop,
   getOrientedDimensions,
+  MAX_FINE_ROTATION,
   ORIGINAL_RATIO,
   resolveAspectRatio,
 } from '../../../utils/cropUtils';
@@ -54,12 +56,10 @@ import { useShallow } from 'zustand/react/shallow';
 import { useUIStore } from '../../../store/useUIStore';
 import { useContextMenu } from '../../../context/ContextMenuContext';
 import { useSettingsStore } from '../../../store/useSettingsStore';
+import { OverlayMode } from '../../../types/editor';
 
 const BASE_RATIO = 1.618;
 const RATIO_TOLERANCE = 0.01;
-
-export type OverlayMode =
-  'none' | 'thirds' | 'goldenTriangle' | 'goldenSpiral' | 'phiGrid' | 'armature' | 'diagonal' | 'center';
 
 interface CropPreset {
   name: string;
@@ -114,6 +114,7 @@ export default function CropPanel() {
   const imageH = selectedImage?.height || 1;
   const activeOverlay = useEditorStore((s) => s.overlayMode);
   const cropToolActive = useEditorStore((s) => s.cropToolActive);
+  const liveRotation = useEditorStore((s) => s.liveRotation);
   const setEditor = useEditorStore((s) => s.setEditor);
   const { setAdjustments, handleRotateWithSelection, handleAutoStraighten } = useEditorActions();
 
@@ -127,7 +128,6 @@ export default function CropPanel() {
   const [lenses, setLenses] = useState<string[]>([]);
   const [myLenses, setMyLenses] = useState<any[]>([]);
   const [lensInfo, setLensInfo] = useState<LensCorrectionInfo | null | undefined>(undefined);
-  const [localRotation, setLocalRotation] = useState<number | null>(null);
   const localRotationRef = useRef<number | null>(null);
 
   const lensMode = adjustments.lensCorrectionMode || 'manual';
@@ -223,7 +223,6 @@ export default function CropPanel() {
 
   const updateLocalRotation = useCallback(
     (val: number | null) => {
-      setLocalRotation(val);
       localRotationRef.current = val;
       setEditor({ liveRotation: val });
     },
@@ -555,7 +554,7 @@ export default function CropPanel() {
     }
   }, [aspectRatio, applyAspectRatio, activateCropTool]);
 
-  const handleReset = () => {
+  const handleReset = async () => {
     setPreferPortrait(false);
     setIsEditingCustom(false);
     setIsCustomMode(false);
@@ -564,32 +563,33 @@ export default function CropPanel() {
 
     setOverlay('thirds');
 
+    const defaults = await getOpenImageDefaults();
     setAdjustments((prev: Adjustments) => ({
       ...prev,
-      aspectRatio: INITIAL_ADJUSTMENTS.aspectRatio,
-      crop: INITIAL_ADJUSTMENTS.crop,
-      flipHorizontal: INITIAL_ADJUSTMENTS.flipHorizontal ?? false,
-      flipVertical: INITIAL_ADJUSTMENTS.flipVertical ?? false,
-      orientationSteps: INITIAL_ADJUSTMENTS.orientationSteps ?? 0,
-      rotation: INITIAL_ADJUSTMENTS.rotation ?? 0,
-      transformDistortion: INITIAL_ADJUSTMENTS.transformDistortion ?? 0,
-      transformVertical: INITIAL_ADJUSTMENTS.transformVertical ?? 0,
-      transformHorizontal: INITIAL_ADJUSTMENTS.transformHorizontal ?? 0,
-      transformRotate: INITIAL_ADJUSTMENTS.transformRotate ?? 0,
-      transformAspect: INITIAL_ADJUSTMENTS.transformAspect ?? 0,
-      transformScale: INITIAL_ADJUSTMENTS.transformScale ?? 100,
-      transformXOffset: INITIAL_ADJUSTMENTS.transformXOffset ?? 0,
-      transformYOffset: INITIAL_ADJUSTMENTS.transformYOffset ?? 0,
-      guidedPerspective: INITIAL_ADJUSTMENTS.guidedPerspective,
-      lensMaker: INITIAL_ADJUSTMENTS.lensMaker,
-      lensModel: INITIAL_ADJUSTMENTS.lensModel,
-      lensDistortionAmount: INITIAL_ADJUSTMENTS.lensDistortionAmount,
-      lensVignetteAmount: INITIAL_ADJUSTMENTS.lensVignetteAmount,
-      lensTcaAmount: INITIAL_ADJUSTMENTS.lensTcaAmount,
-      lensDistortionEnabled: INITIAL_ADJUSTMENTS.lensDistortionEnabled,
-      lensTcaEnabled: INITIAL_ADJUSTMENTS.lensTcaEnabled,
-      lensVignetteEnabled: INITIAL_ADJUSTMENTS.lensVignetteEnabled,
-      lensCorrectionMode: INITIAL_ADJUSTMENTS.lensCorrectionMode,
+      aspectRatio: defaults.aspectRatio,
+      crop: defaults.crop,
+      flipHorizontal: defaults.flipHorizontal ?? false,
+      flipVertical: defaults.flipVertical ?? false,
+      orientationSteps: defaults.orientationSteps ?? 0,
+      rotation: defaults.rotation ?? 0,
+      transformDistortion: defaults.transformDistortion ?? 0,
+      transformVertical: defaults.transformVertical ?? 0,
+      transformHorizontal: defaults.transformHorizontal ?? 0,
+      transformRotate: defaults.transformRotate ?? 0,
+      transformAspect: defaults.transformAspect ?? 0,
+      transformScale: defaults.transformScale ?? 100,
+      transformXOffset: defaults.transformXOffset ?? 0,
+      transformYOffset: defaults.transformYOffset ?? 0,
+      guidedPerspective: defaults.guidedPerspective,
+      lensMaker: defaults.lensMaker,
+      lensModel: defaults.lensModel,
+      lensDistortionAmount: defaults.lensDistortionAmount,
+      lensVignetteAmount: defaults.lensVignetteAmount,
+      lensTcaAmount: defaults.lensTcaAmount,
+      lensDistortionEnabled: defaults.lensDistortionEnabled,
+      lensTcaEnabled: defaults.lensTcaEnabled,
+      lensVignetteEnabled: defaults.lensVignetteEnabled,
+      lensCorrectionMode: defaults.lensCorrectionMode,
     }));
   };
 
@@ -600,7 +600,7 @@ export default function CropPanel() {
     return rotation || 0;
   }, [rotation]);
 
-  const displayRotation = localRotation !== null ? localRotation : fineRotation;
+  const displayRotation = liveRotation ?? fineRotation;
 
   // Auto-crop the black borders when a perspective value arrives without a paired
   // zoom — loaded from a sidecar, undo/redo, or the guided tool. The perspective
@@ -746,18 +746,19 @@ export default function CropPanel() {
 
     const handleResetTransform = () => {
       setEditor({ isGuidedPerspectiveActive: false });
+      const defaults = getDefaultAdjustments();
       setAdjustments((prev: Adjustments) => ({
         ...prev,
-        transformDistortion: INITIAL_ADJUSTMENTS.transformDistortion ?? 0,
-        transformVertical: INITIAL_ADJUSTMENTS.transformVertical ?? 0,
-        transformHorizontal: INITIAL_ADJUSTMENTS.transformHorizontal ?? 0,
-        transformRotate: INITIAL_ADJUSTMENTS.transformRotate ?? 0,
-        transformAspect: INITIAL_ADJUSTMENTS.transformAspect ?? 0,
-        transformScale: INITIAL_ADJUSTMENTS.transformScale ?? 100,
-        transformXOffset: INITIAL_ADJUSTMENTS.transformXOffset ?? 0,
-        transformYOffset: INITIAL_ADJUSTMENTS.transformYOffset ?? 0,
+        transformDistortion: defaults.transformDistortion ?? 0,
+        transformVertical: defaults.transformVertical ?? 0,
+        transformHorizontal: defaults.transformHorizontal ?? 0,
+        transformRotate: defaults.transformRotate ?? 0,
+        transformAspect: defaults.transformAspect ?? 0,
+        transformScale: defaults.transformScale ?? 100,
+        transformXOffset: defaults.transformXOffset ?? 0,
+        transformYOffset: defaults.transformYOffset ?? 0,
         crop: withdrawAutoCrop(prev).crop,
-        guidedPerspective: INITIAL_ADJUSTMENTS.guidedPerspective,
+        guidedPerspective: defaults.guidedPerspective,
       }));
     };
 
@@ -776,19 +777,20 @@ export default function CropPanel() {
     e.preventDefault();
     e.stopPropagation();
 
-    const handleResetLens = () => {
+    const handleResetLens = async () => {
       setLenses([]);
+      const defaults = await getOpenImageDefaults();
       setAdjustments((prev: Adjustments) => ({
         ...prev,
-        lensMaker: INITIAL_ADJUSTMENTS.lensMaker,
-        lensModel: INITIAL_ADJUSTMENTS.lensModel,
-        lensDistortionAmount: INITIAL_ADJUSTMENTS.lensDistortionAmount,
-        lensVignetteAmount: INITIAL_ADJUSTMENTS.lensVignetteAmount,
-        lensTcaAmount: INITIAL_ADJUSTMENTS.lensTcaAmount,
-        lensDistortionEnabled: INITIAL_ADJUSTMENTS.lensDistortionEnabled,
-        lensTcaEnabled: INITIAL_ADJUSTMENTS.lensTcaEnabled,
-        lensVignetteEnabled: INITIAL_ADJUSTMENTS.lensVignetteEnabled,
-        lensCorrectionMode: INITIAL_ADJUSTMENTS.lensCorrectionMode,
+        lensMaker: defaults.lensMaker,
+        lensModel: defaults.lensModel,
+        lensDistortionAmount: defaults.lensDistortionAmount,
+        lensVignetteAmount: defaults.lensVignetteAmount,
+        lensTcaAmount: defaults.lensTcaAmount,
+        lensDistortionEnabled: defaults.lensDistortionEnabled,
+        lensTcaEnabled: defaults.lensTcaEnabled,
+        lensVignetteEnabled: defaults.lensVignetteEnabled,
+        lensCorrectionMode: defaults.lensCorrectionMode,
       }));
     };
 
@@ -1009,8 +1011,8 @@ export default function CropPanel() {
                       </button>
                     </div>
                   }
-                  min={-45}
-                  max={45}
+                  min={-MAX_FINE_ROTATION}
+                  max={MAX_FINE_ROTATION}
                   step={0.1}
                   value={displayRotation}
                   defaultValue={0}
@@ -1258,6 +1260,7 @@ export default function CropPanel() {
                           </Text>
                           <div className="space-y-3">
                             <Slider
+                              resetKey="transformDistortion"
                               label={t('modals.transform.amount')}
                               step={1}
                               value={adjustments.transformDistortion || 0}
@@ -1280,6 +1283,7 @@ export default function CropPanel() {
                           </Text>
                           <div className="space-y-3">
                             <Slider
+                              resetKey="transformVertical"
                               label={t('modals.transform.vertical')}
                               step={1}
                               value={adjustments.transformVertical || 0}
@@ -1296,6 +1300,7 @@ export default function CropPanel() {
                               }}
                             />
                             <Slider
+                              resetKey="transformHorizontal"
                               label={t('modals.transform.horizontal')}
                               step={1}
                               value={adjustments.transformHorizontal || 0}
@@ -1320,6 +1325,7 @@ export default function CropPanel() {
                           </Text>
                           <div className="space-y-3">
                             <Slider
+                              resetKey="transformRotate"
                               label={t('modals.transform.rotate')}
                               step={0.1}
                               value={adjustments.transformRotate || 0}
@@ -1334,6 +1340,7 @@ export default function CropPanel() {
                               }
                             />
                             <Slider
+                              resetKey="transformAspect"
                               label={t('modals.transform.aspect')}
                               step={1}
                               value={adjustments.transformAspect || 0}
@@ -1348,6 +1355,7 @@ export default function CropPanel() {
                               }
                             />
                             <Slider
+                              resetKey="transformScale"
                               label={t('modals.transform.scale')}
                               step={1}
                               value={adjustments.transformScale || 100}
@@ -1370,6 +1378,7 @@ export default function CropPanel() {
                           </Text>
                           <div className="space-y-3">
                             <Slider
+                              resetKey="transformXOffset"
                               label={t('modals.transform.xAxis')}
                               step={1}
                               value={adjustments.transformXOffset || 0}
@@ -1384,6 +1393,7 @@ export default function CropPanel() {
                               }
                             />
                             <Slider
+                              resetKey="transformYOffset"
                               label={t('modals.transform.yAxis')}
                               step={1}
                               value={adjustments.transformYOffset || 0}
@@ -1540,6 +1550,7 @@ export default function CropPanel() {
                                   className="px-2 overflow-hidden"
                                 >
                                   <Slider
+                                    resetKey="lensDistortionAmount"
                                     label={t('modals.lensCorrection.amount')}
                                     step={1}
                                     value={adjustments.lensDistortionAmount ?? 100}
@@ -1583,6 +1594,7 @@ export default function CropPanel() {
                                   className="px-2 overflow-hidden"
                                 >
                                   <Slider
+                                    resetKey="lensTcaAmount"
                                     label={t('modals.lensCorrection.amount')}
                                     step={1}
                                     value={adjustments.lensTcaAmount ?? 100}
@@ -1626,6 +1638,7 @@ export default function CropPanel() {
                                   className="px-2 overflow-hidden"
                                 >
                                   <Slider
+                                    resetKey="lensVignetteAmount"
                                     label={t('modals.lensCorrection.amount')}
                                     step={1}
                                     value={adjustments.lensVignetteAmount ?? 100}

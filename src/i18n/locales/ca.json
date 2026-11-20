@@ -150,6 +150,8 @@
       "aiDenoise": "Reducció de soroll IA",
       "classicDenoise": "Reducció de soroll clàssica",
       "aiDenoiseDetail": "Detall",
+      "aiUpscale": "RapidRes 2x",
+      "aiUpscaleDetail": "Detall",
       "blueYellow": "Blau/Groc",
       "centre": "Centre",
       "chromaticAberration": "Aberració cromàtica",
@@ -165,6 +167,7 @@
       "negativeGreen": "Verd",
       "negativeRed": "Vermell",
       "noiseReduction": "Reducció de soroll",
+      "superResolution": "RapidRes",
       "presence": "Presència",
       "redCyan": "Vermell/Cian",
       "sharpening": "Enfocament",
@@ -325,8 +328,12 @@
       "removeBlackWhite": "Treure blanc i negre",
       "removeDenoise": "Treure reducció de soroll",
       "removeNegativeConversion": "Treure conversió de negatiu",
+      "removeSuperResolution": "Treure RapidRes",
       "resetAdjustments": "Restablir ajustaments",
+      "resetToDefaults": "Restablir als valors per defecte",
+      "resetToNeutral": "Restablir a neutre",
       "stitchPanorama": "Unir panorama",
+      "superResolution": "RapidRes (2x)",
       "tagging": "Etiquetatge",
       "undo": "Desfer",
       "unflagged": "Sense marca"
@@ -399,6 +406,9 @@
       "denoise_many": "Reduir soroll",
       "denoise_one": "Reduir soroll",
       "denoise_other": "Reduir soroll",
+      "superResolution_many": "RapidRes (2x)",
+      "superResolution_one": "RapidRes (2x)",
+      "superResolution_other": "RapidRes (2x)",
       "duplicateImage": "Duplicar imatge",
       "enable": "Activar",
       "exportImage_many": "Exportar {{count}} imatges",
@@ -527,6 +537,7 @@
       "createNewTitle": "Crear nova edició generativa",
       "createNewTooltip": "Crear nova edició {{name}}",
       "denoising": "Executant la reducció de soroll IA...",
+      "upscaling": "Executant RapidRes...",
       "dropzoneText": "Deixeu anar aquí per crear una edició nova",
       "editSettingsTitle": "Configuració d'edició",
       "editsTitle": "Edicions",
@@ -737,11 +748,13 @@
       "cancel": "Cancel·lar",
       "drawingActive": "Dibuix actiu",
       "hint": "Dibuixa al llarg de les vores de la foto que haurien de ser verticals o horitzontals.",
+      "horizontalLine": "Guia horitzontal núm. {{index}}",
       "linesStatus": "Línies guia actives",
       "toast": {
         "angleRejected": "L'angle de la línia està massa lluny de l'horitzontal o vertical",
         "maxLines": "Es permeten com a màxim 2 línies verticals i 2 horitzontals"
-      }
+      },
+      "verticalLine": "Guia vertical núm. {{index}}"
     },
     "layout": {
       "split": "Dividir"
@@ -857,6 +870,7 @@
         "focalLength": "Distància focal",
         "iso": "ISO",
         "lens": "Objectiu",
+        "model": "Model",
         "shutterSpeed": "Velocitat d'obturació",
         "title": "Detalls de la càmera"
       },
@@ -901,6 +915,8 @@
     },
     "presets": {
       "amount": "Quantitat",
+      "defaultForAllCameras": "Predeterminat per a totes les càmeres",
+      "defaultForCamera": "Predeterminat per a {{camera}}",
       "dialog": {
         "allPresetFiles": "Tots els fitxers d'ajustos preestablerts",
         "exportAllTitle": "Exportar tots els ajustos preestablerts",
@@ -921,7 +937,11 @@
         "newPreset": "Nou ajust preestablert",
         "overwrite": "Sobreescriure",
         "renameFolder": "Reanomenar carpeta",
-        "sortAll": "Ordenar-ho tot alfabèticament"
+        "setDefaultAllCameras": "Definir com a predeterminat per a totes les càmeres",
+        "setDefaultForCamera": "Definir com a predeterminat per a {{camera}}",
+        "sortAll": "Ordenar-ho tot alfabèticament",
+        "unsetDefaultAllCameras": "Deixar d'usar com a predeterminat per a totes les càmeres",
+        "unsetDefaultForCamera": "Deixar d'usar com a predeterminat per a {{camera}}"
       },
       "status": {
         "empty": "Encara no s'ha desat cap ajust preestablert. Creeu el vostre, importeu-ne des d'un fitxer o exploreu els de la comunitat.",
@@ -934,6 +954,9 @@
         "masks": "Màscares"
       },
       "title": "Ajustos preestablerts",
+      "toasts": {
+        "importFailed": "No s'ha pogut importar {{fileName}}: {{error}}"
+      },
       "tooltips": {
         "explore": "Explorar ajustos de la comunitat",
         "export": "Exportar tots els ajustos preestablerts a un fitxer .rrpreset",
@@ -956,12 +979,16 @@
         "adjust": "Ajustar",
         "crop": "Retallar",
         "export": "Exportar",
+        "filmstrip": "Tira d'imatges",
         "info": "Informació",
         "inpaint": "Inpainting",
         "masks": "Màscares",
         "presets": "Ajustos preestablerts",
         "tethering": "Captura connectada"
       }
+    },
+    "toasts": {
+      "embeddedPreview": "RapidRAW no ha pogut descodificar aquest fitxer RAW, així que estàs veient i editant la previsualització JPEG incrustada de la càmera. Espera menys qualitat i menys marge d'edició que amb un RAW real."
     },
     "toolbar": {
       "history": "Historial",
@@ -972,6 +999,7 @@
         "compare": "Abans / després (B) o modes (clic dret)",
         "focalLength": "Distància focal",
         "fullscreen": "Alternar pantalla completa (F)",
+        "hdr": "Previsualització HDR",
         "iso": "ISO",
         "redo": "Refer (Ctrl+Y) o Historial (Clic dret)",
         "shutterSpeed": "Velocitat d'obturació",
@@ -1029,7 +1057,13 @@
       "selectFolderTitle_other": "Seleccioneu la carpeta per exportar {{count}} imatges"
     },
     "file": {
+      "colorSpace": "Espai de color",
       "dpi": "PPP",
+      "hdr": "Sortida HDR",
+      "hdrJpegHint": "Afegeix un mapa de guany: les pantalles HDR mostren altes llums més brillants i la resta mostra la foto normal.",
+      "hdrJxlHint": "Desa un fitxer HDR real (PQ, Rec. 2020). Necessita un visor compatible amb HDR.",
+      "hdrNoPreview": "Aquesta pantalla no pot mostrar les altes llums HDR. L'exportació les inclourà igualment.",
+      "hdrPreviewOff": "Activa l'HDR a la barra d'eines de l'editor per previsualitzar les altes llums.",
       "quality": "Qualitat",
       "qualityLossless": "Qualitat (Sense pèrdua)",
       "resolution": "Resolució",
@@ -1186,6 +1220,7 @@
       "failed": "Fallits ({{failedCount}})",
       "kinds": {
         "denoise": "Reduint soroll amb IA",
+        "upscale": "Ampliant amb RapidRes",
         "depthMap": "Analitzant la profunditat",
         "depthMask": "Generant la màscara de profunditat",
         "faceMask": "Generant la màscara de cara",
@@ -1488,10 +1523,7 @@
       "originalRatio": "Proporció original"
     },
     "thumbnailSize": {
-      "large": "Gran",
-      "list": "Llista",
-      "medium": "Mitjana",
-      "small": "Petita"
+      "list": "Llista"
     },
     "tooltips": {
       "communityPresets": "Ajustos preestablerts de la comunitat",
@@ -1584,6 +1616,7 @@
       "descReplace": "Sobreescriu tota la configuració seleccionada, restablint la resta als seus valors predeterminats.",
       "groups": {
         "aiDenoise": "Reducció de soroll amb IA",
+        "aiUpscale": "RapidRes",
         "blackWhite": "Blanc i negre",
         "chromaticAberration": "Aberració cromàtica",
         "clarityDehaze": "Claredat i Eliminar boira",
@@ -1750,6 +1783,10 @@
       "zoomOutTooltip": "Allunyar"
     },
     "panorama": {
+      "autoCrop": "Retall automàtic",
+      "autoProjectionUsed": "S'utilitza {{projection}}",
+      "boundaryWarp": "Deformació dels límits",
+      "boundaryWarpHint": "Estira les vores per omplir l'enquadrament en lloc de retallar-les.",
       "cancel": "Cancel·lar",
       "close": "Tancar",
       "descCount": "Combineu {{count}} imatges superposades en un panorama perfecte.",
@@ -1757,12 +1794,26 @@
       "descCount_one": "Combineu {{count}} imatge superposada en un panorama perfecte.",
       "descCount_other": "Combineu {{count}} imatges superposades en un panorama perfecte.",
       "descGeneric": "Combineu les imatges superposades en un panorama perfecte.",
+      "excludedImages": "{{count}} imatges no s'han pogut emparellar i s'han omès",
+      "excludedImages_many": "{{count}} d'imatges no s'han pogut emparellar i s'han omès",
+      "excludedImages_one": "{{count}} imatge no s'ha pogut emparellar i s'ha omès",
+      "excludedImages_other": "{{count}} imatges no s'han pogut emparellar i s'han omès",
+      "exposureCompensation": "Compensació de l'exposició",
+      "exposureCompensationHint": "Iguala l'exposició, el balanç de blancs i el vinyetatge entre les imatges.",
       "failed": "El panorama ha fallat",
       "initializing": "S'està inicialitzant...",
       "openInEditor": "Obrir a l'editor",
+      "outputInfo": "{{images}} imatges · {{width}} × {{height}} px",
+      "projection": "Projecció",
+      "projectionAuto": "Automàtica",
+      "projectionCylindrical": "Cilíndrica",
+      "projectionFallback": "{{requested}} no cobreix aquest camp de visió, s'utilitza {{projection}}",
+      "projectionPerspective": "Perspectiva",
+      "projectionSpherical": "Esfèrica",
       "retry": "Tornar-ho a intentar",
       "save": "Desar",
       "savedSuccess": "Panorama desat correctament!",
+      "saving": "S'està desant…",
       "speedNotice": "Això pot trigar uns minuts depenent del nombre i la mida de les imatges.",
       "start": "Iniciar",
       "stitchingProgress": "S'està unint el panorama",
@@ -1880,6 +1931,7 @@
       "limit": "Límit",
       "modals": {
         "aiDenoiseMessage": "Segur que vols esborrar la memòria cau de reducció de soroll IA?\n\nLes imatges amb la reducció de soroll IA activada s'hauran de tornar a processar, cosa que pot trigar diversos minuts per imatge.",
+        "aiUpscaleMessage": "Segur que vols esborrar la memòria cau de RapidRes?\n\nLes imatges amb RapidRes activat s'hauran de tornar a ampliar.",
         "aiMapsMessage": "Segur que vols buidar els mapes de profunditat i normals?\n\nLes imatges que fan servir desenfocament d’objectiu, boira o reil·luminació regeneraran els mapes el proper cop que s’obrin.",
         "aiMessage": "Esteu segur que voleu eliminar totes les etiquetes generades per IA de totes les imatges a totes les carpetes arrel actives?\n\nAixò no afectarà les etiquetes afegides pels usuaris. Aquesta acció no es pot desfer.",
         "allMessage": "Esteu segur que voleu eliminar totes les etiquetes generades per IA i les afegides pels usuaris de totes les imatges a totes les carpetes arrel actives?\n\nAquesta acció no es pot desfer.",
@@ -1907,6 +1959,7 @@
       "show": "Mostrar",
       "statuses": {
         "aiDenoiseSuccess": "Memòria cau de reducció de soroll IA esborrada correctament.",
+        "aiUpscaleSuccess": "Memòria cau de RapidRes esborrada correctament.",
         "aiSuccess": "{{count}} fitxers actualitzats. S'han eliminat les etiquetes d'IA.",
         "aiSuccess_many": "{{count}} fitxers actualitzats. S'han eliminat les etiquetes d'IA.",
         "aiSuccess_one": "{{count}} fitxer actualitzat. S'han eliminat les etiquetes d'IA.",
@@ -1926,6 +1979,8 @@
       "storage": {
         "aiDenoise": "Reducció de soroll IA",
         "aiDenoiseDesc": "Resultats de reducció de soroll a la memòria cau.",
+        "aiUpscale": "RapidRes",
+        "aiUpscaleDesc": "Ampliacions 2x de RapidRes a la memòria cau.",
         "aiMaps": "Mapes de profunditat i normals",
         "aiMapsDesc": "Els fan servir el desenfocament d’objectiu, la boira i la reil·luminació.",
         "immich": "Immich",
@@ -2155,6 +2210,52 @@
         "metal": "Metal",
         "vulkan": "Vulkan"
       },
+      "colorManagement": {
+        "chooseProfile": "Tria un perfil",
+        "modeAuto": "Automàtic (perfil del sistema)",
+        "modeCustom": "Perfil ICC personalitzat",
+        "modeOff": "Desactivat",
+        "profile": "Perfil del monitor",
+        "profileDesc": "Converteix la previsualització de l'editor al perfil de color del teu monitor perquè els colors es vegin correctament en pantalles calibrades i de gamma àmplia. Les exportacions no es veuen afectades.",
+        "statusInvalid": "No s'ha pogut carregar aquest perfil.",
+        "statusNone": "No s'ha trobat cap perfil de monitor. La previsualització es mostra com a sRGB.",
+        "statusProfile": "S'està utilitzant {{name}}.",
+        "statusSystem": "El sistema operatiu gestiona els colors.",
+        "statusUnavailable": "La gestió del color necessita el renderitzador GPU.",
+        "wideGamut": "Previsualització de gamma àmplia ({{space}}).",
+        "wideGamutHdrNote": "No s'utilitza mentre l'editor mostra HDR.",
+        "wideGamutPreview": "Previsualització de gamma àmplia",
+        "wideGamutPreviewDesc": "Mostra colors més enllà de sRGB en monitors de gamma àmplia. Activa-ho si exportes en Display P3, Adobe RGB o un altre espai de color ampli. Desactivat, veus com quedarà una exportació sRGB.",
+        "wideGamutPreviewEnable": "Mostra colors de gamma àmplia"
+      },
+      "defaultAdjustments": {
+        "addCamera": "Afegir càmera…",
+        "applyToNonRaw": "Aplicar també a JPEG, TIFF, PNG i altres fitxers no RAW",
+        "applyToNonRawDesc": "Si està desactivat, només els fitxers RAW fan servir aquests valors. Els JPEG de la càmera solen estar ja processats i corregits, i aplicar-los de nou pot ser excessiu.",
+        "autoLensCorrection": "Correcció automàtica d'objectiu",
+        "autoLensCorrectionDesc": "Corregeix la distorsió, l'aberració cromàtica i el vinyetatge amb el perfil d'objectiu detectat a les metadades de cada imatge.",
+        "cameraDefaults": "Valors per defecte per càmera",
+        "cameraDefaultsDesc": "Dona a les imatges de càmeres concretes el seu propi preajust. Les càmeres no llistades fan servir el preajust per defecte de dalt, i la correcció d'objectiu s'aplica a totes les càmeres.",
+        "cameraPresetMissing": "El preajust escollit s'ha eliminat, per això les imatges d'aquesta càmera tornen a fer servir el de totes les càmeres.",
+        "description": "Defineix amb què comencen les imatges sense editar i on torna «Restablir ajustaments»; les imatges editades conserven la seva configuració. Amb valors per defecte, les miniatures RAW es generen en lloc de fer servir la previsualització incrustada de la càmera i triguen més al principi.",
+        "lensCorrection": "Correcció d'objectiu",
+        "noCamerasFound": "No s'han trobat altres càmeres. Obre una carpeta amb imatges d'una càmera o fes clic dret en un preajust mentre edites una de les seves imatges.",
+        "noPreset": "Cap (neutre)",
+        "preset": "Preajust per defecte",
+        "presetDesc": "S'aplica a cada imatge sense editar. S'ometen màscares, retalls i transformacions, perquè només encaixen amb la imatge on es van crear.",
+        "presetMissing": "El preajust escollit s'ha eliminat, per això les imatges sense editar tornen a fer servir valors neutres.",
+        "removeCamera": "Treure la càmera",
+        "sameAsAllCameras": "Igual que totes les càmeres",
+        "scope": "S'aplica a",
+        "sliderReset": "Restabliment dels controls lliscants",
+        "sliderResetDefaults": "Ajustaments per defecte",
+        "sliderResetDesc": "El valor al qual torna un control lliscant quan el restableixes, per exemple amb doble clic o a l'edició ràpida. Els controls de màscara sempre tornen al seu valor neutre.",
+        "sliderResetNeutral": "Valor neutre",
+        "title": "Ajustaments per defecte"
+      },
+      "display": {
+        "title": "Pantalla"
+      },
       "dynamicDesc": "L'editor renderitza la vista prèvia perquè coincideixi amb la densitat real de píxels de la vostra pantalla. Això assegura que cada detall es representi amb precisió 1:1, proporcionant la màxima claredat a l'hora de fer zoom i comprovar l'enfocament.",
       "editIn": {
         "add": "Afegeix un programa",
@@ -2172,6 +2273,16 @@
         "title": "Edita a"
       },
       "enableLivePreviews": "Activar vistes prèvies en directe",
+      "hdr": {
+        "display": "Pantalla HDR",
+        "displayDesc": "Mostra les altes llums més brillants que el blanc normal en una pantalla HDR. Les ombres i els tons mitjans no canvien i les exportacions estàndard no es veuen afectades.",
+        "enableDisplay": "Utilitza HDR a l'editor",
+        "headroom": "Rang d'altes llums",
+        "headroomDesc": "Fins on poden superar les altes llums el blanc normal. També s'utilitza en les exportacions HDR.",
+        "statusActive": "Aquesta pantalla està en mode HDR.",
+        "statusInactive": "Aquesta pantalla no està en mode HDR. Activa l'HDR a la configuració de pantalla del sistema per veure l'efecte.",
+        "statusUnsupported": "L'HDR necessita el renderitzador per GPU a Windows o macOS."
+      },
       "highDpi": "Renderització High-DPI",
       "highDpiDesc": "Renderitzar vistes prèvies a la resolució nativa de {{dpr}}x píxels de la pantalla. Produeix la vista prèvia més nítida possible, però utilitza molta més memòria.",
       "highDpiDescStandard": "Aquesta configuració només afecta pantalles d'alta densitat (High-DPI). La vostra pantalla actual té una resolució estàndard.",
@@ -2200,7 +2311,7 @@
         "baselineExposure": "Exposició base",
         "baselineExposureAmount": "Quantitat base",
         "baselineExposureAmountDesc": "Exposició afegida als fitxers RAW. darktable utilitza +0,7 EV.",
-        "baselineExposureDesc": "Aclareix els fitxers RAW en una quantitat fixa, més l'etiqueta DNG BaselineExposure si n'hi ha.",
+        "baselineExposureDesc": "Aclareix els fitxers RAW en una quantitat fixa, o en el valor de l'etiqueta DNG BaselineExposure si n'hi ha.",
         "colorNr": "Reducció de soroll de color base",
         "colorNrDesc": "Aplica un filtre bilateral creuat d'hora a la canonada per eliminar el soroll de croma. Valor més alt = Més reducció.",
         "defaultNonRawTonemapper": "Mapejador de tons predeterminat No-RAW",
@@ -2240,6 +2351,13 @@
       "qualities": {
         "high": "Alta qualitat",
         "performance": "Rendiment"
+      },
+      "rawDecoding": "Descodificació RAW",
+      "rawDecodingDesc": "Seleccioneu on es descodifiquen els fitxers RAW. 'Auto' utilitza la GPU i canvia a la CPU si no pot gestionar les vostres imatges. 'GPU' sempre prova primer la GPU. 'CPU' és més lenta, però funciona a tots els sistemes.",
+      "rawDecodingOptions": {
+        "auto": "Auto",
+        "cpu": "CPU",
+        "gpu": "GPU"
       },
       "renderScale": "Escala de resolució de renderització",
       "renderScaleDesc": "Escala la resolució de renderització respecte a la vostra pantalla. Valors més baixos milloren el rendiment en pantalles d'alta resolució a canvi d'una mica de pèrdua de nitidesa.",
@@ -2297,6 +2415,7 @@
         "mediapipe": "Pels models ràpids de punts facials i segmentació que impulsen les màscares de cara amb IA.",
         "negpy": "Per la inspiració que hi ha darrere de la lògica de conversió de negatius.",
         "nind": "Per proporcionar els models d'IA que impulsen les capacitats de reducció de soroll per IA a RapidRAW.",
+        "span": "Pel model d'IA base de RapidRes, l'ampliació 2x amb IA de RapidRAW, ajustat per RapidRAW al seu propi processament RAW (de Philip Hofmann, CC BY 4.0).",
         "rawler": "Per l'excel·lent component de Rust que proporciona la base per al processament de fitxers RAW en aquest projecte.",
         "sam2": "Per proporcionar el model de base utilitzat per a les capacitats de detecció de subjectes per IA.",
         "spektrafilm": "Per les LUTs d'emulació de pel·lícula basades en espectres, d'Andrea Volpato, que impulsen les emulacions integrades de RapidRAW. Amb llicència CC BY-SA 4.0.",
@@ -2372,13 +2491,11 @@
     "bottomBar": {
       "imagesSelected": "{{current}} de {{total}} imatges seleccionades",
       "tooltips": {
-        "collapseFilmstrip": "Contraure Tira d'imatges",
         "collapseLeft": "Plegar el panell esquerre",
         "collapseRight": "Plegar el panell dret",
         "copyPasteSettings": "Copiar i enganxar ajustaments",
         "copySettings": "Copiar ajustaments",
         "customZoom": "Feu clic per introduir un percentatge de zoom personalitzat",
-        "expandFilmstrip": "Expandir Tira d'imatges",
         "expandLeft": "Desplegar el panell esquerre",
         "expandRight": "Desplegar el panell dret",
         "export": "Exportar",

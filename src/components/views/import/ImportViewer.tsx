@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Check, Maximize2, Loader2, Image as ImageIcon, LayoutGrid, Star } from 'lucide-react';
-import { Invokes } from '../../ui/AppProperties';
+import { Invokes } from '../../../types/invokes';
 import { useImportStore } from '../../../store/useImportStore';
 import LazyThumb from './LazyThumb';
 import { RatingColor } from './RatingColor';

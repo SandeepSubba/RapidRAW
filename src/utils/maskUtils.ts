@@ -1,7 +1,8 @@
 import { v4 as uuidv4 } from 'uuid';
-import { Mask, SubMask, SubMaskMode, formatMaskTypeName } from '../components/panel/right/Masks';
+import { Mask, SubMask, SubMaskMode } from '../types/masks';
 import { ImageDimensions } from '../hooks/useImageRenderSize';
 import { AiPatch, Coord, MaskContainer } from './adjustments';
+import { formatMaskTypeName } from './maskNames';
 
 const AI_MASK_TYPES = new Set<string>([
   Mask.AiDepth,

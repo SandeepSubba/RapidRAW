@@ -1,4 +1,4 @@
-import { Theme } from '../components/ui/AppProperties';
+import { Theme } from '../types/settings';
 
 export interface ThemeProps {
   /** Tells the WebView which native control colours to use (text fields, scrollbars). */
