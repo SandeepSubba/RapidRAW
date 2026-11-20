@@ -43,6 +43,37 @@ pub fn available_monitor_bounds(window: &tauri::WebviewWindow) -> Vec<MonitorBou
         .unwrap_or_default()
 }
 
+/// Monitor bounds in logical pixels, the units the main window state uses on
+/// Linux.
+///
+/// The size is restored before the window is mapped, while GTK still reports
+/// a scale factor of 1.0; with fractional scaling (e.g. 150%, which GTK rounds
+/// up to 2) a size saved in physical pixels came back twice as large on every
+/// launch (1280×720, 2560×1440, 5120×2880, …). Logical pixels don't depend on
+/// the scale factor.
+#[cfg(target_os = "linux")]
+pub fn available_monitor_bounds_logical(window: &tauri::WebviewWindow) -> Vec<MonitorBounds> {
+    window
+        .available_monitors()
+        .map(|monitors| {
+            monitors
+                .into_iter()
+                .map(|monitor| {
+                    let scale = monitor.scale_factor();
+                    let position = monitor.position().to_logical::<i32>(scale);
+                    let size = monitor.size().to_logical::<u32>(scale);
+                    MonitorBounds {
+                        x: position.x,
+                        y: position.y,
+                        width: size.width,
+                        height: size.height,
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 #[cfg(not(target_os = "android"))]
 pub fn read_window_state(app_handle: &tauri::AppHandle, file_name: &str) -> Option<WindowState> {
     let path = app_handle.path().app_config_dir().ok()?.join(file_name);
@@ -76,6 +107,15 @@ pub fn saved_window_state_is_usable(
 
     if monitors.is_empty() {
         return true;
+    }
+
+    // A window larger than every monitor can't be right (and hides the UI
+    // off-screen); it's what the old Linux scaling bug saved.
+    let fits_a_monitor = monitors
+        .iter()
+        .any(|monitor| state.width <= monitor.width && state.height <= monitor.height);
+    if !fits_a_monitor {
+        return false;
     }
 
     let window_left = state.x as i64;

@@ -61,9 +61,13 @@ use crate::app::state::{
 };
 #[cfg(not(target_os = "android"))]
 use crate::platform::main_window::{
-    MAIN_WINDOW_MIN_SIZE, MAIN_WINDOW_STATE_FILE, available_monitor_bounds, read_window_state,
-    saved_window_state_is_usable, write_window_state,
+    MAIN_WINDOW_MIN_SIZE, MAIN_WINDOW_STATE_FILE, read_window_state, saved_window_state_is_usable,
+    write_window_state,
 };
+#[cfg(target_os = "linux")]
+use crate::platform::main_window::available_monitor_bounds_logical;
+#[cfg(not(any(target_os = "android", target_os = "linux")))]
+use crate::platform::main_window::available_monitor_bounds;
 use crate::platform::window_customizer::PinchZoomDisablePlugin;
 use crate::render::cache_utils::DecodedImageCache;
 use crate::render::gpu::context::get_or_init_gpu_context;
@@ -446,6 +450,17 @@ pub fn run() {
                 window_builder = window_builder.decorations(decorations).visible(false);
             }
 
+            // The window is transparent so the WGPU renderer can draw beneath the
+            // webview. When that renderer is off (the Linux default), a
+            // transparent window on NVIDIA + KDE Plasma only showed the regions
+            // WebKit had just repainted (a stray thumbnail, part of a panel) with
+            // the rest see-through, on Wayland and XWayland alike and with
+            // WebKit's CPU renderer too. An opaque window fixes it.
+            #[cfg(target_os = "linux")]
+            if !settings.wgpu_renderer_enabled() {
+                window_builder = window_builder.transparent(false);
+            }
+
             let window = window_builder.build().expect("Failed to build window");
 
             #[cfg(not(target_os = "android"))]
@@ -465,30 +480,59 @@ pub fn run() {
                 }
 
                 let scale = window.scale_factor().unwrap_or(1.0);
-                let default_w = (1280.0 * scale) as u32;
-                let default_h = (720.0 * scale) as u32;
+                // The saved state is in logical pixels on Linux (see
+                // `available_monitor_bounds_logical`) and physical elsewhere;
+                // `state_scale` converts logical sizes into those units.
+                #[cfg(target_os = "linux")]
+                let state_scale = 1.0_f64;
+                #[cfg(not(target_os = "linux"))]
+                let state_scale = scale;
+                let default_w = (1280.0 * state_scale) as u32;
+                let default_h = (720.0 * state_scale) as u32;
 
                 let mut initial_normal_rect = (default_w, default_h, 100i32, 100i32);
                 let mut state_loaded = false;
 
                 if let Some(state) = read_window_state(app.handle(), MAIN_WINDOW_STATE_FILE) {
+                    #[cfg(target_os = "linux")]
+                    let monitor_bounds = available_monitor_bounds_logical(&window);
+                    #[cfg(not(target_os = "linux"))]
                     let monitor_bounds = available_monitor_bounds(&window);
-                    let monitor_size = window.current_monitor().ok().flatten().map(|m| *m.size());
+                    let monitor_size = window.current_monitor().ok().flatten().map(|m| {
+                        #[cfg(target_os = "linux")]
+                        let size = m.size().to_logical::<u32>(m.scale_factor());
+                        #[cfg(not(target_os = "linux"))]
+                        let size = *m.size();
+                        size
+                    });
 
                     let is_maximized_size = monitor_size.map(|m| {
                         state.width >= m.width.saturating_sub(60) && state.height >= m.height.saturating_sub(60)
                     }).unwrap_or(false);
 
-                    if saved_window_state_is_usable(&state, &monitor_bounds, scale, MAIN_WINDOW_MIN_SIZE) && !is_maximized_size {
+                    if saved_window_state_is_usable(&state, &monitor_bounds, state_scale, MAIN_WINDOW_MIN_SIZE) && !is_maximized_size {
                         initial_normal_rect = (state.width, state.height, state.x, state.y);
                         state_loaded = true;
 
-                        let _ = window.set_size(tauri::Size::Physical(
-                            tauri::PhysicalSize::new(state.width, state.height),
-                        ));
-                        let _ = window.set_position(tauri::Position::Physical(
-                            tauri::PhysicalPosition::new(state.x, state.y),
-                        ));
+                        #[cfg(target_os = "linux")]
+                        {
+                            let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize::new(
+                                state.width as f64,
+                                state.height as f64,
+                            )));
+                            let _ = window.set_position(tauri::Position::Logical(
+                                tauri::LogicalPosition::new(state.x as f64, state.y as f64),
+                            ));
+                        }
+                        #[cfg(not(target_os = "linux"))]
+                        {
+                            let _ = window.set_size(tauri::Size::Physical(
+                                tauri::PhysicalSize::new(state.width, state.height),
+                            ));
+                            let _ = window.set_position(tauri::Position::Physical(
+                                tauri::PhysicalPosition::new(state.x, state.y),
+                            ));
+                        }
                     }
                 }
 
@@ -503,9 +547,10 @@ pub fn run() {
                     let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize::new(w, h)));
                     let _ = window.center();
 
-                    initial_normal_rect.0 = (w * scale) as u32;
-                    initial_normal_rect.1 = (h * scale) as u32;
+                    initial_normal_rect.0 = (w * state_scale) as u32;
+                    initial_normal_rect.1 = (h * state_scale) as u32;
                     if let Ok(pos) = window.outer_position() {
+                        let pos = pos.to_logical::<i32>(scale / state_scale);
                         initial_normal_rect.2 = pos.x;
                         initial_normal_rect.3 = pos.y;
                     }
@@ -566,21 +611,32 @@ pub fn run() {
                         let mut normal = last_normal_rect_handler.lock().unwrap();
 
                         if !maximized && !fullscreen {
+                            let event_scale = window_for_handler.scale_factor().unwrap_or(1.0);
+                            // Linux saves logical pixels (see
+                            // `available_monitor_bounds_logical`); other platforms
+                            // keep physical pixels.
+                            #[cfg(target_os = "linux")]
+                            let to_state = event_scale;
+                            #[cfg(not(target_os = "linux"))]
+                            let to_state = 1.0_f64;
+
                             let (curr_w, curr_h) = window_for_handler
                                 .outer_size()
-                                .map(|s| (s.width, s.height))
+                                .map(|s| {
+                                    let s = s.to_logical::<u32>(to_state);
+                                    (s.width, s.height)
+                                })
                                 .unwrap_or((0, 0));
 
-                            let event_scale = window_for_handler.scale_factor().unwrap_or(1.0);
-                            let min_w = (MAIN_WINDOW_MIN_SIZE.0 * event_scale) as u32;
-                            let min_h = (MAIN_WINDOW_MIN_SIZE.1 * event_scale) as u32;
+                            let min_w = (MAIN_WINDOW_MIN_SIZE.0 * event_scale / to_state) as u32;
+                            let min_h = (MAIN_WINDOW_MIN_SIZE.1 * event_scale / to_state) as u32;
 
                             let is_maximize_in_progress = window_for_handler
                                 .current_monitor()
                                 .ok()
                                 .flatten()
                                 .map(|m| {
-                                    let ms = m.size();
+                                    let ms = m.size().to_logical::<u32>(to_state);
                                     curr_w >= ms.width.saturating_sub(20) && curr_h >= ms.height.saturating_sub(20)
                                 })
                                 .unwrap_or(false);
@@ -590,6 +646,7 @@ pub fn run() {
                                 normal.1 = curr_h;
 
                                 if let Ok(position) = window_for_handler.outer_position() {
+                                    let position = position.to_logical::<i32>(to_state);
                                     normal.2 = position.x;
                                     normal.3 = position.y;
                                 }
