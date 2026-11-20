@@ -23,8 +23,12 @@ export default function ImportReviewBar() {
     );
   // Re-derived on every store change that can move it (selection, scan, file type, exclusions).
   const companionCount = useImportStore(
-    (s) => (s.fileTypeFilter === 'pairs' && s.keptPaths.size > 0 ? importSelection().companionCount : 0),
+    (s) =>
+      (s.fileTypeFilter === 'pairs' || s.fileTypeFilter === 'pairsJpeg') && s.keptPaths.size > 0
+        ? importSelection().companionCount
+        : 0,
   );
+  const companionType = useImportStore((s) => (s.fileTypeFilter === 'pairsJpeg' ? 'RAW' : 'JPEG'));
   const { pickDestination, startImport, setExcludeImported, setPersonalize, resetLearning } = useSdImportActions();
   const [showSettings, setShowSettings] = useState(false);
   const [learning, setLearning] = useState<CullLearning | null>(null);
@@ -117,7 +121,7 @@ export default function ImportReviewBar() {
       <div className="flex items-center gap-3 px-4 py-3">
         <div className="text-sm text-text-secondary">
           <span className="text-text-primary font-medium">{keptCount}</span> selected to import
-          {companionCount > 0 && ` (+${companionCount} paired JPEG)`}
+          {companionCount > 0 && ` (+${companionCount} paired ${companionType})`}
         </div>
 
         <div className="flex-1" />

@@ -1,9 +1,40 @@
-// 'pairs' shows a RAW + JPEG pair as its RAW, like 'preferRaw', but imports both files.
-export type FileTypeFilter = 'all' | 'raw' | 'nonraw' | 'preferRaw' | 'pairs';
+/**
+ * Which files an import copies, and how a RAW + JPEG pair shows in the grid. Driven by
+ * the RAW / JPEG toggles in the culling toolbar ("JPEG" = every non-raw image: JPEG,
+ * HEIF, TIFF, PNG…):
+ *   all        RAW + JPEG, every file its own tile
+ *   raw        RAW only
+ *   nonraw     JPEG only
+ *   pairs      RAW + JPEG, a pair shown as its RAW (keeping it imports the JPEG too)
+ *   pairsJpeg  RAW + JPEG, a pair shown as its JPEG (keeping it imports the RAW too)
+ * A pair is a RAW and a non-raw with the same folder and file name (case-insensitive).
+ */
+export type FileTypeFilter = 'all' | 'raw' | 'nonraw' | 'pairs' | 'pairsJpeg';
+
+/** How a RAW + JPEG pair is shown while both types are imported. */
+export type PairView = 'both' | 'raw' | 'jpeg';
+
+/** Saved values from older versions: 'preferRaw' (RAW, plus JPEGs without a RAW) is now RAW only. */
+export function normalizeFileTypeFilter(value: unknown): FileTypeFilter {
+  if (value === 'preferRaw') return 'raw';
+  return value === 'raw' || value === 'nonraw' || value === 'pairs' || value === 'pairsJpeg' ? value : 'all';
+}
+
+export const importsRaw = (f: FileTypeFilter) => f !== 'nonraw';
+export const importsJpeg = (f: FileTypeFilter) => f !== 'raw';
+export const pairViewOf = (f: FileTypeFilter): PairView => (f === 'pairs' ? 'raw' : f === 'pairsJpeg' ? 'jpeg' : 'both');
+
+/** The filter for a RAW / JPEG toggle state; `view` only matters when both are on. */
+export function fileTypeFilterFrom(raw: boolean, jpeg: boolean, view: PairView): FileTypeFilter {
+  if (raw && !jpeg) return 'raw';
+  if (jpeg && !raw) return 'nonraw';
+  return view === 'raw' ? 'pairs' : view === 'jpeg' ? 'pairsJpeg' : 'all';
+}
 
 const extOf = (p: string) => p.split('?')[0].split(/[\\/]/).pop()?.split('.').pop()?.toLowerCase() || '';
 
-const stemKey = (p: string) => {
+/** Folder + file name without extension, lower-cased: the two files of a pair share it. */
+export const frameKey = (p: string) => {
   const noVc = p.split('?')[0];
   const slash = Math.max(noVc.lastIndexOf('/'), noVc.lastIndexOf('\\'));
   const dir = noVc.slice(0, slash);
@@ -12,47 +43,66 @@ const stemKey = (p: string) => {
   return `${dir}/${dot === -1 ? name : name.slice(0, dot)}`.toLowerCase();
 };
 
+const rawTester = (rawExts: string[]) => {
+  const rawSet = new Set(rawExts.map((e) => e.toLowerCase()));
+  return (p: string) => rawSet.has(extOf(p));
+};
+
+/** How many RAWs, non-raws and RAW + JPEG pairs a scan holds (for the toolbar toggles). */
+export function fileTypeCounts(paths: string[], rawExts: string[]) {
+  const isRaw = rawTester(rawExts);
+  const rawKeys = new Set<string>();
+  let raw = 0;
+  paths.forEach((p) => {
+    if (isRaw(p)) {
+      raw++;
+      rawKeys.add(frameKey(p));
+    }
+  });
+  const pairKeys = new Set(paths.filter((p) => !isRaw(p) && rawKeys.has(frameKey(p))).map(frameKey));
+  return { raw, jpeg: paths.length - raw, pairs: pairKeys.size };
+}
+
 /**
  * Returns the set of paths visible under the given file-type filter, or `null` when
- * everything is visible (filter = 'all'). "preferRaw" hides a non-raw when a raw of the
- * same name exists (RAW + JPEG pairs collapse to the RAW).
+ * everything is visible. A scan holding only one of the two types ignores the filter
+ * (a saved "RAW only" must not blank a JPEG-only card).
  */
 export function computeVisibleSet(paths: string[], filter: FileTypeFilter, rawExts: string[]): Set<string> | null {
   if (filter === 'all') return null;
-  const rawSet = new Set(rawExts.map((e) => e.toLowerCase()));
-  const isRaw = (p: string) => rawSet.has(extOf(p));
+  const isRaw = rawTester(rawExts);
+  const raws = paths.filter(isRaw);
+  if (raws.length === 0 || raws.length === paths.length) return null;
 
-  if (filter === 'raw') return new Set(paths.filter(isRaw));
+  if (filter === 'raw') return new Set(raws);
   if (filter === 'nonraw') return new Set(paths.filter((p) => !isRaw(p)));
 
-  // preferRaw / pairs
-  const rawStems = new Set(paths.filter(isRaw).map(stemKey));
-  return new Set(paths.filter((p) => isRaw(p) || !rawStems.has(stemKey(p))));
+  // pairs / pairsJpeg: hide the other half of each pair.
+  const showRaw = filter === 'pairs';
+  const shownKeys = new Set(paths.filter((p) => isRaw(p) === showRaw).map(frameKey));
+  return new Set(paths.filter((p) => isRaw(p) === showRaw || !shownKeys.has(frameKey(p))));
 }
 
 /**
- * The non-raw files (JPEG, HEIF…) that share a raw's folder and file name, keyed by the
- * raw's path. Only raws that have a companion appear.
+ * For the pair modes, the hidden half of each pair keyed by the path whose tile stands
+ * for it (RAW -> its JPEGs for 'pairs', JPEG -> its RAW for 'pairsJpeg'). Empty for the
+ * other modes. Only tiles that actually have a companion appear.
  */
-export function pairCompanions(paths: string[], rawExts: string[]): Map<string, string[]> {
-  const rawSet = new Set(rawExts.map((e) => e.toLowerCase()));
-  const isRaw = (p: string) => rawSet.has(extOf(p));
-  const rawByStem = new Map(paths.filter(isRaw).map((p) => [stemKey(p), p]));
+export function pairCompanions(paths: string[], rawExts: string[], filter: FileTypeFilter): Map<string, string[]> {
   const pairs = new Map<string, string[]>();
+  if (filter !== 'pairs' && filter !== 'pairsJpeg') return pairs;
+  const isRaw = rawTester(rawExts);
+  const showRaw = filter === 'pairs';
+  const shownByKey = new Map<string, string[]>();
+  paths
+    .filter((p) => isRaw(p) === showRaw)
+    .forEach((p) => shownByKey.set(frameKey(p), [...(shownByKey.get(frameKey(p)) ?? []), p]));
   paths.forEach((p) => {
-    const raw = !isRaw(p) && rawByStem.get(stemKey(p));
-    if (raw) pairs.set(raw, [...(pairs.get(raw) ?? []), p]);
+    if (isRaw(p) === showRaw) return;
+    (shownByKey.get(frameKey(p)) ?? []).forEach((shown) => pairs.set(shown, [...(pairs.get(shown) ?? []), p]));
   });
   return pairs;
 }
-
-export const FILE_TYPE_OPTIONS: { value: FileTypeFilter; label: string }[] = [
-  { value: 'all', label: 'All types' },
-  { value: 'raw', label: 'RAW only' },
-  { value: 'nonraw', label: 'JPEG only' },
-  { value: 'preferRaw', label: 'Prefer RAW (skip its JPEG)' },
-  { value: 'pairs', label: 'RAW + JPEG pairs (import both)' },
-];
 
 export const LABEL_COLORS = ['red', 'yellow', 'green', 'blue', 'purple', 'gray'] as const;
 

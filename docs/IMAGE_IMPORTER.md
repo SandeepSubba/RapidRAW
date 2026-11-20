@@ -253,18 +253,29 @@ You can always override afterward (keep extras, drop keepers).
   Space keeps/skips; Enter opens the viewer).
 - **Ratings & color labels** (1–5 stars, color labels) per photo — written to the source
   `.rrdata` sidecars so they travel with the import.
-- **Filters** by rating, color label, and file type (e.g. hide JPEGs when shooting
-  RAW+JPEG). The file-type filter also governs what gets imported:
-  - **Prefer RAW (skip its JPEG)** shows a RAW + JPEG pair as its RAW and imports only
-    the RAW.
-  - **RAW + JPEG pairs (import both)** also shows one tile per pair (the RAW, labelled
-    "+ JPG"), but keeping it imports both files; the JPEG takes the RAW's rating and
-    colour label. A pair is a raw and a non-raw with the same folder and file name
-    (case-insensitive). The bar shows "(+N paired JPEG)" and the Import button counts
-    both. Built in `importSelection()` (`useSdImportActions.ts`).
-  - Grouping analyses only the file types on show, so the hidden half of a pair does
-    not crowd the scene look-ahead; changing to a filter that shows a different set
-    re-runs the analysis.
+- **What to import: RAW / JPEG toggles** in the culling toolbar (`FileTypeToggles.tsx`,
+  modes in `importFilters.ts`), each with its file count. "JPEG" means every non-raw
+  image (JPEG, HEIF, TIFF…). At least one stays on; with only one on, the other type is
+  hidden and not imported. Shown only when the scan holds both types (a saved "RAW only"
+  is ignored on a JPEG-only card).
+  - With both on and RAW + JPEG pairs present, **Show pairs as Both / RAW / JPEG**:
+    *Both* gives each file its own tile; *RAW* (`pairs`) or *JPEG* (`pairsJpeg`) shows
+    one tile per pair (labelled "+ JPG" / "+ RAW") and keeping it imports both files —
+    the hidden half takes the tile's rating and colour label. A pair is a raw and a
+    non-raw with the same folder and file name (case-insensitive). The bar shows
+    "(+N paired JPEG/RAW)" and the Import button counts both. Built in
+    `importSelection()` (`useSdImportActions.ts`).
+  - Keeping is per frame across mode switches: a frame with any file kept stays kept in
+    the new mode, and a newly shown file takes its frame's rating/label. A selection
+    restored on rescan is mapped onto the current mode the same way (exactly as saved in
+    *Both*). Auto-select best only keeps files on show, and `importSelection()` never
+    copies a type that's switched off. Turning a type back on restores the last pair
+    view (`lastPairView`, persisted).
+  - Grouping analyses only the files on show, so the hidden half of a pair does not
+    crowd the scene look-ahead; a switch that changes which files show re-runs it.
+  - Older saved "Prefer RAW" becomes RAW only. Self-check:
+    `src/components/views/import/importFilters.test.ts` (esbuild + node, see its header).
+- **Filters** by rating and color label (view only — they never change what's imported).
 - **Select all / Select none / Auto-select best.**
 
 ## 8. The viewer
@@ -334,7 +345,7 @@ Both the number row and the numeric keypad are accepted for ratings.
 ## Preferences that persist
 
 Saved across sessions (never the transient scan/selection): import settings, the
-exclude-imported and eject-after-import toggles, the similarity %, and the file-type filter.
+exclude-imported and eject-after-import toggles, the similarity %, and the RAW / JPEG mode.
 
 ## Models used
 

@@ -4,7 +4,7 @@ import { ArrowDownUp, Check, ChevronDown, ChevronUp, Filter, Star, X } from 'luc
 import { useImportStore, ImportSortKey } from '../../../store/useImportStore';
 import { useSdImportActions } from '../../../hooks/useSdImportActions';
 import { SortDirection } from '../../../types/library';
-import { FILE_TYPE_OPTIONS, LABEL_COLORS, COLOR_HEX, FileTypeFilter } from './importFilters';
+import { LABEL_COLORS, COLOR_HEX } from './importFilters';
 
 const SORT_OPTIONS: { key: ImportSortKey; label: string; needsScores?: boolean }[] = [
   { key: 'name', label: 'File name' },
@@ -14,9 +14,8 @@ const SORT_OPTIONS: { key: ImportSortKey; label: string; needsScores?: boolean }
 
 export default function ImportFilterBar() {
   const [open, setOpen] = useState(false);
-  const { fileTypeFilter, filterRating, filterColors, sortKey, sortOrder, scoresReady } = useImportStore(
+  const { filterRating, filterColors, sortKey, sortOrder, scoresReady } = useImportStore(
     useShallow((s) => ({
-      fileTypeFilter: s.fileTypeFilter,
       filterRating: s.filterRating,
       filterColors: s.filterColors,
       sortKey: s.sortKey,
@@ -24,13 +23,14 @@ export default function ImportFilterBar() {
       scoresReady: s.scoresReady,
     })),
   );
-  const { setFileTypeFilter, setFilterRating, toggleFilterColor, setSortKey, setSortOrder } = useSdImportActions();
+  // File types (RAW / JPEG) live in their own toolbar control: they decide what gets
+  // imported, so they're not a view filter that "Clear filters" should reset.
+  const { setFilterRating, toggleFilterColor, setSortKey, setSortOrder } = useSdImportActions();
 
-  const active = fileTypeFilter !== 'all' || filterRating !== 0 || filterColors.length > 0;
+  const active = filterRating !== 0 || filterColors.length > 0;
   const asc = sortOrder === SortDirection.Ascending;
 
   const clearAll = () => {
-    setFileTypeFilter('all');
     setFilterRating(0);
     filterColors.forEach((c) => toggleFilterColor(c));
   };
@@ -116,20 +116,6 @@ export default function ImportFilterBar() {
                 ))}
                 <span className="text-xs text-text-secondary ml-1">&amp; up</span>
               </div>
-            </div>
-
-            {/* FILE TYPE */}
-            <div>
-              <div className="text-[11px] uppercase tracking-wide text-text-secondary mb-1.5">Filter by file type</div>
-              {FILE_TYPE_OPTIONS.map((o) => (
-                <button
-                  key={o.value}
-                  onClick={() => setFileTypeFilter(o.value as FileTypeFilter)}
-                  className={`block w-full text-left px-2 py-1 rounded ${fileTypeFilter === o.value ? 'bg-surface text-text-primary' : 'text-text-secondary hover:bg-surface'}`}
-                >
-                  {o.label}
-                </button>
-              ))}
             </div>
 
             {/* COLOR LABEL */}

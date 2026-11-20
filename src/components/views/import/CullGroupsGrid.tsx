@@ -7,6 +7,7 @@ import { useSdImportActions } from '../../../hooks/useSdImportActions';
 import { CullingSuggestions, SortDirection } from '../../../types/library';
 import { computeVisible, pairCompanions } from './importFilters';
 import ImportFilterBar from './ImportFilterBar';
+import FileTypeToggles from './FileTypeToggles';
 import { RatingColor } from './RatingColor';
 import LazyThumb from './LazyThumb';
 import ImportViewer from './ImportViewer';
@@ -165,12 +166,13 @@ export default function CullGroupsGrid({ suggestions }: { suggestions: CullingSu
   // populated when "Exclude already-imported" is on AND a destination is set, so this hides
   // them exactly when exclusion is active and shows everything otherwise.
   const vis = (p: string) => (!visibleSet || visibleSet.has(p)) && !alreadyImported.has(p);
-  // With the RAW + JPEG pairs option, a RAW's tile stands for both files; say so on its label.
-  const pairedRaws = useMemo(
-    () => (fileTypeFilter === 'pairs' ? new Set(pairCompanions(scannedPaths, rawExts ?? []).keys()) : null),
+  // When a RAW + JPEG pair shows as one tile, that tile stands for both files; say so on its label.
+  const pairedTiles = useMemo(
+    () => new Set(pairCompanions(scannedPaths, rawExts ?? [], fileTypeFilter).keys()),
     [fileTypeFilter, scannedPaths, rawExts],
   );
-  const nameBadge = (p: string) => `${p.split(/[\\/]/).pop()}${pairedRaws?.has(p) ? ' + JPG' : ''}`;
+  const pairSuffix = fileTypeFilter === 'pairsJpeg' ? ' + RAW' : ' + JPG';
+  const nameBadge = (p: string) => `${p.split(/[\\/]/).pop()}${pairedTiles.has(p) ? pairSuffix : ''}`;
 
   const [viewMode, setViewMode] = useState<'grid' | 'viewer'>('grid');
   const [viewerInitialPath, setViewerInitialPath] = useState<string | null>(null);
@@ -283,7 +285,7 @@ export default function CullGroupsGrid({ suggestions }: { suggestions: CullingSu
     const orderedList = [...entries.flat(), ...visBlurry];
 
     return { flat: visScanned, groups: groupList, singles: singleList, timeline: timelineList, blurry: visBlurry, ordered: orderedList, badgeOf: badge, bestOf: best, memberOf: members, collapsed: collapsedList, leadOf: lead };
-  }, [suggestions, scannedPaths, visibleSet, scoresReady, alreadyImported, sortKey, sortOrder, captureTimes, pairedRaws]);
+  }, [suggestions, scannedPaths, visibleSet, scoresReady, alreadyImported, sortKey, sortOrder, captureTimes, pairedTiles, pairSuffix]);
 
   const onOpen = (p: string) => {
     setViewerInitialPath(p);
@@ -529,7 +531,10 @@ export default function CullGroupsGrid({ suggestions }: { suggestions: CullingSu
           <span className="text-xs tabular-nums text-text-secondary w-9">{gapSeconds}s</span>
         </div>
 
-        {/* filters: sort order + rating / file type / color label */}
+        {/* what to import (RAW / JPEG) and how RAW + JPEG pairs show */}
+        <FileTypeToggles />
+
+        {/* filters: sort order + rating / color label */}
         <ImportFilterBar />
 
         <div className="h-5 w-px bg-surface" />

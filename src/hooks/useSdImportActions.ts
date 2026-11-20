@@ -8,7 +8,17 @@ import { Invokes } from '../types/invokes';
 import { DriveInfo, ImportSortKey, restoreSelection, useImportStore } from '../store/useImportStore';
 import { useUIStore } from '../store/useUIStore';
 import { useSettingsStore } from '../store/useSettingsStore';
-import { FileTypeFilter, ImportFilterState, computeVisible, computeVisibleSet, pairCompanions } from '../components/views/import/importFilters';
+import {
+  FileTypeFilter,
+  ImportFilterState,
+  computeVisible,
+  computeVisibleSet,
+  frameKey,
+  importsJpeg,
+  importsRaw,
+  pairCompanions,
+  pairViewOf,
+} from '../components/views/import/importFilters';
 import { CullLearning, keepersOf, learnFromImport, loadCullLearning, rankedGroups } from '../utils/importLearning';
 
 const rawExts = () => useSettingsStore.getState().supportedTypes?.raw ?? [];
@@ -18,30 +28,43 @@ const filterState = (): ImportFilterState => {
   return { fileType: s.fileTypeFilter, rating: s.filterRating, colors: s.filterColors };
 };
 /**
- * What an import of the current selection copies: the kept photos, plus — with the
- * 'pairs' file-type option — the JPEG of every kept RAW, which the grid hides. A
- * companion takes its RAW's rating and colour label. Companions already in the
- * destination are left out.
+ * What an import of the current selection copies: the kept photos, plus — when RAW and
+ * JPEG are both on and pairs show as one tile — the hidden half of every kept pair (its
+ * JPEG, or its RAW when pairs show as JPEG). A companion takes its tile's rating and
+ * colour label. Companions already in the destination are left out.
  */
 export function importSelection() {
   const s = useImportStore.getState();
-  const paths = [...s.keptPaths];
+  // Never copy a file type that's switched off, whatever got into keptPaths.
+  const typeVisible = computeVisibleSet(s.scannedPaths, s.fileTypeFilter, rawExts());
+  const kept = typeVisible ? [...s.keptPaths].filter((p) => typeVisible.has(p)) : [...s.keptPaths];
+  const paths = new Set(kept);
   const ratings = { ...s.ratings };
   const colors = { ...s.colors };
   let companionCount = 0;
-  if (s.fileTypeFilter === 'pairs') {
-    const companions = pairCompanions(s.scannedPaths, rawExts());
-    [...s.keptPaths].forEach((raw) => {
-      (companions.get(raw) ?? []).forEach((p) => {
-        if (s.alreadyImported.has(p)) return;
-        paths.push(p);
-        companionCount++;
-        if (ratings[raw]) ratings[p] = ratings[raw];
-        if (colors[raw]) colors[p] = colors[raw];
-      });
+  const companions = pairCompanions(s.scannedPaths, rawExts(), s.fileTypeFilter);
+  kept.forEach((shown) => {
+    (companions.get(shown) ?? []).forEach((p) => {
+      if (s.alreadyImported.has(p) || paths.has(p)) return;
+      paths.add(p);
+      companionCount++;
+      if (ratings[shown]) ratings[p] = ratings[shown];
+      if (colors[shown]) colors[p] = colors[shown];
     });
-  }
-  return { paths, ratings, colors, companionCount };
+  });
+  return { paths: [...paths], ratings, colors, companionCount };
+}
+
+/**
+ * Keeping is per frame (a RAW + JPEG pair is one frame): the files on show under `filter`
+ * whose frame has any file in `kept`, minus photos already in the destination.
+ */
+function keptFramesShown(kept: Iterable<string>, scannedPaths: string[], filter: FileTypeFilter, alreadyImported: Set<string>) {
+  const frames = new Set([...kept].map(frameKey));
+  const visible = computeVisibleSet(scannedPaths, filter, rawExts());
+  return new Set(
+    scannedPaths.filter((p) => frames.has(frameKey(p)) && (!visible || visible.has(p)) && !alreadyImported.has(p)),
+  );
 }
 
 const visibleNow = () => {
@@ -269,18 +292,40 @@ export function useSdImportActions() {
     });
   }, []);
 
-  // The file-type filter governs what gets imported, so dropping a type also unselects
-  // those photos. Rating/colour filters are view-only and don't change the selection.
+  // The file-type mode governs what gets imported. Keeping is per frame: switching modes
+  // keeps every frame that had any of its files kept (so a kept RAW + JPEG pair stays kept
+  // whichever half is on show), and a newly shown file takes its frame's rating/label.
+  // Rating/colour filters are view-only and don't change the selection.
   const setFileTypeFilter = useCallback(
     (filter: FileTypeFilter) => {
-      const { scannedPaths, keptPaths, fileTypeFilter, analysisReady, enableGroups, setImport } = useImportStore.getState();
-      const visible = computeVisibleSet(scannedPaths, filter, rawExts());
-      const keptVisible = visible ? new Set([...keptPaths].filter((p) => visible.has(p))) : keptPaths;
-      setImport({ fileTypeFilter: filter, keptPaths: keptVisible });
-      // Grouping only analysed the types that were on show; re-analyse for the new set.
-      const before = computeVisibleSet(scannedPaths, fileTypeFilter, rawExts());
-      const sameTypes = before?.size === visible?.size;
-      if (analysisReady && !sameTypes) {
+      const { scannedPaths, fileTypeFilter, analysisReady, enableGroups, alreadyImported, ratings, colors, setImport } =
+        useImportStore.getState();
+      if (filter === fileTypeFilter) return;
+      const exts = rawExts();
+      const keptPaths = keptFramesShown(importSelection().paths, scannedPaths, filter, alreadyImported);
+      const visible = computeVisibleSet(scannedPaths, filter, exts);
+      const shown = visible ? scannedPaths.filter((p) => visible.has(p)) : scannedPaths;
+
+      const frameRating: Record<string, number> = {};
+      const frameColor: Record<string, string> = {};
+      scannedPaths.forEach((p) => {
+        if (ratings[p]) frameRating[frameKey(p)] ??= ratings[p];
+        if (colors[p]) frameColor[frameKey(p)] ??= colors[p];
+      });
+      const nextRatings = { ...ratings };
+      const nextColors = { ...colors };
+      shown.forEach((p) => {
+        if (!nextRatings[p] && frameRating[frameKey(p)]) nextRatings[p] = frameRating[frameKey(p)];
+        if (!nextColors[p] && frameColor[frameKey(p)]) nextColors[p] = frameColor[frameKey(p)];
+      });
+      setImport({ fileTypeFilter: filter, keptPaths, ratings: nextRatings, colors: nextColors });
+      if (importsRaw(filter) && importsJpeg(filter)) setImport({ lastPairView: pairViewOf(filter) });
+
+      // Grouping only analysed the files that were on show; re-analyse if that changed.
+      const before = computeVisibleSet(scannedPaths, fileTypeFilter, exts);
+      const sameShown =
+        before === visible || (!!before && !!visible && before.size === visible.size && [...visible].every((p) => before.has(p)));
+      if (analysisReady && !sameShown) {
         setImport({ analysisReady: false, scoresReady: false });
         if (enableGroups) analyzeThenGroup();
         else setImport({ suggestions: null });
@@ -362,11 +407,16 @@ export function useSdImportActions() {
       useImportStore.getState().setImport({ enableGroups: true }); // reflect that grouping is now active
       await scoreImages(); // analyzes + groups + scores as needed, sets scoresReady + suggestions
     }
-    const { scannedPaths, suggestions, alreadyImported, personalizeSelection, setImport } = useImportStore.getState();
+    const { scannedPaths, suggestions, alreadyImported, personalizeSelection, fileTypeFilter, setImport } =
+      useImportStore.getState();
     if (!suggestions) return; // analysis failed; leave the current selection untouched
     const learning = personalizeSelection ? await loadCullLearning() : null;
     const kept = computeDefaultKeepers(scannedPaths, suggestions, learning);
     alreadyImported.forEach((p) => kept.delete(p));
+    // Only the file types on show can be kept (a hidden JPEG of a pair rides along with
+    // its RAW at import; with RAW only it isn't imported at all).
+    const typeVisible = computeVisibleSet(scannedPaths, fileTypeFilter, rawExts());
+    if (typeVisible) kept.forEach((p) => !typeVisible.has(p) && kept.delete(p));
     setImport({ keptPaths: kept });
   }, [scoreImages]);
 
@@ -394,7 +444,12 @@ export function useSdImportActions() {
       // Show all photos with nothing selected, unless this source was being culled before
       // (importer closed or app restarted mid-way) — then pick up where that left off.
       // Grouping is opt-in (the "Group similar" toggle); selection is explicit.
-      const restored = restoreSelection(useImportStore.getState().savedSelection, path, scannedPaths);
+      const saved = restoreSelection(useImportStore.getState().savedSelection, path, scannedPaths);
+      // The saved picks may come from another RAW / JPEG mode: map them onto this one's
+      // files. With every file on show ('all') they come back exactly as saved.
+      const mode = useImportStore.getState().fileTypeFilter;
+      const restored =
+        mode === 'all' ? saved : { ...saved, keptPaths: keptFramesShown(saved.keptPaths, scannedPaths, mode, new Set()) };
       if (restored.keptPaths.size > 0) {
         toast.info(`Restored your earlier selection: ${restored.keptPaths.size} photos kept.`);
       }

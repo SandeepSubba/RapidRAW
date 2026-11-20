@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { CullingSettings, CullingSuggestions, SortDirection } from '../types/library';
-import { FileTypeFilter } from '../components/views/import/importFilters';
+import { FileTypeFilter, PairView, normalizeFileTypeFilter } from '../components/views/import/importFilters';
 import type { AiDecision } from '../utils/importLearning';
 
 // What to order the culling grid by. 'date' uses EXIF capture time (loaded after a scan);
@@ -89,8 +89,10 @@ interface ImportState {
   ejectAfterImport: boolean;
   // Personalize the auto-selection by learning from your keep/skip picks over time.
   personalizeSelection: boolean;
-  // Show/hide by file type (e.g. hide JPEGs when shooting RAW+JPEG).
+  // RAW / JPEG import toggles + how RAW + JPEG pairs show (importFilters.ts).
   fileTypeFilter: FileTypeFilter;
+  // The last pair view chosen with both types on, restored when a type is turned back on.
+  lastPairView: PairView;
   // Culling metadata (per session): star rating 0-5 and color label per photo.
   ratings: Record<string, number>;
   colors: Record<string, string>;
@@ -153,6 +155,7 @@ const INITIAL: Omit<ImportState, 'setImport' | 'toggleKeep' | 'reset'> = {
   ejectAfterImport: false,
   personalizeSelection: true,
   fileTypeFilter: 'all',
+  lastPairView: 'both',
   ratings: {},
   colors: {},
   activePath: null,
@@ -229,6 +232,7 @@ export const useImportStore = create<ImportState>()(
         timeGapSeconds: state.timeGapSeconds,
         sceneGapSeconds: state.sceneGapSeconds,
         fileTypeFilter: state.fileTypeFilter,
+        lastPairView: state.lastPairView,
         sortKey: state.sortKey,
         sortOrder: state.sortOrder,
       }),
@@ -242,6 +246,8 @@ export const useImportStore = create<ImportState>()(
           ...current,
           ...p,
           importSettings: { ...current.importSettings, ...(p.importSettings ?? {}) },
+          // Older versions saved 'preferRaw', which no longer exists.
+          fileTypeFilter: normalizeFileTypeFilter(p.fileTypeFilter ?? current.fileTypeFilter),
         };
       },
     },
