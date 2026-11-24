@@ -74,7 +74,13 @@ pub fn read(decoder: &dyn Decoder, file_bytes: &[u8], is_monochrome: bool) -> Ra
     .unwrap_or(0.0);
     RawExposure {
         scene_referred: !is_monochrome,
-        dng_baseline: dng_baseline(decoder),
+        dng_baseline: dng_baseline(decoder).or_else(|| {
+            // Fuji's RawExposureBias is the camera's own baseline: it replaces
+            // the generic scene-referred amount (like a DNG tag), never adds to it.
+            matches!(decoder.format_hint(), FormatHint::RAF)
+                .then(|| fuji_raw_exposure_bias(file_bytes).map(|bias| -bias))
+                .flatten()
+        }),
         highlight_preservation: highlight_preservation
             .clamp(HIGHLIGHT_BIAS_MIN, HIGHLIGHT_BIAS_MAX),
     }
@@ -100,10 +106,7 @@ fn highlight_preservation(format: FormatHint, file_bytes: &[u8]) -> f32 {
         }
         FormatHint::PEF => tiff_makernote(file_bytes).map(|makernote| pentax(&makernote)),
         FormatHint::ORF => olympus_camera_settings(file_bytes).map(|settings| olympus(&settings)),
-        FormatHint::RAF => Some(
-            fuji_makernote(file_bytes).map_or(0.0, |makernote| fuji(&makernote))
-                + fuji_raw_exposure_bias(file_bytes).map_or(0.0, |bias| -bias),
-        ),
+        FormatHint::RAF => fuji_makernote(file_bytes).map(|makernote| fuji(&makernote)),
         _ => None,
     }
     .unwrap_or(0.0)
@@ -114,8 +117,9 @@ const RAF_RAW_EXPOSURE_BIAS: u16 = 0x9650;
 
 /// Fuji's RawExposureBias (RAF metadata tag 0x9650): how much darker the camera
 /// recorded the RAW than its own JPEG rendering — e.g. -0.72 EV on an X-T5 at
-/// DR100. Adobe's Fuji profiles add it back as baseline exposure, so without it
-/// RAFs open that much darker than the camera JPEG (and Lightroom/Affinity).
+/// DR100. Adobe's Fuji profiles use it as the baseline exposure, so RAFs use it
+/// in place of the generic scene-referred baseline (adding both over-brightens
+/// by ~0.7 EV). The DR200/DR400 boost stays in highlight preservation.
 /// The RAF metadata block is big-endian: a record count, then tag/size/data.
 fn fuji_raw_exposure_bias(file_bytes: &[u8]) -> Option<f32> {
     let be_u32 = |at: usize| Some(u32::from_be_bytes(file_bytes.get(at..at + 4)?.try_into().ok()?));
@@ -312,5 +316,14 @@ mod tests {
         let bytes = std::fs::read(std::env::var("RAF_SAMPLE").unwrap()).unwrap();
         println!("RawExposureBias {:?}", fuji_raw_exposure_bias(&bytes));
         println!("highlight preservation {:+.2} EV", highlight_preservation(FormatHint::RAF, &bytes));
+    }
+
+    #[test]
+    fn vendor_baseline_replaces_generic_amount() {
+        let options = BaselineOptions { baseline_exposure: Some(0.7), compensate_highlight_preservation: true };
+        let raf = RawExposure { scene_referred: true, dng_baseline: Some(0.72), highlight_preservation: 1.0 };
+        assert!((raf.compensation(options) - 1.72).abs() < 1e-6);
+        let off = BaselineOptions { baseline_exposure: None, ..options };
+        assert!((raf.compensation(off) - 1.0).abs() < 1e-6);
     }
 }
