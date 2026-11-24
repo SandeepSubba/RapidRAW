@@ -70,6 +70,14 @@ fn launch_external_editor(editor: &str, file: &str) -> Result<String, String> {
         return Ok(name);
     }
 
+    // Linux: a .desktop launcher (e.g. a Wine app) isn't an executable —
+    // run its Exec line ourselves. Exec'ing it directly would go through its
+    // `#!/usr/bin/env xdg-open` shebang and open the file in the default app.
+    #[cfg(all(unix, not(target_os = "macos")))]
+    if editor.ends_with(".desktop") {
+        return launch_desktop_entry(editor, file);
+    }
+
     Command::new(editor)
         .arg(file)
         .spawn()
@@ -83,6 +91,100 @@ fn launch_external_editor(editor: &str, file: &str) -> Result<String, String> {
         .file_stem()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| editor.to_string()))
+}
+
+/// Single-quote `s` for `sh -c`.
+#[cfg(all(unix, not(target_os = "macos")))]
+fn shell_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', r"'\''"))
+}
+
+/// Build the shell command for a desktop entry's `Exec` value: file field
+/// codes (%f %F %u %U) become the quoted file, other codes are dropped, and
+/// the file is appended when the line has no file code. Exec quoting rules
+/// are a subset of sh's, so the result runs under `sh -c`.
+#[cfg(all(unix, not(target_os = "macos")))]
+fn desktop_exec_command(exec: &str, file: &str) -> String {
+    let quoted = shell_quote(file);
+    let mut out = String::with_capacity(exec.len() + quoted.len());
+    let mut used_file = false;
+    let mut chars = exec.chars();
+    while let Some(c) = chars.next() {
+        if c != '%' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('%') => out.push('%'),
+            Some('f' | 'F' | 'u' | 'U') => {
+                if !used_file {
+                    out.push_str(&quoted);
+                    used_file = true;
+                }
+            }
+            _ => {} // %i %c %k and deprecated codes: drop
+        }
+    }
+    if !used_file {
+        out.push(' ');
+        out.push_str(&quoted);
+    }
+    out
+}
+
+/// Launch `file` with a freedesktop `.desktop` entry (honours Exec, Path).
+#[cfg(all(unix, not(target_os = "macos")))]
+fn launch_desktop_entry(entry: &str, file: &str) -> Result<String, String> {
+    let text = fs::read_to_string(entry)
+        .map_err(|e| format!("Couldn't read '{}': {}. Check the editor path in Settings.", entry, e))?;
+    let (mut exec, mut workdir, mut name) = (None, None, None);
+    let mut in_main = false;
+    for line in text.lines() {
+        let line = line.trim();
+        if line.starts_with('[') {
+            in_main = line == "[Desktop Entry]";
+            continue;
+        }
+        if !in_main {
+            continue;
+        }
+        if let Some(v) = line.strip_prefix("Exec=") {
+            exec = Some(v.trim().to_string());
+        } else if let Some(v) = line.strip_prefix("Path=") {
+            workdir = Some(v.trim().to_string()).filter(|v| !v.is_empty());
+        } else if let Some(v) = line.strip_prefix("Name=") {
+            name = Some(v.trim().to_string());
+        }
+    }
+    let exec = exec.ok_or_else(|| format!("'{}' has no Exec line.", entry))?;
+    let mut cmd = std::process::Command::new("sh");
+    cmd.arg("-c").arg(desktop_exec_command(&exec, file));
+    if let Some(dir) = workdir.filter(|d| Path::new(d).is_dir()) {
+        cmd.current_dir(dir);
+    }
+    cmd.spawn()
+        .map_err(|e| format!("Couldn't launch '{}': {}", entry, e))?;
+    Ok(name.unwrap_or_else(|| {
+        Path::new(entry)
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| entry.to_string())
+    }))
+}
+
+#[cfg(all(test, unix, not(target_os = "macos")))]
+mod desktop_tests {
+    use super::desktop_exec_command;
+
+    #[test]
+    fn substitutes_file_codes() {
+        assert_eq!(
+            desktop_exec_command(r#"env A="x; y" /bin/wine "C:/a b.exe" %F"#, "/p/it's.tif"),
+            r#"env A="x; y" /bin/wine "C:/a b.exe" '/p/it'\''s.tif'"#
+        );
+        assert_eq!(desktop_exec_command("gimp", "/a.tif"), "gimp '/a.tif'");
+        assert_eq!(desktop_exec_command("app %i %u 100%%", "/a"), "app  '/a' 100%");
+    }
 }
 
 /// Poll the rendered file for saves from the editor. Editors overwrite in

@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
   Cpu,
@@ -311,6 +311,17 @@ export default function SettingsPanel({
   const [assistantModel, setAssistantModel] = useState<string>(appSettings?.assistantModel || '');
   const [assistantDevRepoPath, setAssistantDevRepoPath] = useState<string>(appSettings?.assistantDevRepoPath || '');
   const [externalEditorPath, setExternalEditorPath] = useState<string>(appSettings?.externalEditorPath || '');
+  // The path field normally commits on blur; leaving Settings straight from the
+  // field (back arrow / Esc) never blurs it, so flush an unsaved draft on unmount.
+  const externalEditorFlush = useRef({ draft: externalEditorPath, appSettings, onSettingsChange });
+  externalEditorFlush.current = { draft: externalEditorPath, appSettings, onSettingsChange };
+  const commitExternalEditorPath = useCallback(() => {
+    const { draft, appSettings: current, onSettingsChange: save } = externalEditorFlush.current;
+    if (current && (current.externalEditorPath || '') !== draft) {
+      save({ ...current, externalEditorPath: draft });
+    }
+  }, []);
+  useEffect(() => commitExternalEditorPath, [commitExternalEditorPath]);
   const [assistantTest, setAssistantTest] = useState<{ testing: boolean; success: boolean | null; message: string }>({
     testing: false,
     success: null,
@@ -886,9 +897,12 @@ export default function SettingsPanel({
                       <div className="flex grow items-center gap-2">
                         <Input
                           className="grow"
-                          onBlur={() => onSettingsChange({ ...appSettings, externalEditorPath })}
+                          onBlur={commitExternalEditorPath}
                           onChange={(e: any) => setExternalEditorPath(e.target.value)}
-                          onKeyDown={(e: any) => e.stopPropagation()}
+                          onKeyDown={(e: any) => {
+                            e.stopPropagation();
+                            if (e.key === 'Enter') commitExternalEditorPath();
+                          }}
                           placeholder="C:\Program Files\Adobe\Photoshop\Photoshop.exe"
                           type="text"
                           value={externalEditorPath}
