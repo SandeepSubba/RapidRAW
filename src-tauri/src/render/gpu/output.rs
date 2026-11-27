@@ -79,6 +79,41 @@ pub fn process_and_get_dynamic_image_with_analytics(
     )
 }
 
+/// Out-of-memory and validation scopes around GPU allocations. wgpu reports
+/// a failed allocation through the device's error callback, not as an `Err`,
+/// and hands back an invalid object; popping these scopes turns that into an
+/// error the caller can act on. Pop the inner (validation) scope first.
+struct GpuErrorScopes {
+    out_of_memory: wgpu::ErrorScopeGuard,
+    invalid: wgpu::ErrorScopeGuard,
+}
+
+impl GpuErrorScopes {
+    fn push(device: &wgpu::Device) -> Self {
+        let out_of_memory = device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
+        let invalid = device.push_error_scope(wgpu::ErrorFilter::Validation);
+        Self { out_of_memory, invalid }
+    }
+
+    fn pop(self) -> Result<(), String> {
+        let invalid = pollster::block_on(self.invalid.pop());
+        match pollster::block_on(self.out_of_memory.pop()).or(invalid) {
+            Some(error) => Err(error.to_string()),
+            None => Ok(()),
+        }
+    }
+}
+
+fn gpu_scoped<T>(
+    device: &wgpu::Device,
+    run: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    let scopes = GpuErrorScopes::push(device);
+    let result = run();
+    scopes.pop()?;
+    result
+}
+
 #[allow(clippy::too_many_arguments)]
 fn process_and_get_dynamic_image_inner(
     context: &GpuContext,
@@ -164,7 +199,18 @@ fn process_and_get_dynamic_image_inner(
             timeout: Some(std::time::Duration::from_millis(500)),
         });
 
-        let new_processor = GpuProcessor::new(context.clone(), new_width, new_height)?;
+        // Out of VRAM, wgpu hands back invalid textures instead of an error.
+        // Catch that here so the broken processor is never cached (it would
+        // render garbage — e.g. the image repeated in tiles — until released).
+        let new_processor = match gpu_scoped(device, || {
+            GpuProcessor::new(context.clone(), new_width, new_height)
+        }) {
+            Ok(processor) => processor,
+            Err(e) => {
+                *cache_lock = None;
+                return Err(format!("GPU processor allocation failed: {}", e));
+            }
+        };
 
         *processor_lock = Some(GpuProcessorState {
             processor: new_processor,
@@ -182,6 +228,9 @@ fn process_and_get_dynamic_image_inner(
         let entry = cache.entries.remove(index);
         cache.entries.push(entry);
     } else {
+        // Same guard for the per-image upload: a failed allocation must not
+        // be cached as this image's source.
+        let scopes = GpuErrorScopes::push(device);
         let uploaded = match cache.sources.iter().position(|s| s.identity == identity) {
             Some(index) => cache.sources.remove(index),
             None => UploadedSource {
@@ -196,6 +245,13 @@ fn process_and_get_dynamic_image_inner(
             },
         };
         let input = source.render(context, &uploaded.slot)?;
+        let guided = processor.build_guided_coeffs(&input.view, width, height, is_raw);
+        if let Err(e) = scopes.pop() {
+            drop((uploaded, input, guided));
+            *cache_lock = None;
+            *processor_lock = None;
+            return Err(format!("GPU image upload failed: {}", e));
+        }
         cache.sources.push(uploaded);
         let pixels = |s: &UploadedSource| s.slot.size.0 as u64 * s.slot.size.1 as u64;
         while cache.sources.len() > GPU_SOURCE_CACHE_ENTRIES
@@ -204,8 +260,6 @@ fn process_and_get_dynamic_image_inner(
         {
             cache.sources.remove(0);
         }
-
-        let guided = processor.build_guided_coeffs(&input.view, width, height, is_raw);
 
         cache.entries.push(GpuImageEntry {
             id: NEXT_GPU_IMAGE_ID.fetch_add(1, Ordering::Relaxed),
