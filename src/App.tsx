@@ -60,6 +60,7 @@ import {
 } from './store/useUIStore';
 import { useLibraryStore } from './store/useLibraryStore';
 import { canvasToolState, useEditorStore } from './store/useEditorStore';
+import { globalImageCache } from './utils/ImageLRUCache';
 import { JobKind, useProcessStore } from './store/useProcessStore';
 import { useTetherStore } from './store/useTetherStore';
 import { useScannerStore } from './store/useScannerStore';
@@ -552,12 +553,24 @@ function App() {
 
   useImmichEvents(handleLibraryRefresh);
 
+  // After Edit Original saves over the open file: drop the cached edit state
+  // and open it again so the editor shows the new pixels.
+  const reopenImage = useCallback(
+    (path: string) => {
+      globalImageCache.delete(path);
+      useEditorStore.getState().setEditor({ selectedImage: null });
+      handleImageSelect(path);
+    },
+    [handleImageSelect],
+  );
+
   useTauriListeners({
     refreshAllFolderTrees,
     handleSelectSubfolder,
     refreshImageList: handleLibraryRefresh,
     markGenerated,
     prevAdjustmentsRef,
+    reopenImage,
   });
 
   useAndroidBackHandler();

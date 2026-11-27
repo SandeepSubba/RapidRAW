@@ -31,6 +31,11 @@ interface ConfirmModalState {
   title?: string;
 }
 
+export interface ExternalEditModalState {
+  isOpen: boolean;
+  path: string | null;
+}
+
 interface CollageModalState {
   isOpen: boolean;
   sourceImages: Array<Pick<ImageFile, 'path'>>;
@@ -378,6 +383,7 @@ export interface UIState {
   albumActionTarget: string | null;
 
   confirmModalState: ConfirmModalState;
+  externalEditModalState: ExternalEditModalState;
   panoramaModalState: PanoramaModalState;
   focusStackModalState: FocusStackModalState;
   hdrModalState: HdrModalState;
@@ -466,6 +472,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   albumActionTarget: null,
 
   confirmModalState: { isOpen: false },
+  externalEditModalState: { isOpen: false, path: null },
   panoramaModalState: CLOSED_PANORAMA_MODAL_STATE,
   focusStackModalState: {
     error: null,

@@ -76,6 +76,8 @@ interface TauriListenerProps {
   refreshImageList: () => void;
   markGenerated: (path: string) => void;
   prevAdjustmentsRef: React.RefObject<{ path: string; adjustments: Adjustments } | null>;
+  /** Reload the image open in the editor after its file changed on disk. */
+  reopenImage?: (path: string) => void;
 }
 
 export function useTauriListeners({
@@ -84,11 +86,12 @@ export function useTauriListeners({
   refreshImageList,
   markGenerated,
   prevAdjustmentsRef,
+  reopenImage,
 }: TauriListenerProps) {
-  const refs = useRef({ refreshAllFolderTrees, handleSelectSubfolder, refreshImageList, markGenerated });
+  const refs = useRef({ refreshAllFolderTrees, handleSelectSubfolder, refreshImageList, markGenerated, reopenImage });
 
   useEffect(() => {
-    refs.current = { refreshAllFolderTrees, handleSelectSubfolder, refreshImageList, markGenerated };
+    refs.current = { refreshAllFolderTrees, handleSelectSubfolder, refreshImageList, markGenerated, reopenImage };
   });
 
   const refreshOpenUneditedImage = async () => {
@@ -404,6 +407,12 @@ export function useTauriListeners({
         const currentPath = useLibraryStore.getState().currentFolderPath;
         if (currentPath && savedPath.startsWith(currentPath)) {
           refs.current.handleSelectSubfolder(currentPath, false);
+        }
+        // Edit Original: the file open in the editor changed under it, so
+        // reload it to show the new pixels (adjustments stay as they were).
+        const openPath = useEditorStore.getState().selectedImage?.path;
+        if (event.payload?.original && openPath && openPath.split('?vc=')[0] === savedPath) {
+          refs.current.reopenImage?.(openPath);
         }
       }),
       listen('import-error', (event: any) => {

@@ -30,6 +30,41 @@ pub struct ExternalEditLaunch {
     pub editor: String,
 }
 
+/// What the editor gets, as in Lightroom's "Edit Photo with…" dialog.
+/// Raw files can only be edited as a rendered copy.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum ExternalEditMode {
+    /// Render the current RapidRAW adjustments into a new -Edit file (default).
+    CopyWithAdjustments,
+    /// Copy the original file's pixels unchanged into a new -Edit file.
+    Copy,
+    /// Open the original file itself; the editor saves over it.
+    Original,
+}
+
+impl ExternalEditMode {
+    fn parse(mode: Option<&str>) -> Result<Self, String> {
+        match mode.map(str::trim).unwrap_or("") {
+            "" | "adjusted" => Ok(Self::CopyWithAdjustments),
+            "copy" => Ok(Self::Copy),
+            "original" => Ok(Self::Original),
+            other => Err(format!("Unknown external edit mode '{}'", other)),
+        }
+    }
+}
+
+/// Next free `<stem>-Edit.<ext>`, `<stem>-Edit-2.<ext>`, … — an existing file
+/// is an earlier round-trip that must not be overwritten.
+fn next_edit_path(dir: &Path, stem: &str, ext: &str) -> PathBuf {
+    let mut output = dir.join(format!("{}-Edit.{}", stem, ext));
+    let mut n = 2;
+    while output.exists() {
+        output = dir.join(format!("{}-Edit-{}.{}", stem, n, ext));
+        n += 1;
+    }
+    output
+}
+
 static EXTERNAL_EDIT_WATCHES: Mutex<std::collections::BTreeSet<String>> =
     Mutex::new(std::collections::BTreeSet::new());
 
@@ -187,11 +222,38 @@ mod desktop_tests {
     }
 }
 
+#[cfg(test)]
+mod mode_tests {
+    use super::{next_edit_path, ExternalEditMode};
+
+    #[test]
+    fn parses_modes() {
+        assert_eq!(ExternalEditMode::parse(None), Ok(ExternalEditMode::CopyWithAdjustments));
+        assert_eq!(ExternalEditMode::parse(Some("adjusted")), Ok(ExternalEditMode::CopyWithAdjustments));
+        assert_eq!(ExternalEditMode::parse(Some("copy")), Ok(ExternalEditMode::Copy));
+        assert_eq!(ExternalEditMode::parse(Some(" original ")), Ok(ExternalEditMode::Original));
+        assert!(ExternalEditMode::parse(Some("bogus")).is_err());
+    }
+
+    #[test]
+    fn edit_paths_never_overwrite() {
+        let dir = std::env::temp_dir().join(format!("rr-edit-path-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(next_edit_path(&dir, "a", "tif"), dir.join("a-Edit.tif"));
+        std::fs::write(dir.join("a-Edit.tif"), b"x").unwrap();
+        std::fs::write(dir.join("a-Edit-2.tif"), b"x").unwrap();
+        assert_eq!(next_edit_path(&dir, "a", "tif"), dir.join("a-Edit-3.tif"));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+}
+
 /// Poll the rendered file for saves from the editor. Editors overwrite in
 /// place or replace via temp+rename, so plain mtime polling covers both; a
 /// change only counts once the mtime holds still for two polls (large TIFFs
 /// take a while to write).
-fn spawn_external_edit_watcher(app_handle: tauri::AppHandle, path: String) {
+/// `original` is true when the watched file is the library original itself
+/// (Edit Original), so the frontend reloads it if it's open in the editor.
+fn spawn_external_edit_watcher(app_handle: tauri::AppHandle, path: String, original: bool) {
     {
         let mut watches = EXTERNAL_EDIT_WATCHES.lock().unwrap();
         if !watches.insert(path.clone()) {
@@ -220,7 +282,7 @@ fn spawn_external_edit_watcher(app_handle: tauri::AppHandle, path: String) {
                     pending = None;
                     let _ = app_handle.emit(
                         "external-edit-saved",
-                        serde_json::json!({ "path": path }),
+                        serde_json::json!({ "path": path, "original": original }),
                     );
                 } else {
                     pending = Some(current);
@@ -233,12 +295,41 @@ fn spawn_external_edit_watcher(app_handle: tauri::AppHandle, path: String) {
     });
 }
 
+/// The -Edit file is the same photograph, so its library data must survive
+/// the round-trip: copy the rating, tags (keywords and the color label) and
+/// the user-editable metadata fields into a sidecar for the new file.
+/// Adjustments stay empty — they are baked into the pixels (or, for a plain
+/// copy, deliberately left off).
+fn carry_library_metadata(source_virtual_path: &str, output: &str) {
+    let source_meta =
+        crate::metadata::sidecar::load_sidecar(&parse_virtual_path(source_virtual_path).1);
+    if source_meta.rating == 0 && source_meta.tags.is_none() && source_meta.exif.is_none() {
+        return;
+    }
+    let edit_meta = crate::metadata::sidecar::ImageMetadata {
+        adjustments: Value::Null,
+        ..source_meta
+    };
+    let edit_sidecar = parse_virtual_path(output).1;
+    if let Ok(json) = serde_json::to_string_pretty(&edit_meta) {
+        if let Err(error) = fs::write(&edit_sidecar, json) {
+            log::warn!(
+                "Couldn't carry metadata over to '{}': {}",
+                edit_sidecar.display(),
+                error
+            );
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn start_external_edit(
     path: String,
+    mode: Option<String>,
     state: tauri::State<'_, AppState>,
     app_handle: tauri::AppHandle,
 ) -> Result<ExternalEditLaunch, String> {
+    let mode = ExternalEditMode::parse(mode.as_deref())?;
     let settings = load_settings(app_handle.clone()).unwrap_or_default();
     let editor = settings
         .external_editor_path
@@ -263,6 +354,49 @@ pub async fn start_external_edit(
         .file_stem()
         .map(|s| s.to_string_lossy().to_string())
         .ok_or("Couldn't derive a name for the edit file")?;
+
+    if mode != ExternalEditMode::CopyWithAdjustments
+        && crate::decode::formats::is_raw_file(&source_path)
+    {
+        return Err(
+            "Raw files can only be edited as a copy with RapidRAW adjustments.".to_string(),
+        );
+    }
+
+    if mode == ExternalEditMode::Original {
+        // Hand the original straight to the editor; it saves over it. Its
+        // RapidRAW adjustments stay in the sidecar and apply on top, as in
+        // Lightroom.
+        let source_str = source_path.to_string_lossy().to_string();
+        let editor_label = launch_external_editor(&editor, &source_str)?;
+        crate::render::gpu::context::release_gpu_memory(&state, "external editor");
+        spawn_external_edit_watcher(app_handle, source_str.clone(), true);
+        return Ok(ExternalEditLaunch {
+            output_path: source_str,
+            editor: editor_label,
+        });
+    }
+
+    if mode == ExternalEditMode::Copy {
+        // Byte-for-byte copy of the original, without RapidRAW adjustments.
+        let ext = source_path
+            .extension()
+            .map(|e| e.to_string_lossy().to_string())
+            .unwrap_or_else(|| "tif".to_string());
+        let output = next_edit_path(dir, &stem, &ext);
+        fs::copy(&source_path, &output)
+            .map_err(|e| format!("Couldn't copy '{}': {}", source_path.display(), e))?;
+        let output_str = output.to_string_lossy().to_string();
+        carry_library_metadata(&path, &output_str);
+        let editor_label = launch_external_editor(&editor, &output_str)?;
+        crate::render::gpu::context::release_gpu_memory(&state, "external editor");
+        spawn_external_edit_watcher(app_handle, output_str.clone(), false);
+        return Ok(ExternalEditLaunch {
+            output_path: output_str,
+            editor: editor_label,
+        });
+    }
+
     // "tiff8" shares the .tif container with "tiff" and only narrows the
     // sample depth — some editors (and most plugins) still choke on 16-bit.
     let (ext, tiff_bit_depth) = match format.as_str() {
@@ -271,14 +405,8 @@ pub async fn start_external_edit(
         "tiff8" => ("tif", TiffBitDepth::Eight),
         _ => ("tif", TiffBitDepth::Sixteen),
     };
-    // Each session gets its own file: -Edit, -Edit-2, … — an existing file is
-    // an earlier round-trip that must not be overwritten.
-    let mut output = dir.join(format!("{}-Edit.{}", stem, ext));
-    let mut n = 2;
-    while output.exists() {
-        output = dir.join(format!("{}-Edit-{}.{}", stem, n, ext));
-        n += 1;
-    }
+    // Each session gets its own file: -Edit, -Edit-2, …
+    let output = next_edit_path(dir, &stem, ext);
 
     let export_settings = ExportSettings {
         jpeg_quality: 95,
@@ -323,28 +451,7 @@ pub async fn start_external_edit(
     .map_err(|e| format!("Rendering failed: {}", e))?;
 
     let output_str = output.to_string_lossy().to_string();
-
-    // The -Edit file is the same photograph, so its library data must survive
-    // the round-trip: copy the rating, tags (keywords and the color label) and
-    // the user-editable metadata fields into a sidecar for the new file.
-    // Adjustments stay empty — they are baked into the rendered pixels.
-    let source_meta = crate::metadata::sidecar::load_sidecar(&parse_virtual_path(&path).1);
-    if source_meta.rating != 0 || source_meta.tags.is_some() || source_meta.exif.is_some() {
-        let edit_meta = crate::metadata::sidecar::ImageMetadata {
-            adjustments: Value::Null,
-            ..source_meta
-        };
-        let edit_sidecar = parse_virtual_path(&output_str).1;
-        if let Ok(json) = serde_json::to_string_pretty(&edit_meta) {
-            if let Err(error) = fs::write(&edit_sidecar, json) {
-                log::warn!(
-                    "Couldn't carry metadata over to '{}': {}",
-                    edit_sidecar.display(),
-                    error
-                );
-            }
-        }
-    }
+    carry_library_metadata(&path, &output_str);
 
     let editor_label = launch_external_editor(&editor, &output_str)?;
     // Hand the VRAM to the external editor (e.g. Affinity under Wine).
@@ -353,7 +460,7 @@ pub async fn start_external_edit(
         let app_state = app_handle.state::<AppState>();
         crate::render::gpu::context::release_gpu_memory(&app_state, "external editor");
     }
-    spawn_external_edit_watcher(app_handle, output_str.clone());
+    spawn_external_edit_watcher(app_handle, output_str.clone(), false);
 
     Ok(ExternalEditLaunch {
         output_path: output_str,

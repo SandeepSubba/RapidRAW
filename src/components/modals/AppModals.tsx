@@ -12,6 +12,7 @@ import CreateFolderModal from './CreateFolderModal';
 import RenameFolderModal from './RenameFolderModal';
 import RenameFileModal from './RenameFileModal';
 import ConfirmModal from './ConfirmModal';
+import ExternalEditModal from './ExternalEditModal';
 import ImportSettingsModal from './ImportSettingsModal';
 import CullingModal from './CullingModal';
 import CollageModal from './CollageModal';
@@ -248,6 +249,7 @@ export default function AppModals(props: AppModalsProps) {
         onSave={props.handleSaveRename}
       />
       <ConfirmModal {...confirmModalState} onClose={closeConfirmModal} />
+      <ExternalEditModal />
       <ImportSettingsModal
         fileCount={importSourcePaths.length}
         isOpen={isImportModalOpen}

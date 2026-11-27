@@ -88,6 +88,7 @@ import {
 import { useLibraryActions } from './useLibraryActions';
 import { transferFiles } from './useFileOperations';
 import { globalImageCache } from '../utils/ImageLRUCache';
+import { canEditOriginal, runExternalEdit } from '../utils/externalEdit';
 import { immichAlbumOf, isImmichAlbumId, isImmichImagePath, removeFromImmichAlbum } from '../utils/immichApi';
 import { useImmichStore } from '../store/useImmichStore';
 import type { ParseKeys } from 'i18next';
@@ -296,20 +297,16 @@ export function useAppContextMenus(latestProps: UseAppContextMenusProps) {
     [albumIcons, t],
   );
 
+  // Raw files always go out as a rendered copy. Anything an editor can open
+  // directly (TIFF, JPEG, PSD, …) gets Lightroom's choice: copy with
+  // adjustments, plain copy, or the original.
   const handleStartExternalEdit = useCallback(
     (path: string) => {
-      toast.info(t('contextMenus.toasts.externalEditRendering', 'Rendering for the external editor…'));
-      invoke<{ outputPath: string; editor: string }>(Invokes.StartExternalEdit, { path })
-        .then((res) => {
-          const name = res.outputPath.split(/[\\/]/).pop();
-          toast.success(
-            t('contextMenus.toasts.externalEditOpened', 'Opened {{name}} in {{editor}} — saves appear in the library automatically.', {
-              name,
-              editor: res.editor,
-            }),
-          );
-        })
-        .catch((err) => toast.error(String(err)));
+      if (canEditOriginal(path)) {
+        useUIStore.getState().setUI({ externalEditModalState: { isOpen: true, path } });
+        return;
+      }
+      runExternalEdit(path, 'adjusted', t);
     },
     [t],
   );

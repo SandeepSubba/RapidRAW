@@ -442,7 +442,10 @@
       "failedMove": "Failed to move files: {{err}}",
       "failedMoveError": "Failed to move: {{err}}",
       "failedMoveInvalid": "Failed to move: Target group not found or invalid.",
-      "failedRemoveImages": "Failed to remove images: {{err}}"
+      "failedRemoveImages": "Failed to remove images: {{err}}",
+      "externalEditRendering": "Rendering for the external editor…",
+      "externalEditOpened": "Opened {{name}} in {{editor}} — saves appear in the library automatically.",
+      "externalEditOpenedOriginal": "Opened the original {{name}} in {{editor}} — saving there updates it here."
     }
   },
   "editor": {
@@ -1994,6 +1997,16 @@
       "printGrade": "Print Grade",
       "redWeight": "Red (Cyan)",
       "resetTooltip": "Reset"
+    },
+    "externalEdit": {
+      "title": "Edit Photo in External Editor",
+      "adjustedTitle": "Edit a Copy with RapidRAW Adjustments",
+      "adjustedDesc": "Renders a new -Edit file with your current adjustments applied. The original is not touched.",
+      "copyTitle": "Edit a Copy",
+      "copyDesc": "Copies the original file as it is, without RapidRAW adjustments, into a new -Edit file.",
+      "originalTitle": "Edit Original",
+      "originalDesc": "Opens the original file itself. Saving in the editor overwrites it; RapidRAW adjustments stay and apply on top.",
+      "edit": "Edit"
     }
   },
   "settings": {
