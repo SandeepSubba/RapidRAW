@@ -90,6 +90,7 @@ fn process_and_get_dynamic_image_inner(
     display_output: Option<DisplayOutput>,
     analytics_config: Option<AnalyticsConfig>,
 ) -> Result<DynamicImage, String> {
+    crate::render::gpu::context::mark_gpu_render();
     let start_time = Instant::now();
     let display_layer = display_output
         .filter(|output| output.target == PreviewTarget::Editor)

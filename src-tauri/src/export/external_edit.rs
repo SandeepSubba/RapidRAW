@@ -301,6 +301,10 @@ pub async fn start_external_edit(
         export_original: None,
     };
 
+    // Free RapidRAW's own preview textures first so the full-resolution
+    // render has room even while the external editor holds VRAM.
+    crate::render::gpu::context::release_gpu_memory(&state, "before external edit render");
+
     export_images_and_wait(
         vec![path.clone()],
         output.to_string_lossy().to_string(),
@@ -343,6 +347,12 @@ pub async fn start_external_edit(
     }
 
     let editor_label = launch_external_editor(&editor, &output_str)?;
+    // Hand the VRAM to the external editor (e.g. Affinity under Wine).
+    {
+        use tauri::Manager;
+        let app_state = app_handle.state::<AppState>();
+        crate::render::gpu::context::release_gpu_memory(&app_state, "external editor");
+    }
     spawn_external_edit_watcher(app_handle, output_str.clone());
 
     Ok(ExternalEditLaunch {

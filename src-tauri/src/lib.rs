@@ -272,6 +272,7 @@ pub fn run() {
 
             let app_handle = app.handle().clone();
             crate::render::gpu::context::register_app_handle(&app_handle);
+            crate::render::gpu::context::spawn_gpu_idle_releaser(app_handle.clone(), 90);
             adjustments::develop_defaults::refresh(&app_handle);
 
             if !is_headless {

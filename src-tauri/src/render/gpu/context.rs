@@ -112,7 +112,9 @@ fn open_device(
         required_features,
         required_limits: limits.clone(),
         experimental_features: wgpu::ExperimentalFeatures::default(),
-        memory_hints: wgpu::MemoryHints::Performance,
+        // MemoryUsage: smaller allocation blocks, so less VRAM is reserved up front
+        // (matters on 6 GB cards shared with Affinity/Wine and the desktop).
+        memory_hints: wgpu::MemoryHints::MemoryUsage,
         trace: wgpu::Trace::Off,
     }))
     .map_err(|e| e.to_string())?;
@@ -395,4 +397,66 @@ pub fn lock_or_reset<'a, T>(
         *guard = None;
         guard
     })
+}
+
+
+// ---- VRAM release (fork) ----------------------------------------------------
+// The GPU processor (several full-size Rgba16Float working textures) and the
+// uploaded source images can hold 2+ GB of VRAM for a 40 MP raw. On Linux the
+// NVIDIA driver does not spill VRAM to system RAM like Windows does, so other
+// apps (Affinity under Wine, the compositor, browsers) start failing when it is
+// full. Both are rebuilt on demand by the render path, so releasing them is safe.
+static LAST_GPU_RENDER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// Record that the GPU render path was used (resets the idle timer).
+pub fn mark_gpu_render() {
+    LAST_GPU_RENDER.store(now_secs(), Ordering::Relaxed);
+}
+
+/// Drop the per-image GPU buffers. Returns true if anything was freed.
+pub fn release_gpu_memory(state: &AppState, reason: &str) -> bool {
+    let had_processor = {
+        let mut p = lock_or_reset(&state.gpu_processor, "GPU processor");
+        let had = p.is_some();
+        *p = None;
+        had
+    };
+    let mut had_cache = false;
+    for target in PreviewTarget::ALL {
+        let mut c = lock_or_reset(state.gpu_image_cache_for(target), "GPU image cache");
+        had_cache |= c.is_some();
+        *c = None;
+    }
+    let freed = had_processor || had_cache;
+    if freed {
+        if let Some(ctx) = current_gpu_context(state) {
+            let _ = ctx.device.poll(wgpu::PollType::Wait {
+                submission_index: None,
+                timeout: Some(std::time::Duration::from_millis(500)),
+            });
+        }
+        log::info!("Released GPU image memory ({})", reason);
+    }
+    freed
+}
+
+/// Background thread: free GPU buffers after `idle_secs` without any render.
+pub fn spawn_gpu_idle_releaser(app_handle: tauri::AppHandle, idle_secs: u64) {
+    std::thread::spawn(move || loop {
+        std::thread::sleep(std::time::Duration::from_secs(30));
+        let last = LAST_GPU_RENDER.load(Ordering::Relaxed);
+        if last == 0 || now_secs().saturating_sub(last) < idle_secs {
+            continue;
+        }
+        let state = app_handle.state::<AppState>();
+        release_gpu_memory(&state, "idle");
+        LAST_GPU_RENDER.store(0, Ordering::Relaxed);
+    });
 }

@@ -118,12 +118,12 @@ fn process_image_for_export_pipeline(
                 get_all_adjustments_from_json(js_adjustments, is_raw, as_shot(path), *render);
             all_adjustments.global.show_clipping = 0;
 
-            process_and_get_dynamic_image_with_precision(
+            let render_once = || process_and_get_dynamic_image_with_precision(
                 context,
                 state,
                 &source,
                 RenderRequest {
-                    adjustments: all_adjustments,
+                    adjustments: all_adjustments.clone(),
                     mask_bitmaps: &mask_bitmaps,
                     mask_cache_key: None,
                     lut: lut.clone(),
@@ -139,7 +139,16 @@ fn process_image_for_export_pipeline(
                 },
                 debug_tag,
                 *output_precision,
-            )
+            );
+            match render_once() {
+                Ok(img) => Ok(img),
+                Err(e) => {
+                    log::warn!("Export render failed ({}); releasing GPU memory and retrying once", e);
+                    crate::render::gpu::context::release_gpu_memory(state, "export retry");
+                    std::thread::sleep(std::time::Duration::from_millis(300));
+                    render_once()
+                }
+            }
         })
         .collect()
 }
@@ -783,6 +792,9 @@ pub(crate) async fn export_images_impl(
         let errors: Vec<String> = results.into_iter().filter_map(Result::err).collect();
         let error_count = errors.len();
         let export_state = app_handle.state::<AppState>();
+        // Full-resolution export textures are no longer needed; free them now
+        // instead of waiting for the idle releaser.
+        crate::render::gpu::context::release_gpu_memory(&export_state, "export finished");
         let finalized = finish_export_task(
             &export_state.export_task_token,
             &cancellation_token,
